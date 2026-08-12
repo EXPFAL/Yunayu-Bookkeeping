@@ -1,0 +1,22 @@
+# Gradle
+.gradle/
+build/
+.kotlin/
+
+# 本地配置（SDK 路径等，不入库）
+local.properties
+
+# IDE
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 构建产物（经 CI/本地任务产出，不入库）
+*.apk
+*.aab
