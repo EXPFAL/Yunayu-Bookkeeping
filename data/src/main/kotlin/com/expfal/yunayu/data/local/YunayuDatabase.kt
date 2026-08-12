@@ -59,74 +59,82 @@ abstract class YunayuDatabase : RoomDatabase() {
          */
         val MIGRATION_1_2 = object : Migration(1, 2) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // 1) tags 表重建：自引用外键 + 唯一索引（保留四大类根节点及其子树）
-                // 外键指向临时名 tags_new，RENAME 后由 SQLite 改写为 tags
-                db.execSQL(
-                    "CREATE TABLE IF NOT EXISTS `tags_new` (" +
-                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
-                        "`name` TEXT NOT NULL, " +
-                        "`parent_id` INTEGER, " +
-                        "`sort_order` INTEGER NOT NULL, " +
-                        "`icon` TEXT, " +
-                        "`created_at` INTEGER NOT NULL, " +
-                        "`updated_at` INTEGER NOT NULL, " +
-                        "FOREIGN KEY(`parent_id`) REFERENCES `tags_new`(`id`) " +
-                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
-                )
-                db.execSQL(
-                    "INSERT INTO `tags_new` " +
-                        "(`id`, `name`, `parent_id`, `sort_order`, `icon`, `created_at`, `updated_at`) " +
-                        "SELECT `id`, `name`, `parent_id`, `sort_order`, `icon`, `created_at`, `updated_at` " +
-                        "FROM `tags`",
-                )
-                // 备份 transactions.tag_id：DROP 旧 tags 会触发既有外键 SET NULL，需重建后恢复
-                db.execSQL(
-                    "CREATE TABLE IF NOT EXISTS `_tx_tag_backup` " +
-                        "(`id` INTEGER PRIMARY KEY NOT NULL, `tag_id` INTEGER)",
-                )
-                db.execSQL(
-                    "INSERT INTO `_tx_tag_backup` (`id`, `tag_id`) " +
-                        "SELECT `id`, `tag_id` FROM `transactions` WHERE `tag_id` IS NOT NULL",
-                )
-                db.execSQL("DROP TABLE `tags`")
-                db.execSQL("ALTER TABLE `tags_new` RENAME TO `tags`")
-                db.execSQL(
-                    "UPDATE `transactions` SET `tag_id` = (" +
-                        "SELECT `_tx_tag_backup`.`tag_id` FROM `_tx_tag_backup` " +
-                        "WHERE `_tx_tag_backup`.`id` = `transactions`.`id`" +
-                        ") WHERE `id` IN (SELECT `id` FROM `_tx_tag_backup`)",
-                )
-                db.execSQL("DROP TABLE `_tx_tag_backup`")
-                db.execSQL(
-                    "CREATE UNIQUE INDEX IF NOT EXISTS `index_tags_parent_id_name` " +
-                        "ON `tags` (`parent_id`, `name`)",
-                )
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS `index_tags_parent_id_sort_order` " +
-                        "ON `tags` (`parent_id`, `sort_order`)",
-                )
+                // Room 2.6.1 不会自动为 migration 包事务：任何一条语句中断都会留下
+                // 半迁移状态，导致下次启动在 version=2 与缺失对象之间反复崩溃。故整体包事务。
+                db.beginTransaction()
+                try {
+                    // 1) tags 表重建：自引用外键 + 唯一索引（保留四大类根节点及其子树）
+                    // 外键指向临时名 tags_new，RENAME 后由 SQLite 改写为 tags
+                    db.execSQL(
+                        "CREATE TABLE `tags_new` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`name` TEXT NOT NULL, " +
+                            "`parent_id` INTEGER, " +
+                            "`sort_order` INTEGER NOT NULL, " +
+                            "`icon` TEXT, " +
+                            "`created_at` INTEGER NOT NULL, " +
+                            "`updated_at` INTEGER NOT NULL, " +
+                            "FOREIGN KEY(`parent_id`) REFERENCES `tags_new`(`id`) " +
+                            "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                    )
+                    db.execSQL(
+                        "INSERT INTO `tags_new` " +
+                            "(`id`, `name`, `parent_id`, `sort_order`, `icon`, `created_at`, `updated_at`) " +
+                            "SELECT `id`, `name`, `parent_id`, `sort_order`, `icon`, `created_at`, `updated_at` " +
+                            "FROM `tags`",
+                    )
+                    // 备份 transactions.tag_id：DROP 旧 tags 会触发既有外键 SET NULL，需重建后恢复
+                    db.execSQL(
+                        "CREATE TABLE `_tx_tag_backup` " +
+                            "(`id` INTEGER PRIMARY KEY NOT NULL, `tag_id` INTEGER)",
+                    )
+                    db.execSQL(
+                        "INSERT INTO `_tx_tag_backup` (`id`, `tag_id`) " +
+                            "SELECT `id`, `tag_id` FROM `transactions` WHERE `tag_id` IS NOT NULL",
+                    )
+                    db.execSQL("DROP TABLE `tags`")
+                    db.execSQL("ALTER TABLE `tags_new` RENAME TO `tags`")
+                    db.execSQL(
+                        "UPDATE `transactions` SET `tag_id` = (" +
+                            "SELECT `_tx_tag_backup`.`tag_id` FROM `_tx_tag_backup` " +
+                            "WHERE `_tx_tag_backup`.`id` = `transactions`.`id`" +
+                            ") WHERE `id` IN (SELECT `id` FROM `_tx_tag_backup`)",
+                    )
+                    db.execSQL("DROP TABLE `_tx_tag_backup`")
+                    db.execSQL(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS `index_tags_parent_id_name` " +
+                            "ON `tags` (`parent_id`, `name`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_tags_parent_id_sort_order` " +
+                            "ON `tags` (`parent_id`, `sort_order`)",
+                    )
 
-                // 2) transactions 新增复合索引 (occurred_at, type)
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS `index_transactions_occurred_at_type` " +
-                        "ON `transactions` (`occurred_at`, `type`)",
-                )
+                    // 2) transactions 新增复合索引 (occurred_at, type)
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_transactions_occurred_at_type` " +
+                            "ON `transactions` (`occurred_at`, `type`)",
+                    )
 
-                // 3) 新建 date_ranges 子表（考试周 / 假期区间）
-                db.execSQL(
-                    "CREATE TABLE IF NOT EXISTS `date_ranges` (" +
-                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
-                        "`semester_id` INTEGER NOT NULL, " +
-                        "`range_type` TEXT NOT NULL, " +
-                        "`start_date` TEXT NOT NULL, " +
-                        "`end_date` TEXT NOT NULL, " +
-                        "FOREIGN KEY(`semester_id`) REFERENCES `semesters`(`id`) " +
-                        "ON UPDATE NO ACTION ON DELETE CASCADE )",
-                )
-                db.execSQL(
-                    "CREATE INDEX IF NOT EXISTS `index_date_ranges_semester_id` " +
-                        "ON `date_ranges` (`semester_id`)",
-                )
+                    // 3) 新建 date_ranges 子表（考试周 / 假期区间）
+                    db.execSQL(
+                        "CREATE TABLE `date_ranges` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`semester_id` INTEGER NOT NULL, " +
+                            "`range_type` TEXT NOT NULL, " +
+                            "`start_date` TEXT NOT NULL, " +
+                            "`end_date` TEXT NOT NULL, " +
+                            "FOREIGN KEY(`semester_id`) REFERENCES `semesters`(`id`) " +
+                            "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_date_ranges_semester_id` " +
+                            "ON `date_ranges` (`semester_id`)",
+                    )
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
             }
         }
 
