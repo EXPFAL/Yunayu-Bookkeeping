@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 应用视觉体系由 Compose Material3 主题承载，此处仅提供窗口级基础主题 -->
+    <style name="Theme.Yunayu" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
