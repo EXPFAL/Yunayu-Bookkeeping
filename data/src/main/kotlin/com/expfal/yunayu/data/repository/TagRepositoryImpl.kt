@@ -4,10 +4,10 @@ import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.repository.TagRepository
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /** [TagRepository] 的 Room 实现。 */
 @Singleton

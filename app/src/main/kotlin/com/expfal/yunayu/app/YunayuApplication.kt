@@ -4,11 +4,11 @@ import android.app.Application
 import android.util.Log
 import com.expfal.yunayu.domain.repository.TagRepository
 import dagger.hilt.android.HiltAndroidApp
-import javax.inject.Inject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import javax.inject.Inject
 
 /** Hilt 入口。启动时触发一次 Room 建表 + 查询，验证数据库真实初始化。 */
 @HiltAndroidApp
