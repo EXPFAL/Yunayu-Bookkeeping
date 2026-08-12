@@ -18,7 +18,12 @@ interface SemesterDateRangeDao {
     @Insert
     suspend fun insertAll(ranges: List<SemesterDateRangeEntity>)
 
-    /** 删除指定学期下的全部区间（更新语义：先删后重写）。 */
-    @Query("DELETE FROM date_ranges WHERE semester_id = :semesterId")
-    suspend fun deleteBySemesterId(semesterId: Long)
+    /**
+     * 删除指定学期下给定 rangeType 的区间（更新语义：先删后重写）。
+     *
+     * 调用方仅传入已知类型（EXAM_WEEK / VACATION），以保护未来新增类型行不被
+     * 「读侧丢弃」后遭永久删除。
+     */
+    @Query("DELETE FROM date_ranges WHERE semester_id = :semesterId AND range_type IN (:rangeTypes)")
+    suspend fun deleteBySemesterIdAndRangeTypes(semesterId: Long, rangeTypes: List<String>)
 }

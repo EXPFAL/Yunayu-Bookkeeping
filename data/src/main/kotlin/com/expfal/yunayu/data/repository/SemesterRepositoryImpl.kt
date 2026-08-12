@@ -32,10 +32,14 @@ class SemesterRepositoryImpl @Inject constructor(
         val semesterId = if (semester.id == 0L) {
             semesterDao.insert(semester.toEntity())
         } else {
-            semesterDao.update(semester.toEntity())
+            val updated = semesterDao.update(semester.toEntity())
+            check(updated == 1) { "Semester id=${semester.id} not found" }
             semester.id
         }
-        dateRangeDao.deleteBySemesterId(semesterId)
+        dateRangeDao.deleteBySemesterIdAndRangeTypes(
+            semesterId,
+            SemesterDateRangeEntity.KNOWN_RANGE_TYPES,
+        )
         dateRangeDao.insertAll(semester.toRangeEntities(semesterId))
         semesterId
     }
@@ -78,6 +82,9 @@ class SemesterRepositoryImpl @Inject constructor(
     private fun SemesterEntity.toDomain(ranges: List<SemesterDateRangeEntity>): Semester? {
         val startDate = parseDateOrNull(this.startDate, "startDate") ?: return null
         val endDate = parseDateOrNull(this.endDate, "endDate") ?: return null
+        ranges
+            .filter { it.rangeType !in SemesterDateRangeEntity.KNOWN_RANGE_TYPES }
+            .forEach { Log.w(TAG, "Unknown range_type \"${it.rangeType}\" for date range id=${it.id}, record skipped") }
         val examWeekRanges = ranges
             .filter { it.rangeType == SemesterDateRangeEntity.RANGE_TYPE_EXAM_WEEK }
             .mapNotNull { it.toDateRangeOrNull() }

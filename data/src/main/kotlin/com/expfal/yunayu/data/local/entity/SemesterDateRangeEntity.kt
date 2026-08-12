@@ -38,5 +38,8 @@ data class SemesterDateRangeEntity(
     companion object {
         const val RANGE_TYPE_EXAM_WEEK = "EXAM_WEEK"
         const val RANGE_TYPE_VACATION = "VACATION"
+
+        /** 仓储层读写已知的区间类型；重写区间时仅删除这些类型，保护未来新增类型不被误删。 */
+        val KNOWN_RANGE_TYPES = listOf(RANGE_TYPE_EXAM_WEEK, RANGE_TYPE_VACATION)
     }
 }

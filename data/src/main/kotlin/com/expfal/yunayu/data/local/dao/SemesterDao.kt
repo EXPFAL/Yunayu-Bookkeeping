@@ -14,8 +14,9 @@ interface SemesterDao {
     @Insert
     suspend fun insert(semester: SemesterEntity): Long
 
+    /** 按主键更新，返回受影响行数（目标行不存在时返回 0）。 */
     @Update
-    suspend fun update(semester: SemesterEntity)
+    suspend fun update(semester: SemesterEntity): Int
 
     /** 观察全部学期，按起始日期倒序。 */
     @Query("SELECT * FROM semesters ORDER BY start_date DESC")
