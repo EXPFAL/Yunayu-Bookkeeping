@@ -233,3 +233,34 @@ interface SemesterBudgetEngine {
 | (b) | **Gradle wrapper jar 获取**：本机 Gradle CLI 未安装，且历史执行中曾出现网络不可达。`gradle-wrapper.jar` 需在线下载或手工放置到 `gradle/wrapper/`，执行脚手架前需确认网络可用或离线提供 jar | 已解决：`gradle-wrapper.jar` 已就绪；`distributionUrl` 保留腾讯云镜像（官方源在本机曾超时），并补充 `distributionSha256Sum` 校验发行包完整性 |
 | (c) | **交易↔标签关联方案**：方案 A 单标签外键（`TransactionEntity.tagId: Long?`，简化，本计划默认）vs 方案 B 多对多关联表（更灵活，留待后续）。本计划按方案 A 推进，未经确认不切换到方案 B | 默认方案 A，待用户确认 |
 | (d) | **仓库历史**：旧代码归档分支 `archive/v1-final` 在本地已不存在；用户已确认以 `git init` 重建仓库，当前 develop 分支仅含 `docs/PRD.md`（commit 07249e2），不再追溯旧历史 | 已确认，仅备案 |
+
+---
+
+## 7. Schema v2 增强记录
+
+> 触发时机：零用户数据增强窗口。Schema 版本 1 → 2，通过显式 `MIGRATION_1_2` 迁移，禁止 fallbackToDestructiveMigration。
+
+### 7.1 变更内容
+
+1. **tags 表重建**
+   - 新增自引用外键 `parent_id → tags(id)`，`ON DELETE CASCADE`：删除父标签级联删除整棵子树；子树上交易的 `tag_id` 经既有外键 `ON DELETE SET NULL` 自动置空。
+   - 新增唯一索引 `(parent_id, name)`：同父节点下不允许重名。
+   - 删除冗余单列索引 `index_tags_parent_id`（已被 `(parent_id, sort_order)` 复合索引最左前缀覆盖）。
+2. **transactions 表**：新增复合索引 `(occurred_at, type)`，服务预算聚合查询形态。
+3. **新增 date_ranges 子表**：持久化考试周 / 假期区间，修复 `SemesterRepositoryImpl` 此前静默丢弃 `examWeekRanges` / `vacationRanges` 的契约漂移。字段：`id`(PK) / `semester_id`(FK→semesters, CASCADE, 带索引) / `range_type`(EXAM_WEEK|VACATION) / `start_date` / `end_date`（ISO LocalDate 文本，snake_case 命名与现有表一致）。
+
+### 7.2 关键决策理由
+
+- **CASCADE 语义**：标签树删除父节点即删除整棵子树，避免孤儿子树残留；交易与标签为弱关联（`SET NULL`），标签删除后交易保留、仅置空 `tag_id`，符合「交易不可因标签清理而丢失」原则。
+- **(parent_id, name) 唯一的 NULL 根节点注意点**：SQLite 唯一索引中多个 `NULL parent_id` 可共存（NULL 互不相等），因此根节点（`parent_id IS NULL`）重名不会被该唯一索引拦截，需在仓储层写入前显式同名校验并返回明确错误（当前无 add 入口，已在 `TagRepositoryImpl` 留 TODO 注释）。
+- **date_ranges 子表而非 JSON 列**：区间需要按 `semester_id` 关联查询、级联删除、以及未来按日期范围做预算阶段判定，独立子表 + 外键比 JSON 列更利于索引与关系完整性，也避免 JSON 解析开销与 Room 类型映射负担。
+
+### 7.3 Migration(1, 2)
+
+`MIGRATION_1_2`（定义于 `YunayuDatabase`，经 `DatabaseModule` 注册）分三步：
+
+1. **tags 重建**：`CREATE TABLE tags_new`（带自引用外键）→ `INSERT SELECT` 迁移数据（保留四大类根节点及子树）→ `DROP TABLE tags` → `RENAME tags_new TO tags` → 重建唯一/复合索引。为防 `DROP tags` 触发既有外键 `SET NULL` 清空 `transactions.tag_id`，迁移前先备份、重建后恢复该关联。
+2. **transactions**：`CREATE INDEX IF NOT EXISTS (occurred_at, type)`。
+3. **date_ranges**：`CREATE TABLE date_ranges` + `CREATE INDEX (semester_id)`。
+
+导出 schema 见 `data/schemas/com.expfal.yunayu.data.local.YunayuDatabase/2.json`。
