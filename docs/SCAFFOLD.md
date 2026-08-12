@@ -198,12 +198,12 @@ data class Semester(
 enum class BudgetPhase { NORMAL, EXAM_WEEK, VACATION }
 
 data class BudgetSnapshot(
-    totalBudget: Long,
-    spent: Long,
-    remaining: Long,
+    totalBudgetCents: Long,
+    spentCents: Long,
+    remainingCents: Long,
     remainingDays: Int,
-    weeklyQuota: Long,
-    monthlyQuota: Long,
+    weeklyQuotaCents: Long,
+    monthlyQuotaCents: Long,
     phase: BudgetPhase,
 )
 
@@ -229,7 +229,7 @@ interface SemesterBudgetEngine {
 
 | # | 事项 | 状态 / 建议 |
 | --- | --- | --- |
-| (a) | **JDK 阻塞项**：本机当前仅有 JDK 26，AGP 8.5.2 官方要求 JDK 17。脚手架执行前必须先安装 JDK 17，并在 `gradle.properties` 配置 `org.gradle.java.home` 指向 JDK 17，否则无法构建 | 阻塞，待用户安装 |
-| (b) | **Gradle wrapper jar 获取**：本机 Gradle CLI 未安装，且历史执行中曾出现网络不可达。`gradle-wrapper.jar` 需在线下载或手工放置到 `gradle/wrapper/`，执行脚手架前需确认网络可用或离线提供 jar | 阻塞风险，待确认 |
+| (a) | **JDK 阻塞项**：本机当前仅有 JDK 26，AGP 8.5.2 官方要求 JDK 17。脚手架执行前必须先安装 JDK 17，并在 `gradle.properties` 配置 `org.gradle.java.home` 指向 JDK 17，否则无法构建 | 已解决：本机已安装 JDK 17（`C:\Program Files\Eclipse Adoptium\jdk-17.0.20.8-hotspot`）；`org.gradle.java.home` 已从仓库 `gradle.properties` 移除，改由用户级 `~/.gradle/gradle.properties` 生效，不污染仓库 |
+| (b) | **Gradle wrapper jar 获取**：本机 Gradle CLI 未安装，且历史执行中曾出现网络不可达。`gradle-wrapper.jar` 需在线下载或手工放置到 `gradle/wrapper/`，执行脚手架前需确认网络可用或离线提供 jar | 已解决：`gradle-wrapper.jar` 已就绪；`distributionUrl` 保留腾讯云镜像（官方源在本机曾超时），并补充 `distributionSha256Sum` 校验发行包完整性 |
 | (c) | **交易↔标签关联方案**：方案 A 单标签外键（`TransactionEntity.tagId: Long?`，简化，本计划默认）vs 方案 B 多对多关联表（更灵活，留待后续）。本计划按方案 A 推进，未经确认不切换到方案 B | 默认方案 A，待用户确认 |
 | (d) | **仓库历史**：旧代码归档分支 `archive/v1-final` 在本地已不存在；用户已确认以 `git init` 重建仓库，当前 develop 分支仅含 `docs/PRD.md`（commit 07249e2），不再追溯旧历史 | 已确认，仅备案 |
