@@ -11,6 +11,8 @@ import androidx.room.PrimaryKey
  *
  * `tagId` 为可空学业标签外键（SCAFFOLD.md 4.3 方案 A：单笔交易最多挂一个学业标签），
  * 标签删除时置空而非级联删除交易。
+ *
+ * Schema v2：新增复合索引 `(occurred_at, type)`，服务预算聚合查询形态。
  */
 @Entity(
     tableName = "transactions",
@@ -22,7 +24,7 @@ import androidx.room.PrimaryKey
             onDelete = ForeignKey.SET_NULL,
         ),
     ],
-    indices = [Index("tag_id"), Index("occurred_at")],
+    indices = [Index("tag_id"), Index("occurred_at"), Index(value = ["occurred_at", "type"])],
 )
 data class TransactionEntity(
     @PrimaryKey(autoGenerate = true)

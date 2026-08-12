@@ -3,6 +3,7 @@ package com.expfal.yunayu.data.local.dao
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Update
 import com.expfal.yunayu.data.local.entity.SemesterEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -12,6 +13,9 @@ interface SemesterDao {
 
     @Insert
     suspend fun insert(semester: SemesterEntity): Long
+
+    @Update
+    suspend fun update(semester: SemesterEntity)
 
     /** 观察全部学期，按起始日期倒序。 */
     @Query("SELECT * FROM semesters ORDER BY start_date DESC")

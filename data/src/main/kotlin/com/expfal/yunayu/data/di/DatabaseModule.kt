@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.expfal.yunayu.data.local.YunayuDatabase
 import com.expfal.yunayu.data.local.dao.SemesterDao
+import com.expfal.yunayu.data.local.dao.SemesterDateRangeDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import dagger.Module
@@ -23,6 +24,7 @@ object DatabaseModule {
     fun provideYunayuDatabase(@ApplicationContext context: Context): YunayuDatabase =
         Room.databaseBuilder(context, YunayuDatabase::class.java, YunayuDatabase.NAME)
             .addCallback(YunayuDatabase.seedCallback())
+            .addMigrations(YunayuDatabase.MIGRATION_1_2)
             .build()
 
     @Provides
@@ -36,4 +38,8 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideSemesterDao(database: YunayuDatabase): SemesterDao = database.semesterDao()
+
+    @Provides
+    @Singleton
+    fun provideSemesterDateRangeDao(database: YunayuDatabase): SemesterDateRangeDao = database.semesterDateRangeDao()
 }

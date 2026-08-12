@@ -1,11 +1,20 @@
 package com.expfal.yunayu.data.repository
 
 import android.util.Log
+import androidx.room.withTransaction
+import com.expfal.yunayu.data.local.YunayuDatabase
 import com.expfal.yunayu.data.local.dao.SemesterDao
+import com.expfal.yunayu.data.local.dao.SemesterDateRangeDao
+import com.expfal.yunayu.data.local.entity.SemesterDateRangeEntity
 import com.expfal.yunayu.data.local.entity.SemesterEntity
+import com.expfal.yunayu.domain.model.DateRange
 import com.expfal.yunayu.domain.model.Semester
 import com.expfal.yunayu.domain.repository.SemesterRepository
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import java.time.LocalDate
 import javax.inject.Inject
@@ -14,14 +23,37 @@ import javax.inject.Singleton
 /** [SemesterRepository] 的 Room 实现。 */
 @Singleton
 class SemesterRepositoryImpl @Inject constructor(
+    private val database: YunayuDatabase,
     private val semesterDao: SemesterDao,
+    private val dateRangeDao: SemesterDateRangeDao,
 ) : SemesterRepository {
 
-    override suspend fun save(semester: Semester): Long =
-        semesterDao.insert(semester.toEntity())
+    override suspend fun save(semester: Semester): Long = database.withTransaction {
+        val semesterId = if (semester.id == 0L) {
+            semesterDao.insert(semester.toEntity())
+        } else {
+            semesterDao.update(semester.toEntity())
+            semester.id
+        }
+        dateRangeDao.deleteBySemesterId(semesterId)
+        dateRangeDao.insertAll(semester.toRangeEntities(semesterId))
+        semesterId
+    }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
     override fun observeAll(): Flow<List<Semester>> =
-        semesterDao.observeAll().map { entities -> entities.mapNotNull { it.toDomainOrNull() } }
+        semesterDao.observeAll().flatMapLatest { entities ->
+            if (entities.isEmpty()) {
+                flowOf(emptyList())
+            } else {
+                combine(
+                    entities.map { entity ->
+                        dateRangeDao.observeBySemester(entity.id)
+                            .map { ranges -> entity.toDomain(ranges) }
+                    },
+                ) { semesters -> semesters.filterNotNull() }
+            }
+        }
 
     private fun Semester.toEntity(): SemesterEntity = SemesterEntity(
         id = id,
@@ -31,16 +63,46 @@ class SemesterRepositoryImpl @Inject constructor(
         totalBudgetCents = totalBudgetCents,
     )
 
-    private fun SemesterEntity.toDomainOrNull(): Semester? {
+    private fun Semester.toRangeEntities(semesterId: Long): List<SemesterDateRangeEntity> =
+        examWeekRanges.map { it.toEntity(semesterId, SemesterDateRangeEntity.RANGE_TYPE_EXAM_WEEK) } +
+            vacationRanges.map { it.toEntity(semesterId, SemesterDateRangeEntity.RANGE_TYPE_VACATION) }
+
+    private fun DateRange.toEntity(semesterId: Long, rangeType: String): SemesterDateRangeEntity =
+        SemesterDateRangeEntity(
+            semesterId = semesterId,
+            rangeType = rangeType,
+            startDate = start.toString(),
+            endDate = endInclusive.toString(),
+        )
+
+    private fun SemesterEntity.toDomain(ranges: List<SemesterDateRangeEntity>): Semester? {
         val startDate = parseDateOrNull(this.startDate, "startDate") ?: return null
         val endDate = parseDateOrNull(this.endDate, "endDate") ?: return null
+        val examWeekRanges = ranges
+            .filter { it.rangeType == SemesterDateRangeEntity.RANGE_TYPE_EXAM_WEEK }
+            .mapNotNull { it.toDateRangeOrNull() }
+        val vacationRanges = ranges
+            .filter { it.rangeType == SemesterDateRangeEntity.RANGE_TYPE_VACATION }
+            .mapNotNull { it.toDateRangeOrNull() }
         return Semester(
             id = id,
             name = name,
             startDate = startDate,
             endDate = endDate,
             totalBudgetCents = totalBudgetCents,
+            examWeekRanges = examWeekRanges,
+            vacationRanges = vacationRanges,
         )
+    }
+
+    private fun SemesterDateRangeEntity.toDateRangeOrNull(): DateRange? {
+        val start = runCatching { LocalDate.parse(startDate) }
+            .onFailure { Log.w(TAG, "Invalid startDate \"$startDate\" for date range id=$id, record skipped") }
+            .getOrNull() ?: return null
+        val end = runCatching { LocalDate.parse(endDate) }
+            .onFailure { Log.w(TAG, "Invalid endDate \"$endDate\" for date range id=$id, record skipped") }
+            .getOrNull() ?: return null
+        return DateRange(start = start, endInclusive = end)
     }
 
     private fun SemesterEntity.parseDateOrNull(raw: String, field: String): LocalDate? =
