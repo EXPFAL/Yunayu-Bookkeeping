@@ -9,7 +9,12 @@ import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** [TagRepository] 的 Room 实现。 */
+/** [TagRepository] 的 Room 实现。
+ *
+ * TODO(schema-v2): 当引入子标签新增入口（add）时，需在仓储层对「同父节点同名」做显式防御：
+ * 唯一索引 (parent_id, name) 对 NULL parent_id 不生效（SQLite 允许多个 NULL 共存），
+ * 因此根节点（parentId == null）的同名校验必须在写入前完成并返回明确错误。
+ */
 @Singleton
 class TagRepositoryImpl @Inject constructor(
     private val tagDao: TagDao,
