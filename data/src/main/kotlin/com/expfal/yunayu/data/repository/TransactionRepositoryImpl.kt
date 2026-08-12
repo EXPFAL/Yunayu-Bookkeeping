@@ -1,14 +1,15 @@
 package com.expfal.yunayu.data.repository
 
+import android.util.Log
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.repository.TransactionRepository
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import javax.inject.Inject
+import javax.inject.Singleton
 
 /** [TransactionRepository] 的 Room 实现。 */
 @Singleton
@@ -38,9 +39,15 @@ class TransactionRepositoryImpl @Inject constructor(
     private fun TransactionEntity.toDomain(): Transaction = Transaction(
         id = id,
         amountCents = amountCents,
-        type = runCatching { TransactionType.valueOf(type) }.getOrDefault(TransactionType.EXPENSE),
+        type = runCatching { TransactionType.valueOf(type) }
+            .onFailure { Log.w(TAG, "Unknown transaction type \"$type\" for id=$id, fallback to EXPENSE") }
+            .getOrDefault(TransactionType.EXPENSE),
         note = note,
         tagId = tagId,
         occurredAt = occurredAt,
     )
+
+    private companion object {
+        const val TAG = "TransactionRepo"
+    }
 }

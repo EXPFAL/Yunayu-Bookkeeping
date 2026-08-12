@@ -26,11 +26,14 @@ object DatabaseModule {
             .build()
 
     @Provides
+    @Singleton
     fun provideTagDao(database: YunayuDatabase): TagDao = database.tagDao()
 
     @Provides
+    @Singleton
     fun provideTransactionDao(database: YunayuDatabase): TransactionDao = database.transactionDao()
 
     @Provides
+    @Singleton
     fun provideSemesterDao(database: YunayuDatabase): SemesterDao = database.semesterDao()
 }
