@@ -140,6 +140,8 @@ Sprint 0 完成的判定条件（全部满足才算脚手架通过）：
 
 ### 4.1 表 `tags`
 
+> Schema v2 已重建本表，详见 §7。
+
 | 字段 | 类型 | 说明 |
 | --- | --- | --- |
 | id | Long, PK, autoGenerate | 主键 |
@@ -151,6 +153,8 @@ Sprint 0 完成的判定条件（全部满足才算脚手架通过）：
 | updatedAt | Long | 更新时间戳（epochMillis） |
 
 ### 4.2 Entity 草图
+
+> Schema v2 已重建本表，详见 §7。
 
 ```kotlin
 @Entity(tableName = "tags")
@@ -254,6 +258,7 @@ interface SemesterBudgetEngine {
 - **CASCADE 语义**：标签树删除父节点即删除整棵子树，避免孤儿子树残留；交易与标签为弱关联（`SET NULL`），标签删除后交易保留、仅置空 `tag_id`，符合「交易不可因标签清理而丢失」原则。
 - **(parent_id, name) 唯一的 NULL 根节点注意点**：SQLite 唯一索引中多个 `NULL parent_id` 可共存（NULL 互不相等），因此根节点（`parent_id IS NULL`）重名不会被该唯一索引拦截，需在仓储层写入前显式同名校验并返回明确错误（当前无 add 入口，已在 `TagRepositoryImpl` 留 TODO 注释）。
 - **date_ranges 子表而非 JSON 列**：区间需要按 `semester_id` 关联查询、级联删除、以及未来按日期范围做预算阶段判定，独立子表 + 外键比 JSON 列更利于索引与关系完整性，也避免 JSON 解析开销与 Room 类型映射负担。
+- **删除入口安全规则（硬性）**：任何标签/学期删除入口必须先查询并展示影响面（子树节点数、将被置空的交易笔数、将级联的区间数），并经用户二次确认；删除须经仓储层封装，不走 DAO 直删。
 
 ### 7.3 Migration(1, 2)
 
@@ -264,3 +269,11 @@ interface SemesterBudgetEngine {
 3. **date_ranges**：`CREATE TABLE date_ranges` + `CREATE INDEX (semester_id)`。
 
 导出 schema 见 `data/schemas/com.expfal.yunayu.data.local.YunayuDatabase/2.json`。
+
+### 7.4 v3 已知欠账
+
+以下为 Schema v2 遗留、留待 v3 迁移解决的已知欠账：
+
+1. **`date_ranges.range_type` 无 CHECK 约束**：非法取值无法在 DB 层拦截，目前仅由仓储层映射时丢弃并在日志告警。
+2. **区间合法性无约束**：`date_ranges` 的 `start_date` / `end_date` 顺序、跨区间重叠、区间越出学期范围等未在 DB 层校验。
+3. **`semesters` 无唯一约束**：同名或同日期区间的重复学期可被写入，需引入唯一索引（如 `name` 或 `(start_date, end_date)`）并在迁移前做数据去重。
