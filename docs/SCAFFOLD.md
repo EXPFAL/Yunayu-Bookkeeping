@@ -1,0 +1,235 @@
+# Sprint 0 脚手架计划（Yunayu-Bookkeeping）
+
+> 对齐文档：`docs/PRD.md`（PRD v1）
+> 分支：develop
+> MVP 范围红线（来自 PRD 第四节）：仅 P0 三项（3 秒极速记账 / 学期预算看板 / 学业关联标签）+ P1 自然语言记账。P2（课程表联动、兼职/奖学金追踪）与 PRD 第二节明确砍掉的功能一律不在本计划中出现。
+>
+> 本计划只定义工程结构与接口草图，不包含任何实现代码。
+
+---
+
+## 1. 最小可编译 Compose + Room 工程结构
+
+### 1.1 架构原则
+
+- Clean Architecture + MVVM 三层隔离：UI / Domain / Data。
+- 依赖方向只能向内：`:app` → `:ui` → `:domain` ← `:data`；`:domain` 是纯 Kotlin 模块，不依赖 Android 框架，不依赖任何其他模块。
+- `:domain` 只定义 Repository 接口与 UseCase；`:data` 实现接口（Room + DataStore）；`:ui` 只面向接口编程，经 Hilt 注入具体实现。
+
+### 1.2 模块划分
+
+| 模块 | 职责 | 关键依赖 |
+| --- | --- | --- |
+| `:app` | 组装层：Application（Hilt 入口）、MainActivity、模块组装与导航根 | `:ui` `:data` `:domain`、Hilt |
+| `:domain` | 纯 Kotlin：领域模型、Repository 接口、UseCase、预算引擎接口 | 仅 Kotlin stdlib + Coroutines |
+| `:data` | Room 数据库 + DAO + Entity、RepositoryImpl、DataStore 偏好 | Room（KSP）、DataStore、Hilt |
+| `:ui` | Compose 屏幕、ViewModel、主题 | Compose BOM、lifecycle、Hilt、`:domain` |
+
+### 1.3 目录树草图
+
+```
+Yunayu-Bookkeeping/
+├── app/                          # :app 组装层
+│   └── src/main/kotlin/com/expfal/yunayu/app/
+│       ├── YunayuApplication.kt  # @HiltAndroidApp
+│       └── MainActivity.kt       # 空 Activity，仅 setContent 欢迎页
+├── domain/                       # :domain 纯 Kotlin，无 Android 依赖
+│   └── src/main/kotlin/com/expfal/yunayu/domain/
+│       ├── model/                # Transaction / Tag / Semester 等领域模型
+│       ├── repository/           # Repository 接口
+│       └── usecase/              # UseCase（含预算引擎接口）
+├── data/                         # :data Room + DataStore
+│   └── src/main/kotlin/com/expfal/yunayu/data/
+│       ├── local/entity/         # Room Entity
+│       ├── local/dao/            # DAO
+│       ├── local/YunayuDatabase.kt
+│       ├── repository/           # RepositoryImpl
+│       └── di/                   # Hilt Module
+├── ui/                           # :ui Compose
+│   └── src/main/kotlin/com/expfal/yunayu/ui/
+│       ├── screen/               # 各功能屏幕
+│       ├── viewmodel/            # 各功能 ViewModel
+│       ├── theme/                # Material3 主题（深色跟随系统）
+│       └── navigation/
+├── gradle/libs.versions.toml     # 版本目录，唯一版本来源
+└── docs/                         # PRD / SCAFFOLD
+```
+
+### 1.4 最小可编译验证标准
+
+Sprint 0 完成的判定条件（全部满足才算脚手架通过）：
+
+1. `./gradlew assembleDebug` 成功产出 APK，无编译错误、无 warning 阻塞。
+2. `:app` 空 `MainActivity` + Compose 欢迎页可启动（显示应用名即可）。
+3. `:data` 空数据库可建表：`YunayuDatabase` 包含 `tags` / `transactions` / `semesters` 表，首次启动 Room 建表成功（Instrumented 或 `createFromAsset`/内存库冒烟验证）。
+4. Hilt 依赖图可编译：`:app` 能注入 `:data` 提供的一个 Repository 实现（编译通过即可）。
+5. `ktlintCheck` 通过。
+6. `:domain` 模块 `dependencies` 中无任何 Android/AndroidX 依赖（纯 Kotlin 验证）。
+
+---
+
+## 2. 包名与模块划分
+
+- applicationId：`com.expfal.yunayu.app`（沿用项目历史包名前缀 `com.expfal.yunayu`）
+- 各模块包结构：
+
+| 模块 | 包 | 内容 |
+| --- | --- | --- |
+| `:app` | `com.expfal.yunayu.app` | Application、MainActivity |
+| `:domain` | `com.expfal.yunayu.domain.model` | 领域模型（Transaction、Tag、Semester、BudgetSnapshot 等） |
+|  | `com.expfal.yunayu.domain.repository` | TransactionRepository、TagRepository、SemesterRepository 接口 |
+|  | `com.expfal.yunayu.domain.usecase` | UseCase（动词+名词命名，如 AddTransactionUseCase）、SemesterBudgetEngine 接口 |
+| `:data` | `com.expfal.yunayu.data.local.entity` | TransactionEntity、TagEntity、SemesterEntity |
+|  | `com.expfal.yunayu.data.local.dao` | TransactionDao、TagDao、SemesterDao |
+|  | `com.expfal.yunayu.data.local` | YunayuDatabase |
+|  | `com.expfal.yunayu.data.repository` | 各 RepositoryImpl |
+|  | `com.expfal.yunayu.data.di` | Hilt @Module / @Provides |
+| `:ui` | `com.expfal.yunayu.ui.screen.{feature}` | {Feature}Screen.kt |
+|  | `com.expfal.yunayu.ui.viewmodel` | {Feature}ViewModel |
+|  | `com.expfal.yunayu.ui.theme` | Material3 主题，深色模式默认跟随系统 |
+|  | `com.expfal.yunayu.ui.navigation` | 导航图 |
+
+命名规范沿用既定约定：ViewModel={Feature}ViewModel；Screen={Feature}Screen.kt；Repository={Feature}Repository/{Feature}RepositoryImpl；Entity={Feature}Entity；UseCase={Verb}{Noun}UseCase。
+
+---
+
+## 3. 依赖版本清单
+
+以下组合已经调研核实，直接采用。所有版本集中在 `gradle/libs.versions.toml`，代码中一律经 `alias(libs.xxx)` / `implementation(libs.xxx)` 引用，不允许散落硬编码版本号。仓库源：Google Maven + Maven Central。
+
+### 3.1 构建工具链
+
+| 项 | 版本 | 兼容性依据 |
+| --- | --- | --- |
+| AGP | 8.5.2 | AGP 8.5 官方要求 Gradle ≥ 8.7、JDK 17，最高支持 API 34 |
+| Gradle wrapper | 8.7 | 满足 AGP 8.5 的最低要求 |
+| JDK | 17 | AGP 8.5 官方要求；**注意：本机当前仅有 JDK 26，脚手架执行前必须先安装 JDK 17，并在 `gradle.properties` 配置 `org.gradle.java.home` 指向 JDK 17。这是已知阻塞项，见第 6 节** |
+| compileSdk / targetSdk | 34 | AGP 8.5 最高支持 API 34 |
+| minSdk | 26 | 满足 Room/DataStore/Compose 要求，覆盖主流学生机 |
+
+### 3.2 Kotlin 与 Compose
+
+| 项 | 版本 | 说明 |
+| --- | --- | --- |
+| Kotlin | 2.0.10 | — |
+| KSP | 2.0.10-1.0.24 | KSP 版本前缀必须与 Kotlin 版本严格一致（2.0.10-*） |
+| Compose BOM | 2024.08.00 | Compose 依赖一律由 BOM 管理，不写单个版本号 |
+| Compose Compiler | `org.jetbrains.kotlin.plugin.compose` 插件 | 与 Kotlin 同版本（2.0.10）；不再使用 `composeOptions` 块 |
+
+### 3.3 AndroidX 与 DI
+
+| 项 | 版本 | 说明 |
+| --- | --- | --- |
+| Room | 2.6.1 | 编译器用 `ksp(room-compiler)`，**禁用 kapt**；Entity 必须有 migration 策略 |
+| Hilt | 2.51.1 | 编译器用 ksp |
+| DataStore | 1.1.1 | 偏好设置（如首次启动标记、提醒开关） |
+| core-ktx | 1.13.1 | — |
+| activity-compose | 1.9.1 | — |
+| lifecycle | 2.8.4 | ViewModel + compose 集成 |
+| ktlint | 0.50.0 | 代码风格门禁 |
+
+### 3.4 备选组合（本次不采用）
+
+较新组合 AGP 8.7.3 + Kotlin 2.0.21 + Compose BOM 2024.10.00 本次不采用，理由：求稳优先，优先保证已知可编译组合快速落地，后续迭代再评估升级。
+
+---
+
+## 4. 学业标签体系初始数据模型草图（仅 Room Entity schema，不写实现）
+
+对应 PRD P0-3「学业关联标签」：内置「学习 / 社交 / 生活 / 娱乐」四大类根节点 + 自定义子标签（教材 / 考证 / 实习等），标签树存 Room，支持拖拽排序。
+
+### 4.1 表 `tags`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| id | Long, PK, autoGenerate | 主键 |
+| name | String | 标签名 |
+| parentId | Long? | null = 根节点；四大类「学习/社交/生活/娱乐」种子化为根节点 |
+| sortOrder | Int | 拖拽排序，同级递增 |
+| icon | String? | emoji 图标 |
+| createdAt | Long | 创建时间戳（epochMillis） |
+| updatedAt | Long | 更新时间戳（epochMillis） |
+
+### 4.2 Entity 草图
+
+```kotlin
+@Entity(tableName = "tags")
+data class TagEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0L,
+    @ColumnInfo(name = "name") val name: String,
+    @ColumnInfo(name = "parent_id") val parentId: Long?,   // null = 根节点
+    @ColumnInfo(name = "sort_order") val sortOrder: Int,   // 同级递增，支持拖拽排序
+    @ColumnInfo(name = "icon") val icon: String?,          // emoji
+    @ColumnInfo(name = "created_at") val createdAt: Long,
+    @ColumnInfo(name = "updated_at") val updatedAt: Long,
+)
+```
+
+### 4.3 交易 ↔ 标签关联（MVP 决策）
+
+- **方案 A（本计划默认，简化）**：单标签外键 `TransactionEntity.tagId: Long?`，一笔交易最多挂一个学业标签。
+- 方案 B（多对多关联表）留待后续迭代，不在 MVP 落地。
+- 决策待用户确认，见第 6 节上报事项 (c)。
+
+### 4.4 DAO 需求点（仅列需求，不写实现）
+
+- 按 `parentId` 查子节点，返回 `Flow<List<TagEntity>>`（根节点查询传 `parentId = null`）。
+- 批量更新 `sortOrder`（拖拽排序后整层重写）。
+- 种子化：首次建库插入四大类根节点（学习/社交/生活/娱乐）。
+
+---
+
+## 5. 学期预算引擎接口签名草图（仅 interface，不写实现）
+
+对应 PRD P0-2「学期预算看板」：按学期设总预算 → 自动拆解周/月可用额度 → 进度条预警；考试周/寒暑假自动切换预算策略。
+
+```kotlin
+data class Semester(
+    id: Long,
+    name: String,
+    startDate: LocalDate,
+    endDate: LocalDate,
+    totalBudgetCents: Long,
+    examWeekRanges: List<DateRange>,
+    vacationRanges: List<DateRange>,
+)
+
+enum class BudgetPhase { NORMAL, EXAM_WEEK, VACATION }
+
+data class BudgetSnapshot(
+    totalBudget: Long,
+    spent: Long,
+    remaining: Long,
+    remainingDays: Int,
+    weeklyQuota: Long,
+    monthlyQuota: Long,
+    phase: BudgetPhase,
+)
+
+interface SemesterBudgetEngine {
+    fun observeBudgetSnapshot(semesterId: Long, today: LocalDate): Flow<BudgetSnapshot>
+    fun calcWeeklyQuota(remainingCents: Long, remainingDays: Int, phase: BudgetPhase): Long
+    fun calcMonthlyQuota(remainingCents: Long, remainingDays: Int, phase: BudgetPhase): Long
+    fun resolvePhase(semester: Semester, date: LocalDate): BudgetPhase
+}
+```
+
+要点说明：
+
+- **核心算法**（来自 PRD）：周额度 = (剩余总额 ÷ 剩余天数) × 7；月额度按同一日均值 × 30 推导。
+- **金额单位**：一律用分（`Long`），避免浮点误差；展示层再格式化为元。
+- **不持久化额度**：weeklyQuota / monthlyQuota 不落库，由 `Flow.combine`（学期信息 + 已花费聚合）实时推导，保证数据单一事实来源。
+- `DateRange` 为 domain 层值对象草图（起止日期），具体字段随实现确定。
+- 文案遵循 PRD 温和提醒原则（如"本周还剩 ¥320"），引擎只产出数据不产出文案。
+
+---
+
+## 6. 上报事项（需用户决策）
+
+| # | 事项 | 状态 / 建议 |
+| --- | --- | --- |
+| (a) | **JDK 阻塞项**：本机当前仅有 JDK 26，AGP 8.5.2 官方要求 JDK 17。脚手架执行前必须先安装 JDK 17，并在 `gradle.properties` 配置 `org.gradle.java.home` 指向 JDK 17，否则无法构建 | 阻塞，待用户安装 |
+| (b) | **Gradle wrapper jar 获取**：本机 Gradle CLI 未安装，且历史执行中曾出现网络不可达。`gradle-wrapper.jar` 需在线下载或手工放置到 `gradle/wrapper/`，执行脚手架前需确认网络可用或离线提供 jar | 阻塞风险，待确认 |
+| (c) | **交易↔标签关联方案**：方案 A 单标签外键（`TransactionEntity.tagId: Long?`，简化，本计划默认）vs 方案 B 多对多关联表（更灵活，留待后续）。本计划按方案 A 推进，未经确认不切换到方案 B | 默认方案 A，待用户确认 |
+| (d) | **仓库历史**：旧代码归档分支 `archive/v1-final` 在本地已不存在；用户已确认以 `git init` 重建仓库，当前 develop 分支仅含 `docs/PRD.md`（commit 07249e2），不再追溯旧历史 | 已确认，仅备案 |
