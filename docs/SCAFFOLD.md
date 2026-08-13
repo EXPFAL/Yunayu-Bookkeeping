@@ -277,3 +277,37 @@ interface SemesterBudgetEngine {
 1. **`date_ranges.range_type` 无 CHECK 约束**：非法取值无法在 DB 层拦截，目前仅由仓储层映射时丢弃并在日志告警。
 2. **区间合法性无约束**：`date_ranges` 的 `start_date` / `end_date` 顺序、跨区间重叠、区间越出学期范围等未在 DB 层校验。
 3. **`semesters` 无唯一约束**：同名或同日期区间的重复学期可被写入，需引入唯一索引（如 `name` 或 `(start_date, end_date)`）并在迁移前做数据去重。
+
+---
+
+## 8. 测试基建记录
+
+> 触发时机：全仓零测试 + Schema v2 落地后，为评审认定的最高风险区（SemesterRepository 与 Migration）补齐关键测试。仅新增测试类依赖，未实现任何 PRD 功能逻辑，未改动 PRD.md。
+
+### 8.1 测试栈清单
+
+| 项 | 版本 | 用途 |
+| --- | --- | --- |
+| JUnit5（junit-jupiter） | 5.10.2 | JVM 单元测试框架，经 `useJUnitPlatform()` 启用 |
+| kotlinx-coroutines-test | 1.8.1 | `runTest` 与 Flow 测试（与既有 coroutines 同版） |
+| androidx.room:room-testing | 2.6.1 | `MigrationTestHelper`（androidTest 用） |
+| androidx.test:core / ext:junit | 1.6.1 / 1.2.1 | instrumented 测试运行器 |
+| JaCoCo | 0.8.12 | Gradle 内置 `jacoco` 插件，覆盖率报告 |
+
+### 8.2 模块配置
+
+- `:data`：`testOptions.unitTests.all { it.useJUnitPlatform() }`；`sourceSets.androidTest.assets.srcDir("$projectDir/schemas")` 暴露 Room 导出 schema 给 `MigrationTestHelper`；应用 `jacoco` 插件并自定义 `testCoverage`（`JacocoReport`）报告任务。
+- `:domain`：`tasks.test { useJUnitPlatform() }`；应用 `jacoco` 插件，报告用内置 `jacocoTestReport` 任务。
+- 暂不设硬性覆盖率门禁，报告可用即可（避免 Scaffold 阶段误杀）。
+
+### 8.3 JVM 单元测试（data/src/test）
+
+- `SemesterRepositoryImplTest`：手写 fake `SemesterDao` / `SemesterDateRangeDao` + `FakeYunayuDatabase`（不引入 mock 库，覆盖 `RoomDatabase` 事务执行器与事务边界方法使 `withTransaction` 可在 JVM 执行），`runTest` 覆盖：save 新增（id=0 走 insert 并写区间）、save 更新（update 返回 1）、save 陈旧 id（update 返回 0 抛 `IllegalStateException`）、区间重写只删 `KNOWN_RANGE_TYPES`、observeAll 组装完整区间、非法日期记录被过滤且不崩溃、未知 rangeType 被过滤。
+- `TagRepositoryImplTest`：`getChildren` 映射正确性的基础用例。
+
+运行方式：`./gradlew.bat testDebugUnitTest`（或 `./gradlew.bat test`）。
+
+### 8.4 Migration 测试（data/src/androidTest，待设备执行）
+
+- `MigrationTest`：`MigrationTestHelper` + `InstrumentationRegistry`，校验 v1 → v2 迁移后 `tags` 数据保留、`transactions.tag_id` 关联恢复、唯一索引 `index_tags_parent_id_name` 存在。
+- 本机无模拟器/设备，该测试写好但不执行，接入 CI 后启用。
