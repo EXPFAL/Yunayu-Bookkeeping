@@ -13,6 +13,11 @@ lifecycle = "2.8.4"
 coroutines = "1.8.1"
 ktlint = "0.50.0"
 ktlintPlugin = "12.1.1"
+# 测试栈
+junit5 = "5.10.2"
+androidxTestCore = "1.6.1"
+androidxTestExtJunit = "1.2.1"
+jacoco = "0.8.12"
 
 [libraries]
 # AndroidX 基础
@@ -44,6 +49,13 @@ datastore-preferences = { group = "androidx.datastore", name = "datastore-prefer
 # Coroutines（:domain 仅依赖 stdlib + coroutines）
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
+
+# 测试（JUnit5 / Room migration / Android instrumented）
+junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junit5" }
+room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTestCore" }
+androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
