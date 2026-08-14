@@ -26,8 +26,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.ui.util.formatCents
 import com.expfal.yunayu.ui.util.vibrateSuccess
-import java.util.Locale
 
 /**
  * 「3秒极速记账」底部弹层：金额大字 + 最近分类预选 + 自绘数字键盘 + 保存。
@@ -154,6 +154,3 @@ private fun NecessaryExpenseDialog(
         },
     )
 }
-
-/** 将「分」格式化为两位小数的元，如 1250 → "12.50"。 */
-private fun formatCents(cents: Long): String = String.format(Locale.US, "%.2f", cents / 100.0)
