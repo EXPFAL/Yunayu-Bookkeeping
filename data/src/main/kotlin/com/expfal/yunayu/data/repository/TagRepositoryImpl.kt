@@ -1,6 +1,7 @@
 package com.expfal.yunayu.data.repository
 
 import android.database.sqlite.SQLiteConstraintException
+import android.util.Log
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TagEntity
@@ -57,7 +58,11 @@ class TagRepositoryImpl @Inject constructor(
                 ),
             )
         } catch (e: SQLiteConstraintException) {
-            throw DuplicateTagNameException("父标签 $parentId 下已存在同名标签「$trimmed」")
+            Log.w(TAG, "Constraint violation while adding sub tag", e)
+            if (e.message?.contains("UNIQUE") == true) {
+                throw DuplicateTagNameException("父标签 $parentId 下已存在同名标签「$trimmed」")
+            }
+            throw e
         }
     }
 
@@ -71,7 +76,8 @@ class TagRepositoryImpl @Inject constructor(
         if (all.any { it.id != tagId && it.parentId == target.parentId && it.name == trimmed }) {
             throw DuplicateTagNameException("父标签 ${target.parentId} 下已存在同名标签「$trimmed」")
         }
-        tagDao.renameById(tagId, trimmed, System.currentTimeMillis())
+        val affected = tagDao.renameById(tagId, trimmed, System.currentTimeMillis())
+        if (affected == 0) throw IllegalArgumentException("标签不存在：$tagId")
     }
 
     override suspend fun getDeleteImpact(tagId: Long): TagDeleteImpact {
@@ -122,4 +128,8 @@ class TagRepositoryImpl @Inject constructor(
         createdAt = createdAt,
         updatedAt = updatedAt,
     )
+
+    private companion object {
+        const val TAG = "TagRepositoryImpl"
+    }
 }

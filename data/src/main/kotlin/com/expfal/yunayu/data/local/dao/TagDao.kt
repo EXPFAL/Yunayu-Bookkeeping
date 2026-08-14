@@ -41,9 +41,9 @@ interface TagDao {
     @Query("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tags WHERE parent_id = :parentId")
     suspend fun nextSortOrder(parentId: Long): Int
 
-    /** 按 id 重命名标签并更新 updatedAt。 */
+    /** 按 id 重命名标签并更新 updatedAt，返回受影响行数（0 表示目标不存在）。 */
     @Query("UPDATE tags SET name = :name, updated_at = :updatedAt WHERE id = :tagId")
-    suspend fun renameById(tagId: Long, name: String, updatedAt: Long)
+    suspend fun renameById(tagId: Long, name: String, updatedAt: Long): Int
 
     /** 按 id 删除标签（子树级联由外键 ON DELETE CASCADE 执行）。 */
     @Query("DELETE FROM tags WHERE id = :tagId")

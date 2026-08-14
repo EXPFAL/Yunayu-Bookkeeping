@@ -18,6 +18,7 @@ class FakeTagDao : TagDao {
     val insertedTags = mutableListOf<TagEntity>()
     var nextInsertId: Long = 1L
     val renameCalls = mutableListOf<Triple<Long, String, Long>>()
+    var renameResult: Int = 1
     val deleteCalls = mutableListOf<Long>()
 
     override fun observeChildren(parentId: Long?): Flow<List<TagEntity>> =
@@ -44,8 +45,9 @@ class FakeTagDao : TagDao {
 
     override suspend fun nextSortOrder(parentId: Long): Int = nextSortOrderByParent[parentId] ?: 0
 
-    override suspend fun renameById(tagId: Long, name: String, updatedAt: Long) {
+    override suspend fun renameById(tagId: Long, name: String, updatedAt: Long): Int {
         renameCalls += Triple(tagId, name, updatedAt)
+        return renameResult
     }
 
     override suspend fun deleteById(tagId: Long) {

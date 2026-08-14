@@ -169,6 +169,20 @@ class TagRepositoryImplTest {
     }
 
     @Test
+    fun `renameTag throws when rename affects zero rows`() = runTest {
+        val dao = FakeTagDao().apply {
+            allTags = listOf(tagEntity(2L, "教材", 1L))
+            renameResult = 0
+        }
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+
+        val error = captureError { repository.renameTag(2L, "高数") }
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("标签不存在：2", error?.message)
+    }
+
+    @Test
     fun `deleteTag rejects root tag`() = runTest {
         val dao = FakeTagDao().apply { allTags = listOf(tagEntity(1L, "学习")) }
         val repository = TagRepositoryImpl(dao, FakeTransactionDao())
