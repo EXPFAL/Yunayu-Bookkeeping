@@ -15,7 +15,7 @@ import javax.inject.Singleton
 private val Context.budgetDataStore by preferencesDataStore(name = "budget_prefs")
 
 /** 月度预算额度的 DataStore 键。 */
-private val MONTHLY_BUDGET_CENTS_KEY = longPreferencesKey("monthly_budget_cents")
+internal val MONTHLY_BUDGET_CENTS_KEY = longPreferencesKey("monthly_budget_cents")
 
 /** [MonthlyBudgetRepository] 的 DataStore 实现，额度以「分」持久化。 */
 @Singleton

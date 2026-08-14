@@ -2,7 +2,6 @@ package com.expfal.yunayu.data.repository
 
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
-import androidx.datastore.preferences.core.longPreferencesKey
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -16,8 +15,8 @@ import java.io.File
  * 月度预算 DataStore 持久化语义的 JVM 直测。
  *
  * [MonthlyBudgetRepositoryImpl] 的 DataStore 实例经 `preferencesDataStore` 绑定到应用 Context，
- * JVM 单测无法直接注入，故此处用 [PreferenceDataStoreFactory.create] 以临时文件直测相同键
- * 与读写语义：初值 0、写后可读、覆盖写。
+ * JVM 单测无法直接注入，故此处用 [PreferenceDataStoreFactory.create] 以临时文件直测生产常量
+ * `MONTHLY_BUDGET_CENTS_KEY` 的读写语义：初值 0、写后可读、覆盖写。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 class MonthlyBudgetRepositoryImplTest {
@@ -60,9 +59,5 @@ class MonthlyBudgetRepositoryImplTest {
         dataStore.edit { it[MONTHLY_BUDGET_CENTS_KEY] = 200L }
 
         assertEquals(200L, dataStore.data.map { it[MONTHLY_BUDGET_CENTS_KEY] ?: 0L }.first())
-    }
-
-    private companion object {
-        val MONTHLY_BUDGET_CENTS_KEY = longPreferencesKey("monthly_budget_cents")
     }
 }

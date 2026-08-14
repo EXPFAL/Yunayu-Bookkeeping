@@ -34,7 +34,7 @@ object DatabaseModule {
      *
      * SQLite 默认关闭外键强制；[androidx.room.RoomDatabase.Callback] 没有 onConfigure，
      * 故包装 [FrameworkSQLiteOpenHelperFactory] 的回调，在数据库打开前的配置阶段即开启外键，
-     * 确保 tags 子树 CASCADE、transactions SET NULL、date_ranges CASCADE 在运行时真实生效。
+     * 确保 tags 子树 CASCADE、transactions SET NULL 在运行时真实生效。
      */
     private fun foreignKeyEnforcingFactory(): SupportSQLiteOpenHelper.Factory =
         SupportSQLiteOpenHelper.Factory { configuration ->

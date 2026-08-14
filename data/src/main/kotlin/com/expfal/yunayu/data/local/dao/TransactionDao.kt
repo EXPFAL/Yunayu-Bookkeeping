@@ -66,7 +66,7 @@ interface TransactionDao {
     @Query(
         "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
             "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
-            "ORDER BY t.occurred_at DESC LIMIT :limit",
+            "ORDER BY t.occurred_at DESC, t.id DESC LIMIT :limit",
     )
     fun observeRecent(limit: Int): Flow<List<RecentTransactionRow>>
 }
