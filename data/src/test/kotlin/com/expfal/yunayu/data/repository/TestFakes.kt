@@ -12,6 +12,7 @@ import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.SemesterDateRangeEntity
 import com.expfal.yunayu.data.local.entity.SemesterEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
+import com.expfal.yunayu.data.local.entity.TransactionEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import java.util.concurrent.Executor
@@ -73,6 +74,34 @@ class FakeTagDao : TagDao {
     override suspend fun insert(tag: TagEntity): Long = 0L
 
     override suspend fun insertAll(tags: List<TagEntity>): List<Long> = emptyList()
+}
+
+/** [TransactionDao] 手写 fake：记录 insert 入参、聚合查询返回可预置、观察流简单实现。 */
+class FakeTransactionDao : TransactionDao {
+
+    val inserted = mutableListOf<TransactionEntity>()
+    var nextInsertId: Long = 1L
+    var recentTagRows: List<TransactionDao.RecentTagRow> = emptyList()
+    val recentFrequentTagsCalls = mutableListOf<Pair<Long, Int>>()
+
+    override suspend fun insert(transaction: TransactionEntity): Long {
+        inserted += transaction
+        return nextInsertId
+    }
+
+    override suspend fun delete(transaction: TransactionEntity) = Unit
+
+    override fun observeAll(): Flow<List<TransactionEntity>> = flowOf(emptyList())
+
+    override fun observeByTag(tagId: Long): Flow<List<TransactionEntity>> = flowOf(emptyList())
+
+    override suspend fun getRecentFrequentTags(
+        sinceEpochMillis: Long,
+        limit: Int,
+    ): List<TransactionDao.RecentTagRow> {
+        recentFrequentTagsCalls += sinceEpochMillis to limit
+        return recentTagRows
+    }
 }
 
 /**

@@ -1,6 +1,7 @@
 package com.expfal.yunayu.data.repository
 
 import com.expfal.yunayu.data.local.dao.TagDao
+import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.repository.TagRepository
@@ -18,6 +19,7 @@ import javax.inject.Singleton
 @Singleton
 class TagRepositoryImpl @Inject constructor(
     private val tagDao: TagDao,
+    private val transactionDao: TransactionDao,
 ) : TagRepository {
 
     override fun observeChildren(parentId: Long?): Flow<List<Tag>> =
@@ -25,6 +27,9 @@ class TagRepositoryImpl @Inject constructor(
 
     override suspend fun getChildren(parentId: Long?): List<Tag> =
         tagDao.getChildren(parentId).map { it.toDomain() }
+
+    override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> =
+        transactionDao.getRecentFrequentTags(sinceEpochMillis, limit).map { it.tag.toDomain() }
 
     override suspend fun updateSortOrder(tags: List<Tag>) {
         val now = System.currentTimeMillis()
