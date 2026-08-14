@@ -2,6 +2,7 @@ package com.expfal.yunayu.ui.screen.quickadd
 
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
@@ -237,6 +238,17 @@ class QuickAddViewModelTest {
         assertEquals(1L, viewModel.uiState.value.selectedTagId)
     }
 
+    @Test
+    fun `builds root name mapping for sub tag display`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(5L, "教材", parentId = 1L))
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        assertEquals(mapOf(1L to "学习", 2L to "社交"), viewModel.uiState.value.rootNameById)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository,
         txRepo: TransactionRepository,
@@ -246,7 +258,7 @@ class QuickAddViewModelTest {
         addTransactionUseCase = AddTransactionUseCase(txRepo),
     )
 
-    private fun tag(id: Long, name: String) = Tag(id = id, name = name)
+    private fun tag(id: Long, name: String, parentId: Long? = null) = Tag(id = id, name = name, parentId = parentId)
 
     /** [TagRepository] 手写 fake：返回预置的最近/根标签，可配置异常模拟加载失败。 */
     private class FakeTagRepository : TagRepository {
@@ -265,6 +277,14 @@ class QuickAddViewModelTest {
         }
 
         override suspend fun updateSortOrder(tags: List<Tag>) = Unit
+
+        override suspend fun addSubTag(parentId: Long, name: String, icon: String?): Long = 0L
+
+        override suspend fun renameTag(tagId: Long, newName: String) = Unit
+
+        override suspend fun getDeleteImpact(tagId: Long): TagDeleteImpact = TagDeleteImpact(0, 0, emptyList())
+
+        override suspend fun deleteTag(tagId: Long) = Unit
     }
 
     /** [TransactionRepository] 手写 fake：记录 add 入参，可选经 [addGate] 挂起模拟慢写或抛错。 */
