@@ -25,6 +25,7 @@ class FakeSemesterDao : SemesterDao {
     var updateResult: Int = 1
     var nextInsertId: Long = 1L
     var observeAllFlow: Flow<List<SemesterEntity>> = flowOf(emptyList())
+    var observeByIdFlow: Flow<SemesterEntity?> = flowOf(null)
 
     override suspend fun insert(semester: SemesterEntity): Long {
         inserted += semester
@@ -37,6 +38,8 @@ class FakeSemesterDao : SemesterDao {
     }
 
     override fun observeAll(): Flow<List<SemesterEntity>> = observeAllFlow
+
+    override fun observeById(id: Long): Flow<SemesterEntity?> = observeByIdFlow
 }
 
 /** [SemesterDateRangeDao] 手写 fake：记录删除/写入调用，供断言区间重写语义。 */

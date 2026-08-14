@@ -21,4 +21,8 @@ interface SemesterDao {
     /** 观察全部学期，按起始日期倒序。 */
     @Query("SELECT * FROM semesters ORDER BY start_date DESC")
     fun observeAll(): Flow<List<SemesterEntity>>
+
+    /** 按主键观察单个学期；目标行不存在时发射 null。 */
+    @Query("SELECT * FROM semesters WHERE id = :id")
+    fun observeById(id: Long): Flow<SemesterEntity?>
 }

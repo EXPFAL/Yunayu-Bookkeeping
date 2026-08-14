@@ -234,6 +234,8 @@ class SemesterBudgetEngineImplTest {
         override suspend fun save(semester: Semester): Long = 0L
 
         override fun observeAll(): Flow<List<Semester>> = semesters
+
+        override fun observeById(id: Long): Flow<Semester?> = flowOf(null)
     }
 
     /** [TransactionRepository] 手写 fake：以 MutableStateFlow 驱动观察流。 */

@@ -59,6 +59,16 @@ class SemesterRepositoryImpl @Inject constructor(
             }
         }
 
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun observeById(id: Long): Flow<Semester?> =
+        semesterDao.observeById(id).flatMapLatest { entity ->
+            if (entity == null) {
+                flowOf(null)
+            } else {
+                dateRangeDao.observeBySemester(id).map { ranges -> entity.toDomain(ranges) }
+            }
+        }
+
     private fun Semester.toEntity(): SemesterEntity = SemesterEntity(
         id = id,
         name = name,

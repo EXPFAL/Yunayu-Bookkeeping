@@ -2,6 +2,9 @@ package com.expfal.yunayu.domain.repository
 
 import com.expfal.yunayu.domain.model.Semester
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import java.time.Instant
+import java.time.ZoneId
 
 /** 学期仓储接口，由 :data 模块实现。 */
 interface SemesterRepository {
@@ -24,4 +27,22 @@ interface SemesterRepository {
      * 去重。
      */
     fun observeAll(): Flow<List<Semester>>
+
+    /** 观察指定学期，不存在时发射 null。 */
+    fun observeById(id: Long): Flow<Semester?>
+
+    /**
+     * 观察当前学期：`today` 落在 `[startDate, endDate]` 区间内（含端点）的学期。
+     *
+     * 多个学期同时 active 时取 `startDate` 最晚者（假设）；无 active 学期时发射 null。
+     */
+    fun observeActiveSemester(todayEpochMillis: Long): Flow<Semester?> =
+        observeAll().map { semesters ->
+            val today = Instant.ofEpochMilli(todayEpochMillis)
+                .atZone(ZoneId.systemDefault())
+                .toLocalDate()
+            semesters
+                .filter { !today.isBefore(it.startDate) && !today.isAfter(it.endDate) }
+                .maxByOrNull { it.startDate }
+        }
 }

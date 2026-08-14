@@ -10,9 +10,11 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import java.time.LocalDate
+import java.time.ZoneId
 
 /** [SemesterRepositoryImpl] 的 JVM 单元测试（手写 fake DAO + coroutines-test）。 */
 class SemesterRepositoryImplTest {
@@ -191,6 +193,118 @@ class SemesterRepositoryImplTest {
         assertEquals(1, semester.examWeekRanges.size)
         assertTrue(semester.vacationRanges.isEmpty())
     }
+
+    @Test
+    fun `observeById maps entity with ranges`() = runTest {
+        val semesterDao = FakeSemesterDao()
+        val dateRangeDao = FakeSemesterDateRangeDao()
+        val repository = repository(semesterDao, dateRangeDao)
+
+        semesterDao.observeByIdFlow = flowOf(
+            SemesterEntity(7L, "2026春", "2026-02-23", "2026-06-28", 20_000L),
+        )
+        dateRangeDao.observeBySemesterFlows[7L] = flowOf(
+            listOf(
+                range(7L, SemesterDateRangeEntity.RANGE_TYPE_EXAM_WEEK, "2026-04-20", "2026-04-26"),
+                range(7L, SemesterDateRangeEntity.RANGE_TYPE_VACATION, "2026-05-01", "2026-05-05"),
+            ),
+        )
+
+        val semester = repository.observeById(7L).first()
+
+        require(semester != null)
+        assertEquals(7L, semester.id)
+        assertEquals(20_000L, semester.totalBudgetCents)
+        assertEquals(
+            listOf(DateRange(LocalDate.of(2026, 4, 20), LocalDate.of(2026, 4, 26))),
+            semester.examWeekRanges,
+        )
+        assertEquals(
+            listOf(DateRange(LocalDate.of(2026, 5, 1), LocalDate.of(2026, 5, 5))),
+            semester.vacationRanges,
+        )
+    }
+
+    @Test
+    fun `observeById emits null when entity missing`() = runTest {
+        val semesterDao = FakeSemesterDao()
+        val dateRangeDao = FakeSemesterDateRangeDao()
+        val repository = repository(semesterDao, dateRangeDao)
+
+        semesterDao.observeByIdFlow = flowOf(null)
+
+        assertNull(repository.observeById(99L).first())
+    }
+
+    @Test
+    fun `observeById emits null for invalid date`() = runTest {
+        val semesterDao = FakeSemesterDao()
+        val dateRangeDao = FakeSemesterDateRangeDao()
+        val repository = repository(semesterDao, dateRangeDao)
+
+        semesterDao.observeByIdFlow = flowOf(
+            SemesterEntity(7L, "坏日期", "not-a-date", "2026-06-28", 20_000L),
+        )
+        dateRangeDao.observeBySemesterFlows[7L] = flowOf(emptyList())
+
+        assertNull(repository.observeById(7L).first())
+    }
+
+    @Test
+    fun `observeActiveSemester picks semester containing today`() = runTest {
+        val semesterDao = FakeSemesterDao()
+        val dateRangeDao = FakeSemesterDateRangeDao()
+        val repository = repository(semesterDao, dateRangeDao)
+
+        semesterDao.observeAllFlow = flowOf(
+            listOf(
+                SemesterEntity(1L, "2026春", "2026-02-23", "2026-06-28", 100L),
+                SemesterEntity(2L, "2027春", "2027-02-23", "2027-06-28", 100L),
+            ),
+        )
+
+        val semester = repository.observeActiveSemester(epochMillis(LocalDate.of(2026, 4, 1))).first()
+
+        require(semester != null)
+        assertEquals(1L, semester.id)
+    }
+
+    @Test
+    fun `observeActiveSemester emits null when no semester active`() = runTest {
+        val semesterDao = FakeSemesterDao()
+        val dateRangeDao = FakeSemesterDateRangeDao()
+        val repository = repository(semesterDao, dateRangeDao)
+
+        semesterDao.observeAllFlow = flowOf(
+            listOf(
+                SemesterEntity(1L, "2026春", "2026-02-23", "2026-06-28", 100L),
+            ),
+        )
+
+        assertNull(repository.observeActiveSemester(epochMillis(LocalDate.of(2027, 1, 1))).first())
+    }
+
+    @Test
+    fun `observeActiveSemester picks latest startDate when multiple active`() = runTest {
+        val semesterDao = FakeSemesterDao()
+        val dateRangeDao = FakeSemesterDateRangeDao()
+        val repository = repository(semesterDao, dateRangeDao)
+
+        semesterDao.observeAllFlow = flowOf(
+            listOf(
+                SemesterEntity(1L, "2026春", "2026-02-23", "2026-06-28", 100L),
+                SemesterEntity(2L, "2026夏", "2026-03-01", "2026-05-01", 100L),
+            ),
+        )
+
+        val semester = repository.observeActiveSemester(epochMillis(LocalDate.of(2026, 4, 1))).first()
+
+        require(semester != null)
+        assertEquals(2L, semester.id)
+    }
+
+    private fun epochMillis(date: LocalDate): Long =
+        date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     private fun repository(semesterDao: SemesterDao, dateRangeDao: SemesterDateRangeDao) =
         SemesterRepositoryImpl(
