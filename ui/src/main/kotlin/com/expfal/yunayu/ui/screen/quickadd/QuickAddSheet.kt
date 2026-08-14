@@ -119,7 +119,7 @@ fun QuickAddSheet(
                     .fillMaxWidth()
                     .height(52.dp),
             ) {
-                Text(text = if (uiState.saving) "记下中…" else "记下")
+                Text(text = if (uiState.saving) "记一笔中…" else "记一笔")
             }
 
             if (uiState.saveFailed) {
@@ -147,7 +147,7 @@ private fun NecessaryExpenseDialog(
         title = { Text("这笔属于必要支出吗？") },
         text = { Text("只是帮你多确认一下。") },
         confirmButton = {
-            TextButton(onClick = onConfirm) { Text("记下") }
+            TextButton(onClick = onConfirm) { Text("记一笔") }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) { Text("再想想") }

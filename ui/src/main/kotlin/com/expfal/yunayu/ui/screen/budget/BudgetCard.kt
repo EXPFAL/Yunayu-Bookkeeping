@@ -98,6 +98,12 @@ private fun ActiveCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "本月剩余 ¥${formatCents(snapshot.remainingCents)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
             if (ratio >= 1f) {
                 Spacer(Modifier.height(8.dp))
                 Text(
