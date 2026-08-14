@@ -298,6 +298,7 @@ interface SemesterBudgetEngine {
 
 - `:data`：`testOptions.unitTests.all { it.useJUnitPlatform() }`；`sourceSets.androidTest.assets.srcDir("$projectDir/schemas")` 暴露 Room 导出 schema 给 `MigrationTestHelper`；应用 `jacoco` 插件并自定义 `testCoverage`（`JacocoReport`）报告任务。
 - `:domain`：`tasks.test { useJUnitPlatform() }`；应用 `jacoco` 插件，报告用内置 `jacocoTestReport` 任务。
+- `:ui`：`testOptions.unitTests.isReturnDefaultValues = true` 使未 mock 的 Android API（如 `android.util.Log`）静默返回默认值而非抛「not mocked」；需要真实 Android 行为的测试应改用 Robolectric（后续引入），避免假绿。
 - 暂不设硬性覆盖率门禁，报告可用即可（避免 Scaffold 阶段误杀）。
 
 ### 8.3 JVM 单元测试（data/src/test）
@@ -305,7 +306,7 @@ interface SemesterBudgetEngine {
 - `SemesterRepositoryImplTest`：手写 fake `SemesterDao` / `SemesterDateRangeDao` + `FakeYunayuDatabase`（不引入 mock 库，覆盖 `RoomDatabase` 事务执行器与事务边界方法使 `withTransaction` 可在 JVM 执行），`runTest` 覆盖：save 新增（id=0 走 insert 并写区间）、save 更新（update 返回 1）、save 陈旧 id（update 返回 0 抛 `IllegalStateException`）、区间重写只删 `KNOWN_RANGE_TYPES`、observeAll 组装完整区间、非法日期记录被过滤且不崩溃、未知 rangeType 被过滤。
 - `TagRepositoryImplTest`：`getChildren` 映射正确性的基础用例。
 
-运行方式：`./gradlew.bat testDebugUnitTest`（或 `./gradlew.bat test`）。
+运行方式：`./gradlew.bat test`（主命令，覆盖 :domain JVM 模块等全部本地单测）；`testDebugUnitTest` 仅覆盖 Android 模块（:app/:data/:ui）的本地单测，不含 :domain 的 JVM 测试任务。
 
 ### 8.4 Migration 测试（data/src/androidTest，待设备执行）
 
