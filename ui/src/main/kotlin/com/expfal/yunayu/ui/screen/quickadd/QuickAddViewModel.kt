@@ -8,6 +8,7 @@ import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -27,6 +28,7 @@ data class QuickAddUiState(
     val saving: Boolean = false,
     val saveFailed: Boolean = false,
     val confirmRequested: Boolean = false,
+    val rootNameById: Map<Long, String> = emptyMap(),
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -67,18 +69,33 @@ class QuickAddViewModel @Inject constructor(
         refreshSuggestedTags()
     }
 
-    /** 重新加载建议分类；幂等，弹层每次打开时可安全调用以刷新陈旧建议。 */
+    /** 重新加载建议分类与根标签名映射；幂等，弹层每次打开时可安全调用以刷新陈旧建议。 */
     fun refreshSuggestedTags() {
         viewModelScope.launch {
             val tags = loadSuggestedTags()
+            val rootNameById = loadRootNames()
             _uiState.update { state ->
                 state.copy(
                     suggestedTags = tags,
                     selectedTagId = tags.firstOrNull()?.id,
+                    rootNameById = rootNameById,
                 )
             }
         }
     }
+
+    /**
+     * 加载根标签 id→名称 映射，供子标签 chip 展示「父·子」两级名；
+     * 失败保持空 Map（不阻塞建议 chips），[kotlinx.coroutines.CancellationException] 直接重抛。
+     */
+    private suspend fun loadRootNames(): Map<Long, String> =
+        runCatching { tagRepository.getChildren(parentId = null) }
+            .onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
+                Log.w(TAG, "Failed to load root tag names", throwable)
+            }
+            .getOrDefault(emptyList())
+            .associate { it.id to it.name }
 
     /** 加载建议分类；useCase 失败时回退根标签，仍失败则保持空列表。 */
     private suspend fun loadSuggestedTags(): List<Tag> {

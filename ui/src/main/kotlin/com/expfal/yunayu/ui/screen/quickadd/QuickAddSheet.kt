@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expfal.yunayu.ui.util.formatCents
+import com.expfal.yunayu.ui.util.tagDisplayName
 import com.expfal.yunayu.ui.util.vibrateSuccess
 
 /**
@@ -99,7 +100,7 @@ fun QuickAddSheet(
                         FilterChip(
                             selected = uiState.selectedTagId == tag.id,
                             onClick = { viewModel.onSelectTag(tag.id) },
-                            label = { Text(tag.name) },
+                            label = { Text(tagDisplayName(tag, uiState.rootNameById)) },
                         )
                     }
                 }
