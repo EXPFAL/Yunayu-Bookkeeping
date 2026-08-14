@@ -117,10 +117,23 @@ private fun ActiveCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
+                "本月可花 ¥${formatCents(snapshot.monthlyQuotaCents)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
                 "学期预算还剩 ¥${formatCents(snapshot.remainingCents)}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (ratio >= 1f) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "学期预算已用完，先记着，回头看看哪里能省",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
         }
     }
 }
