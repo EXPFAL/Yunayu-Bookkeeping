@@ -17,6 +17,7 @@ ktlintPlugin = "12.1.1"
 junit5 = "5.10.2"
 androidxTestCore = "1.6.1"
 androidxTestExtJunit = "1.2.1"
+androidxTestRunner = "1.6.2"
 jacoco = "0.8.12"
 
 [libraries]
@@ -56,6 +57,7 @@ junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.r
 room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
 androidx-test-core = { group = "androidx.test", name = "core", version.ref = "androidxTestCore" }
 androidx-test-ext-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestExtJunit" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
