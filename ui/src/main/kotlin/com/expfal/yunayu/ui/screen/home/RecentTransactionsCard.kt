@@ -21,7 +21,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
-/** 首页「最近记录」卡片：标题 + 最近交易列表，空态给出温和引导文案；金额与记账口径一致（支出不带负号）。 */
+/** 首页「最近记录」卡片：标题 + 最近交易列表，空态仅保留简短占位语；金额与记账口径一致（支出不带负号）。 */
 @Composable
 fun RecentTransactionsCard(
     uiState: HomeUiState,
@@ -37,7 +37,7 @@ fun RecentTransactionsCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             uiState.recent.isEmpty() -> Text(
-                "还没有记录，点右下角「+」记一笔",
+                "暂无记录",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
