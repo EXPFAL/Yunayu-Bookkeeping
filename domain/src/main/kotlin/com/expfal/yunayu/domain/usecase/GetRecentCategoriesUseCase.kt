@@ -2,6 +2,7 @@ package com.expfal.yunayu.domain.usecase
 
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.repository.TagRepository
+import kotlinx.coroutines.CancellationException
 
 /**
  * 预测用户最近常用的标签类别，支撑「3秒极速记账」首页快捷入口。
@@ -21,6 +22,7 @@ class GetRecentCategoriesUseCase(
             limit = DEFAULT_LIMIT,
         )
         val roots = runCatching { tagRepository.getChildren(parentId = null) }
+            .onFailure { if (it is CancellationException) throw it }
             .getOrDefault(emptyList())
         return (recent + roots.filter { root -> recent.none { it.id == root.id } })
             .take(DEFAULT_LIMIT)

@@ -7,6 +7,7 @@ import com.expfal.yunayu.domain.model.MonthlyBudgetSnapshot
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.usecase.MonthlyBudgetEngine
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -83,9 +84,9 @@ open class MonthlyBudgetViewModel @Inject constructor(
                 }
                 .catch { throwable ->
                     Log.e(TAG, "Failed to observe monthly budget state", throwable)
-                    _uiState.value = MonthlyBudgetUiState(loading = false)
+                    _uiState.update { it.copy(loading = false) }
                 }
-                .collect { _uiState.value = it }
+                .collect { emitted -> _uiState.update { prev -> emitted.copy(saving = prev.saving) } }
         }
     }
 
@@ -108,6 +109,7 @@ open class MonthlyBudgetViewModel @Inject constructor(
                     _uiState.update { it.copy(saving = false) }
                 }
                 .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     Log.e(TAG, "Failed to save monthly budget", throwable)
                     _events.tryEmit(MonthlyBudgetEvent.SaveFailed)
                     _uiState.update { it.copy(saving = false) }
@@ -129,14 +131,7 @@ open class MonthlyBudgetViewModel @Inject constructor(
         while (true) {
             val now = System.currentTimeMillis()
             emit(now)
-            val nextMidnight = Instant.ofEpochMilli(now)
-                .atZone(ZoneId.systemDefault())
-                .toLocalDate()
-                .plusDays(1)
-                .atStartOfDay(ZoneId.systemDefault())
-                .toInstant()
-                .toEpochMilli()
-            delay(nextMidnight - now)
+            delay(nextMidnightMillis(now) - now)
         }
     }
 
@@ -144,3 +139,16 @@ open class MonthlyBudgetViewModel @Inject constructor(
         const val TAG = "MonthlyBudgetViewModel"
     }
 }
+
+/**
+ * 从当前毫秒派生本地次日零点毫秒（systemDefault 口径），供 [MonthlyBudgetViewModel.todayTicks]
+ * 计算下一次发射所需的 delay 时长；抽为纯函数以便 JVM 单测直接断言跨午夜推进边界。
+ */
+internal fun nextMidnightMillis(nowMillis: Long): Long =
+    Instant.ofEpochMilli(nowMillis)
+        .atZone(ZoneId.systemDefault())
+        .toLocalDate()
+        .plusDays(1)
+        .atStartOfDay(ZoneId.systemDefault())
+        .toInstant()
+        .toEpochMilli()

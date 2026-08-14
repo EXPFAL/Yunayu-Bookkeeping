@@ -19,6 +19,8 @@ import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
 import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.ZoneId
 
 /** [MonthlyBudgetViewModel] 的 JVM 单元测试（手写 fake 引擎/仓储 + coroutines-test）。 */
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -122,6 +124,21 @@ class MonthlyBudgetViewModelTest {
 
         assertEquals(listOf(MonthlyBudgetEvent.SaveFailed), events)
         assertFalse(viewModel.uiState.value.saving)
+    }
+
+    @Test
+    fun `nextMidnightMillis crosses year boundary`() {
+        val zone = ZoneId.systemDefault()
+        val input = LocalDateTime.of(2026, 12, 31, 23, 30)
+            .atZone(zone)
+            .toInstant()
+            .toEpochMilli()
+        val expected = LocalDate.of(2027, 1, 1)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+
+        assertEquals(expected, nextMidnightMillis(input))
     }
 
     private fun snapshot(weeklyQuotaCents: Long = 0L) = MonthlyBudgetSnapshot(
