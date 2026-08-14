@@ -12,6 +12,9 @@ interface TagRepository {
     /** 一次性获取指定父节点下的子标签（根节点传 `null`）。 */
     suspend fun getChildren(parentId: Long?): List<Tag>
 
+    /** 按起始时间之后的交易频次降序返回已用标签（最多 [limit] 个）。 */
+    suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag>
+
     /** 拖拽排序后整层重写 sortOrder。 */
     suspend fun updateSortOrder(tags: List<Tag>)
 }
