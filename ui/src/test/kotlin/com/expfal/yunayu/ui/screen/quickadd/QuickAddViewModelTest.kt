@@ -170,39 +170,112 @@ class QuickAddViewModelTest {
         assertEquals("0.50", viewModel.uiState.value.amountText)
     }
 
+    @Test
+    fun `emits SaveFailed and keeps input when save fails`() = runTest {
+        val txRepo = FakeTransactionRepository().apply { addError = RuntimeException("db down") }
+        val tagRepo = FakeTagRepository().apply { recentTags = listOf(tag(1L, "学习")) }
+        val viewModel = viewModel(tagRepo, txRepo)
+
+        val events = mutableListOf<QuickAddEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events.add(it) }
+        }
+
+        viewModel.onDigit('5')
+        viewModel.onSave()
+
+        assertEquals(listOf(QuickAddEvent.SaveFailed), events)
+        assertFalse(viewModel.uiState.value.saving)
+        assertTrue(viewModel.uiState.value.saveFailed)
+        assertEquals("5", viewModel.uiState.value.amountText)
+    }
+
+    @Test
+    fun `sets saving synchronously when save starts`() = runTest {
+        val gate = CompletableDeferred<Long>()
+        val txRepo = FakeTransactionRepository().apply { addGate = gate }
+        val viewModel = viewModel(FakeTagRepository(), txRepo)
+
+        viewModel.onDigit('1')
+        viewModel.onSave()
+
+        assertTrue(viewModel.uiState.value.saving)
+        assertEquals(1, txRepo.added.size)
+
+        gate.complete(7L)
+        runCurrent()
+        assertFalse(viewModel.uiState.value.saving)
+    }
+
+    @Test
+    fun `refreshSuggestedTags reloads suggestions`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"))
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        assertEquals(listOf(tag(1L, "学习")), viewModel.uiState.value.suggestedTags)
+
+        tagRepo.recentTags = listOf(tag(2L, "社交"), tag(3L, "生活"))
+        viewModel.refreshSuggestedTags()
+        runCurrent()
+
+        assertEquals(listOf(tag(2L, "社交"), tag(3L, "生活")), viewModel.uiState.value.suggestedTags)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+    }
+
+    @Test
+    fun `falls back to root tags when recent categories load fails`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            recentError = RuntimeException("db down")
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        assertEquals(listOf(tag(1L, "学习"), tag(2L, "社交")), viewModel.uiState.value.suggestedTags)
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository,
         txRepo: TransactionRepository,
     ) = QuickAddViewModel(
+        tagRepository = tagRepo,
         getRecentCategoriesUseCase = GetRecentCategoriesUseCase(tagRepo),
         addTransactionUseCase = AddTransactionUseCase(txRepo),
     )
 
     private fun tag(id: Long, name: String) = Tag(id = id, name = name)
 
-    /** [TagRepository] 手写 fake：返回预置的最近/根标签。 */
+    /** [TagRepository] 手写 fake：返回预置的最近/根标签，可配置异常模拟加载失败。 */
     private class FakeTagRepository : TagRepository {
 
         var recentTags: List<Tag> = emptyList()
         var rootTags: List<Tag> = emptyList()
+        var recentError: Throwable? = null
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())
 
         override suspend fun getChildren(parentId: Long?): List<Tag> = rootTags
 
-        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> = recentTags
+        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> {
+            recentError?.let { throw it }
+            return recentTags
+        }
 
         override suspend fun updateSortOrder(tags: List<Tag>) = Unit
     }
 
-    /** [TransactionRepository] 手写 fake：记录 add 入参，可选经 [addGate] 挂起以模拟慢写。 */
+    /** [TransactionRepository] 手写 fake：记录 add 入参，可选经 [addGate] 挂起模拟慢写或抛错。 */
     private class FakeTransactionRepository : TransactionRepository {
 
         val added = mutableListOf<Transaction>()
         var nextId: Long = 0L
         var addGate: CompletableDeferred<Long>? = null
+        var addError: Throwable? = null
 
         override suspend fun add(transaction: Transaction): Long {
+            addError?.let { throw it }
             added += transaction
             addGate?.let { return it.await() }
             return nextId

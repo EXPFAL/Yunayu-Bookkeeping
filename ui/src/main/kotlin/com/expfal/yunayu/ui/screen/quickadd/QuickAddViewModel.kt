@@ -1,17 +1,20 @@
 package com.expfal.yunayu.ui.screen.quickadd
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -22,6 +25,7 @@ data class QuickAddUiState(
     val suggestedTags: List<Tag> = emptyList(),
     val selectedTagId: Long? = null,
     val saving: Boolean = false,
+    val saveFailed: Boolean = false,
     val confirmRequested: Boolean = false,
 )
 
@@ -30,16 +34,22 @@ sealed interface QuickAddEvent {
 
     /** 记账成功，提示 UI 关闭弹层并触发震动反馈。 */
     data object Saved : QuickAddEvent
+
+    /** 记账失败，提示 UI 温和反馈「刚才没记上」。 */
+    data object SaveFailed : QuickAddEvent
 }
 
 /**
  * 「3秒极速记账」ViewModel：数字键盘直输金额 + 最近常用分类预选 + 大额二次确认。
  *
  * 金额在内存中以文本维护（整数 ≤7 位、小数 ≤2 位），落库前经 [parseAmountToCents]
- * 转换为「分」。成功保存后经 [events] 发出一次性 [QuickAddEvent.Saved]。
+ * 转换为「分」。成功保存后经 [events] 发出一次性 [QuickAddEvent.Saved]，失败发出
+ * [QuickAddEvent.SaveFailed]。事件流无回放、缓冲为 1 且满时丢弃最旧，杜绝下次打开
+ * 弹层回放陈旧事件。
  */
 @HiltViewModel
 class QuickAddViewModel @Inject constructor(
+    private val tagRepository: TagRepository,
     private val getRecentCategoriesUseCase: GetRecentCategoriesUseCase,
     private val addTransactionUseCase: AddTransactionUseCase,
 ) : ViewModel() {
@@ -47,23 +57,38 @@ class QuickAddViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(QuickAddUiState())
     val uiState: StateFlow<QuickAddUiState> = _uiState.asStateFlow()
 
-    private val _events = Channel<QuickAddEvent>(Channel.BUFFERED)
-    val events: Flow<QuickAddEvent> = _events.receiveAsFlow()
+    private val _events = MutableSharedFlow<QuickAddEvent>(
+        extraBufferCapacity = 1,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    val events: Flow<QuickAddEvent> = _events.asSharedFlow()
 
     init {
-        loadSuggestedTags()
+        refreshSuggestedTags()
     }
 
-    /** 加载最近常用分类，非空时默认预选第一个。 */
-    private fun loadSuggestedTags() {
+    /** 重新加载建议分类；幂等，弹层每次打开时可安全调用以刷新陈旧建议。 */
+    fun refreshSuggestedTags() {
         viewModelScope.launch {
-            val tags = runCatching { getRecentCategoriesUseCase() }.getOrDefault(emptyList())
+            val tags = loadSuggestedTags()
             _uiState.update { state ->
                 state.copy(
                     suggestedTags = tags,
                     selectedTagId = tags.firstOrNull()?.id,
                 )
             }
+        }
+    }
+
+    /** 加载建议分类；useCase 失败时回退根标签，仍失败则保持空列表。 */
+    private suspend fun loadSuggestedTags(): List<Tag> {
+        return try {
+            getRecentCategoriesUseCase()
+        } catch (throwable: Throwable) {
+            Log.w(TAG, "Failed to load recent categories, fallback to root tags", throwable)
+            runCatching { tagRepository.getChildren(parentId = null) }
+                .onFailure { Log.w(TAG, "Failed to load root tags", it) }
+                .getOrDefault(emptyList())
         }
     }
 
@@ -117,8 +142,8 @@ class QuickAddViewModel @Inject constructor(
     }
 
     private fun persist(amountCents: Long) {
+        _uiState.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
-            _uiState.update { it.copy(saving = true) }
             runCatching {
                 addTransactionUseCase(
                     amountCents = amountCents,
@@ -126,17 +151,20 @@ class QuickAddViewModel @Inject constructor(
                     occurredAt = System.currentTimeMillis(),
                 )
             }.onSuccess {
-                _events.send(QuickAddEvent.Saved)
+                _events.tryEmit(QuickAddEvent.Saved)
                 _uiState.update { state ->
                     state.copy(
                         amountText = "",
                         selectedTagId = null,
                         saving = false,
+                        saveFailed = false,
                         confirmRequested = false,
                     )
                 }
-            }.onFailure {
-                _uiState.update { it.copy(saving = false) }
+            }.onFailure { throwable ->
+                Log.e(TAG, "Failed to save transaction", throwable)
+                _events.tryEmit(QuickAddEvent.SaveFailed)
+                _uiState.update { it.copy(saving = false, saveFailed = true) }
             }
         }
     }
@@ -157,6 +185,9 @@ class QuickAddViewModel @Inject constructor(
     }
 
     companion object {
+        /** 日志标签。 */
+        private const val TAG = "QuickAddViewModel"
+
         /** 整数部分最多位数。 */
         private const val MAX_INTEGER_DIGITS = 7
 

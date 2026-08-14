@@ -45,6 +45,10 @@ fun QuickAddSheet(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
+    LaunchedEffect(Unit) {
+        viewModel.refreshSuggestedTags()
+    }
+
     LaunchedEffect(viewModel, context) {
         viewModel.events.collect { event ->
             when (event) {
@@ -52,6 +56,7 @@ fun QuickAddSheet(
                     context.vibrateSuccess()
                     onSaved()
                 }
+                QuickAddEvent.SaveFailed -> Unit // 提示文案由 uiState.saveFailed 驱动
             }
         }
     }
@@ -63,7 +68,11 @@ fun QuickAddSheet(
         )
     }
 
-    ModalBottomSheet(onDismissRequest = onDismissRequest) {
+    ModalBottomSheet(
+        onDismissRequest = {
+            if (!uiState.saving) onDismissRequest()
+        },
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -105,12 +114,23 @@ fun QuickAddSheet(
             Spacer(modifier = Modifier.height(20.dp))
             Button(
                 onClick = viewModel::onSave,
-                enabled = !uiState.saving,
+                enabled = !uiState.saving && QuickAddViewModel.parseAmountToCents(uiState.amountText) != null,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(52.dp),
             ) {
                 Text(text = if (uiState.saving) "记下中…" else "记下")
+            }
+
+            if (uiState.saveFailed) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    text = "刚才没记上，再试一次",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
         }
     }
@@ -125,7 +145,7 @@ private fun NecessaryExpenseDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("这笔属于必要支出吗？") },
-        text = { Text("只是帮你多确认一下，记下后随时能改。") },
+        text = { Text("只是帮你多确认一下。") },
         confirmButton = {
             TextButton(onClick = onConfirm) { Text("记下") }
         },
