@@ -177,7 +177,7 @@ abstract class YunayuDatabase : RoomDatabase() {
                     db.execSQL(
                         "INSERT INTO tags (name, parent_id, sort_order, icon, created_at, updated_at) " +
                             "VALUES (?, NULL, ?, ?, ?, ?)",
-                        arrayOf(name, index, icon, now, now),
+                        arrayOf<Any?>(name, index, icon, now, now),
                     )
                 }
                 ROOT_TAGS.forEach { (rootName, _) ->
@@ -186,7 +186,7 @@ abstract class YunayuDatabase : RoomDatabase() {
                         db.execSQL(
                             "INSERT INTO tags (name, parent_id, sort_order, icon, created_at, updated_at) " +
                                 "VALUES (?, ?, ?, ?, ?, ?)",
-                            arrayOf(subName, rootId, index, null, now, now),
+                            arrayOf<Any?>(subName, rootId, index, null, now, now),
                         )
                     }
                 }

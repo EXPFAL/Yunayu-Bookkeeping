@@ -24,10 +24,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    kotlinOptions {
-        jvmTarget = "17"
-    }
-
     // 本地单元测试启用 JUnit5；isReturnDefaultValues 使 android.util.Log 等 Android stub
     // 返回默认值而非抛「not mocked」，供 ViewModel 单测使用
     testOptions {
@@ -35,6 +31,12 @@ android {
             it.useJUnitPlatform()
         }
         unitTests.isReturnDefaultValues = true
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17)
     }
 }
 

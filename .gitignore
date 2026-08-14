@@ -23,3 +23,6 @@ Thumbs.db
 # 构建产物（经 CI/本地任务产出，不入库）
 *.apk
 *.aab
+
+# 端侧 LLM 可行性 spike（独立工程 + 1.49GB 模型，不入库）
+/spike-litertlm/
