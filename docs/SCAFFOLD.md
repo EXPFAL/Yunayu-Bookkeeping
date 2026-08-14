@@ -335,3 +335,31 @@ interface SemesterBudgetEngine {
 - **DI 装配约定**：domain 用例装配可置于 `:data`，后续新增用例遵循既有装配位置，不在 `:domain` 内自建 DI。
 - **transactions 全表 Flow 规模假设**：预算引擎对 `transactions` 全表 Flow 实时聚合，假设单用户万笔量级；超过后再改为按学期聚合查询。
 - **门禁主命令**：`./gradlew.bat test`（覆盖 `:domain` 等全部本地单测），辅以 `ktlintCheck` 与 `assembleDebug`。
+
+---
+
+## 10. 月度预算改造记录
+
+> 触发时机：用户实机反馈「学期维度过重」，P0-2 从学期预算看板改造为月度预算看板；Domain/Data 已先行交付，本节记录决策留痕。
+
+### 10.1 学期 → 月度决策
+
+- **用户实机反馈**：学期维度（考试周/寒暑假策略、跨学期归档）对个人学生记账偏重，日常真正关心的是「每月生活费还能花多少」。
+- **决策**：删除 `semesters` / `date_ranges` 两表与 `Semester` / `SemesterBudgetEngine` / `BudgetSnapshot` / `BudgetPhase` 等领域模型，改为月度预算单值配置，按自然月滚动、跨月自动重算。
+
+### 10.2 存储与数据口径
+
+- **月度预算**：经 DataStore 单 key（`budget_prefs` / `monthly_budget_cents`）持久化，未设置发射 `0` 由 UI 转译引导态。
+- **预算引擎**：`剩余 ÷ 剩余天数 × 7` 实时推导周额度；额度不落库（`Flow.combine` 单一事实来源）。
+- **最近列表口径**：`transactions JOIN tags` 取 `tag_name`，`LIMIT` 最近 N 笔按 `occurred_at` 倒序，`distinctUntilChanged` 抑制重复发射。
+- **预测补足语义**：`recent` 高频分类不足时以 `roots` 补足、按 `id` 去重后取前 4。
+
+### 10.3 Schema v3 与 MIGRATION_2_3
+
+- schema 版本 2 → 3：`MIGRATION_2_3` 以事务包裹 `DROP TABLE date_ranges` 与 `DROP TABLE semesters`（先删区间子表再删学期主表），`transactions` / `tags` 表不变。
+- 导出 schema 见 `data/schemas/com.expfal.yunayu.data.local.YunayuDatabase/3.json`。
+
+### 10.4 约束废止与门禁
+
+- 旧 §9.3「禁止持久化 `date_ranges.id`」约束随 `date_ranges` 表删除而废止。
+- 门禁主命令沿用 `./gradlew.bat test`（覆盖 `:domain` 等全部本地单测），辅以 `ktlintCheck` 与 `assembleDebug`。

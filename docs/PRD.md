@@ -10,10 +10,10 @@
    - 痛点：课间/食堂排队无法打开复杂表单
    - 方案：首页悬浮按钮 + 数字键盘直输金额 → 自动匹配最近常用分类
    - 技术要点：Compose 自定义键盘；Room 查询最近7天高频分类缓存
-2. 学期预算看板
-   - 痛点：生活费按月分配易超支，缺乏学期全局视角
-   - 方案：按学期设总预算 → 自动拆解周/月可用额度 → 进度条预警
-   - 技术要点：预算算法 (剩余总额 ÷ 剩余天数) × 7；Flow 实时计算
+2. 每月预算看板
+   - 痛点：生活费按月分配易超支
+   - 方案：设置每月预算 → 自动拆解周可用额度 → 进度条预警
+   - 技术要点：DataStore 预算配置、(剩余÷剩余天数)×7、Flow 实时计算
 3. 学业关联标签
    - 痛点：买书/打印/培训等支出难归类，与生活费混淆
    - 方案：内置「学习/社交/生活/娱乐」四大类 + 自定义子标签（教材/考证/实习）
@@ -40,10 +40,8 @@
 - Web 端/小程序（专注 Android 原生）
 
 ## 三、学生专属设计细节
-1. 学期周期管理
-   - 支持设置学期起止日期（如「2026-2027第一学期」）
-   - 跨学期自动归档旧数据；新学期预算重置但历史可查
-   - 考试周/寒暑假自动切换预算策略
+1. 月度预算管理
+   - 预算按月滚动，跨月自动按新月重新计算
 2. 防冲动消费机制（温和提醒，非强制拦截）
    - 单笔超阈值（如 ¥100）弹确认："这笔属于必要支出吗？"
    - 娱乐类支出达周限额 80% 时，记账按钮变橙色警示
@@ -63,7 +61,7 @@
 - 不追求功能完备性
 
 ## 五、建议 ISSUE 拆分（供 Sprint 规划参考）
-- feat(core): semester-based budget engine with weekly auto-calculation
+- feat(core): monthly-based budget engine with weekly auto-calculation
 - feat(ui): floating quick-add button with recent-category prediction
 - feat(ai): local qwen2.5-1.5b for natural language transaction parsing
 - feat(report): weekly consumption review with anomaly detection
