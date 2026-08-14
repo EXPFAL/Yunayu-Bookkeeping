@@ -51,6 +51,16 @@ class SemesterBudgetEngineImplTest {
     }
 
     @Test
+    fun `quota calculation guards against zero remaining days`() {
+        val engine = newEngine()
+
+        // remainingDays=0 被钳制为 1，避免除零：100_000 * 7 * 100 / 1 / 100 = 700_000
+        assertEquals(700_000L, engine.calcWeeklyQuota(100_000L, 0, BudgetPhase.NORMAL))
+        // 100_000 * 30 * 100 / 1 / 100 = 3_000_000
+        assertEquals(3_000_000L, engine.calcMonthlyQuota(100_000L, 0, BudgetPhase.NORMAL))
+    }
+
+    @Test
     fun `resolvePhase handles inside outside boundary and overlap precedence`() {
         val engine = newEngine()
         val semester = semester(

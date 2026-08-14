@@ -53,7 +53,7 @@ class SemesterBudgetEngineImpl(
 
     /**
      * 周额度 = `remainingCents * 7 * pct / remainingDays / 100`，`pct` 为阶段系数百分比。
-     * 约定 `remainingDays >= 1`（由快照组装处钳制），金额向下取整。
+     * 将 `remainingDays` 钳制到至少 1（把「剩余天数 ≥1」的约定落为代码），金额向下取整。
      */
     override fun calcWeeklyQuota(
         remainingCents: Long,
@@ -61,12 +61,13 @@ class SemesterBudgetEngineImpl(
         phase: BudgetPhase,
     ): Long {
         val pct = coefficientPercent(phase)
-        return remainingCents * 7 * pct / remainingDays / 100
+        val days = remainingDays.coerceAtLeast(MIN_REMAINING_DAYS)
+        return remainingCents * 7 * pct / days / 100
     }
 
     /**
      * 月额度 = `remainingCents * 30 * pct / remainingDays / 100`（按 30 天折算，默认假设）。
-     * 约定 `remainingDays >= 1`，金额向下取整。
+     * 将 `remainingDays` 钳制到至少 1，金额向下取整。
      */
     override fun calcMonthlyQuota(
         remainingCents: Long,
@@ -74,7 +75,8 @@ class SemesterBudgetEngineImpl(
         phase: BudgetPhase,
     ): Long {
         val pct = coefficientPercent(phase)
-        return remainingCents * 30 * pct / remainingDays / 100
+        val days = remainingDays.coerceAtLeast(MIN_REMAINING_DAYS)
+        return remainingCents * 30 * pct / days / 100
     }
 
     /**
