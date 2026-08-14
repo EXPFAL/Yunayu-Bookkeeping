@@ -205,7 +205,7 @@ class QuickAddViewModel @Inject constructor(
             val trimmed = text.trim()
             if (trimmed.isEmpty()) return null
             if (trimmed.count { it == '.' } > 1) return null
-            if (!trimmed.all { it.isDigit() || it == '.' }) return null
+            if (!trimmed.all { it in '0'..'9' || it == '.' }) return null
 
             val parts = trimmed.split('.')
             val integer = parts[0]
