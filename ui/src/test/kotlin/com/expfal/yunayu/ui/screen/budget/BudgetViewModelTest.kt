@@ -8,7 +8,10 @@ import com.expfal.yunayu.domain.repository.SemesterRepository
 import com.expfal.yunayu.domain.usecase.SemesterBudgetEngine
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
@@ -31,8 +34,8 @@ class BudgetViewModelTest {
 
     @Test
     fun `shows guide state when no active semester`() = runTest {
-        val repo = FakeSemesterRepository().apply { activeSemester = null }
-        val viewModel = BudgetViewModel(FakeBudgetEngine(), repo)
+        val repo = FakeSemesterRepository()
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
@@ -43,9 +46,9 @@ class BudgetViewModelTest {
     @Test
     fun `shows snapshot when active semester exists`() = runTest {
         val semester = semester(id = 5L)
-        val repo = FakeSemesterRepository().apply { activeSemester = semester }
+        val repo = FakeSemesterRepository().apply { activeSemesterFlow.value = semester }
         val engine = FakeBudgetEngine().apply { snapshot = snapshot(weeklyQuotaCents = 3_000L) }
-        val viewModel = BudgetViewModel(engine, repo)
+        val viewModel = TestBudgetViewModel(engine, repo)
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
@@ -55,14 +58,16 @@ class BudgetViewModelTest {
 
     @Test
     fun `saves new semester with zero id and empty ranges`() = runTest {
-        val repo = FakeSemesterRepository().apply { activeSemester = null }
-        val viewModel = BudgetViewModel(FakeBudgetEngine(), repo)
+        val repo = FakeSemesterRepository()
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
 
         viewModel.saveSemester(
             name = "2026 秋季学期",
             startDate = LocalDate.of(2026, 9, 1),
             endDate = LocalDate.of(2027, 1, 15),
             totalBudgetCents = 1_000_000L,
+            examWeekRanges = emptyList(),
+            vacationRanges = emptyList(),
         )
 
         assertEquals(1, repo.saved.size)
@@ -77,35 +82,77 @@ class BudgetViewModelTest {
     }
 
     @Test
-    fun `editing keeps id and existing ranges`() = runTest {
+    fun `saves ranges along with new semester`() = runTest {
         val exam = DateRange(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 7))
         val vacation = DateRange(LocalDate.of(2027, 1, 1), LocalDate.of(2027, 1, 3))
+        val repo = FakeSemesterRepository()
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
+
+        viewModel.saveSemester(
+            name = "2026 秋季学期",
+            startDate = LocalDate.of(2026, 9, 1),
+            endDate = LocalDate.of(2027, 1, 15),
+            totalBudgetCents = 1_000_000L,
+            examWeekRanges = listOf(exam),
+            vacationRanges = listOf(vacation),
+        )
+
+        val saved = repo.saved.single()
+        assertEquals(listOf(exam), saved.examWeekRanges)
+        assertEquals(listOf(vacation), saved.vacationRanges)
+    }
+
+    @Test
+    fun `editing keeps id and applies provided ranges`() = runTest {
+        val oldExam = DateRange(LocalDate.of(2026, 12, 1), LocalDate.of(2026, 12, 7))
+        val newExam = DateRange(LocalDate.of(2026, 12, 10), LocalDate.of(2026, 12, 14))
         val repo = FakeSemesterRepository().apply {
-            activeSemester = semester(id = 5L, exam = listOf(exam), vacation = listOf(vacation))
+            activeSemesterFlow.value = semester(id = 5L, exam = listOf(oldExam))
         }
-        val viewModel = BudgetViewModel(FakeBudgetEngine(), repo)
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
 
         viewModel.saveSemester(
             name = "改名学期",
             startDate = LocalDate.of(2026, 9, 10),
             endDate = LocalDate.of(2027, 1, 10),
             totalBudgetCents = 2_000_000L,
+            examWeekRanges = listOf(newExam),
+            vacationRanges = emptyList(),
         )
 
         val saved = repo.saved.single()
         assertEquals(5L, saved.id)
         assertEquals("改名学期", saved.name)
-        assertEquals(listOf(exam), saved.examWeekRanges)
-        assertEquals(listOf(vacation), saved.vacationRanges)
+        assertEquals(listOf(newExam), saved.examWeekRanges)
+        assertTrue(saved.vacationRanges.isEmpty())
+    }
+
+    @Test
+    fun `emits Saved event on successful save`() = runTest {
+        val repo = FakeSemesterRepository()
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
+
+        val events = mutableListOf<BudgetEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events.add(it) }
+        }
+
+        viewModel.saveSemester(
+            name = "2026 秋季学期",
+            startDate = LocalDate.of(2026, 9, 1),
+            endDate = LocalDate.of(2027, 1, 15),
+            totalBudgetCents = 1_000_000L,
+            examWeekRanges = emptyList(),
+            vacationRanges = emptyList(),
+        )
+
+        assertEquals(listOf(BudgetEvent.Saved), events)
     }
 
     @Test
     fun `emits SaveFailed when repository save fails`() = runTest {
-        val repo = FakeSemesterRepository().apply {
-            activeSemester = null
-            saveError = RuntimeException("db down")
-        }
-        val viewModel = BudgetViewModel(FakeBudgetEngine(), repo)
+        val repo = FakeSemesterRepository().apply { saveError = RuntimeException("db down") }
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
 
         val events = mutableListOf<BudgetEvent>()
         backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
@@ -117,6 +164,8 @@ class BudgetViewModelTest {
             startDate = LocalDate.of(2026, 9, 1),
             endDate = LocalDate.of(2027, 1, 15),
             totalBudgetCents = 100_000L,
+            examWeekRanges = emptyList(),
+            vacationRanges = emptyList(),
         )
 
         assertEquals(listOf(BudgetEvent.SaveFailed), events)
@@ -124,14 +173,45 @@ class BudgetViewModelTest {
 
     @Test
     fun `invalid input does not persist`() = runTest {
-        val repo = FakeSemesterRepository().apply { activeSemester = null }
-        val viewModel = BudgetViewModel(FakeBudgetEngine(), repo)
+        val repo = FakeSemesterRepository()
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
 
-        viewModel.saveSemester("", LocalDate.of(2026, 9, 1), LocalDate.of(2027, 1, 15), 100_000L)
-        viewModel.saveSemester("学期", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 8, 1), 100_000L)
-        viewModel.saveSemester("学期", LocalDate.of(2026, 9, 1), LocalDate.of(2027, 1, 15), 0L)
+        viewModel.saveSemester("", LocalDate.of(2026, 9, 1), LocalDate.of(2027, 1, 15), 100_000L, emptyList(), emptyList())
+        viewModel.saveSemester("学期", LocalDate.of(2026, 9, 1), LocalDate.of(2026, 8, 1), 100_000L, emptyList(), emptyList())
+        viewModel.saveSemester("学期", LocalDate.of(2026, 9, 1), LocalDate.of(2027, 1, 15), 0L, emptyList(), emptyList())
 
         assertTrue(repo.saved.isEmpty())
+    }
+
+    @Test
+    fun `emits SaveFailed when invalid input is rejected`() = runTest {
+        val repo = FakeSemesterRepository()
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
+
+        val events = mutableListOf<BudgetEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events.add(it) }
+        }
+
+        viewModel.saveSemester("", LocalDate.of(2026, 9, 1), LocalDate.of(2027, 1, 15), 100_000L, emptyList(), emptyList())
+
+        assertEquals(listOf(BudgetEvent.SaveFailed), events)
+        assertTrue(repo.saved.isEmpty())
+    }
+
+    @Test
+    fun `falls back to guide state when active semester becomes null`() = runTest {
+        val semester = semester(id = 5L)
+        val repo = FakeSemesterRepository().apply { activeSemesterFlow.value = semester }
+        val viewModel = TestBudgetViewModel(FakeBudgetEngine(), repo)
+
+        assertEquals(semester, viewModel.uiState.value.semester)
+
+        repo.activeSemesterFlow.value = null
+
+        assertFalse(viewModel.uiState.value.loading)
+        assertNull(viewModel.uiState.value.semester)
+        assertNull(viewModel.uiState.value.snapshot)
     }
 
     private fun semester(
@@ -158,10 +238,10 @@ class BudgetViewModelTest {
         phase = BudgetPhase.NORMAL,
     )
 
-    /** [SemesterRepository] 手写 fake：直接返回预置激活学期，记录 save 入参并可配置异常。 */
+    /** [SemesterRepository] 手写 fake：以 MutableStateFlow 驱动激活学期，记录 save 入参并可配置异常。 */
     private class FakeSemesterRepository : SemesterRepository {
 
-        var activeSemester: Semester? = null
+        val activeSemesterFlow = MutableStateFlow<Semester?>(null)
         val saved = mutableListOf<Semester>()
         var saveError: Throwable? = null
         var nextId: Long = 10L
@@ -176,7 +256,7 @@ class BudgetViewModelTest {
 
         override fun observeById(id: Long): Flow<Semester?> = flowOf(null)
 
-        override fun observeActiveSemester(todayEpochMillis: Long): Flow<Semester?> = flowOf(activeSemester)
+        override fun observeActiveSemester(todayEpochMillis: Long): Flow<Semester?> = activeSemesterFlow
     }
 
     /** [SemesterBudgetEngine] 手写 fake：返回预置快照，其余方法返回默认值。 */
@@ -200,5 +280,16 @@ class BudgetViewModelTest {
         override fun calcMonthlyQuota(remainingCents: Long, remainingDays: Int, phase: BudgetPhase): Long = 0L
 
         override fun resolvePhase(semester: Semester, date: LocalDate): BudgetPhase = BudgetPhase.NORMAL
+    }
+
+    /** 有限 ticker 的 [BudgetViewModel] 子类：发射一次后挂起，规避 runTest advanceUntilIdle 对无限 delay 循环的挂起。 */
+    private class TestBudgetViewModel(
+        engine: SemesterBudgetEngine,
+        repo: SemesterRepository,
+    ) : BudgetViewModel(engine, repo) {
+        override fun todayTicks(): Flow<Long> = flow {
+            emit(System.currentTimeMillis())
+            awaitCancellation()
+        }
     }
 }

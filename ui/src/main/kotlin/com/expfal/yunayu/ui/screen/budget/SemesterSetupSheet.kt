@@ -3,15 +3,22 @@ package com.expfal.yunayu.ui.screen.budget
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
@@ -24,21 +31,27 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import com.expfal.yunayu.domain.model.DateRange
+import com.expfal.yunayu.ui.util.filterBudgetInput
+import com.expfal.yunayu.ui.util.parseBudgetToCents
+import com.expfal.yunayu.ui.util.toUtcEpochMillis
+import com.expfal.yunayu.ui.util.toUtcLocalDate
 import com.expfal.yunayu.ui.util.vibrateSuccess
-import java.time.Instant
 import java.time.LocalDate
-import java.time.ZoneId
 import java.util.Locale
 
 /**
- * 学期设置底部弹层：名称 + 起止日期（只读，点击弹 DatePicker）+ 总预算（小数过滤）。
+ * 学期设置底部弹层：名称 + 起止日期（只读，点击弹 DatePicker）+ 总预算（小数过滤）+
+ * 考试周 / 寒暑假区间配置。
  *
- * 编辑模式从 [BudgetViewModel.uiState] 的当前学期预填；保存成功经 [BudgetEvent.Saved]
- * 触发震动并关闭，失败经 [BudgetEvent.SaveFailed] 显示温和错误文案。
+ * 编辑模式从 [BudgetViewModel.uiState] 的当前学期预填（含区间，区间以 UI 为唯一来源）；
+ * 保存成功经 [BudgetEvent.Saved] 触发震动并关闭，失败经 [BudgetEvent.SaveFailed] 显示
+ * 温和错误文案。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -51,6 +64,8 @@ fun SemesterSetupSheet(
     var startDate by remember { mutableStateOf(initialSemester?.startDate ?: LocalDate.now()) }
     var endDate by remember { mutableStateOf(initialSemester?.endDate ?: LocalDate.now().plusMonths(4)) }
     var budgetText by remember { mutableStateOf(initialSemester?.let { centsToBudgetText(it.totalBudgetCents) } ?: "") }
+    var examWeekRanges by remember { mutableStateOf(initialSemester?.examWeekRanges ?: emptyList()) }
+    var vacationRanges by remember { mutableStateOf(initialSemester?.vacationRanges ?: emptyList()) }
     var showStartPicker by remember { mutableStateOf(false) }
     var showEndPicker by remember { mutableStateOf(false) }
     var saving by remember { mutableStateOf(false) }
@@ -120,6 +135,20 @@ fun SemesterSetupSheet(
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 modifier = Modifier.fillMaxWidth(),
             )
+            Spacer(Modifier.height(16.dp))
+            RangeSection(
+                title = "考试周",
+                ranges = examWeekRanges,
+                onAdd = { examWeekRanges = examWeekRanges + it },
+                onRemove = { index -> examWeekRanges = examWeekRanges.filterIndexed { i, _ -> i != index } },
+            )
+            Spacer(Modifier.height(8.dp))
+            RangeSection(
+                title = "寒暑假",
+                ranges = vacationRanges,
+                onAdd = { vacationRanges = vacationRanges + it },
+                onRemove = { index -> vacationRanges = vacationRanges.filterIndexed { i, _ -> i != index } },
+            )
             val errorText = validationError ?: if (saveFailed) "刚才没保存上，再试一次" else null
             if (errorText != null) {
                 Spacer(Modifier.height(12.dp))
@@ -135,7 +164,14 @@ fun SemesterSetupSheet(
                     if (validationError == null && budgetCents != null) {
                         saving = true
                         saveFailed = false
-                        viewModel.saveSemester(name.trim(), startDate, endDate, budgetCents)
+                        viewModel.saveSemester(
+                            name.trim(),
+                            startDate,
+                            endDate,
+                            budgetCents,
+                            examWeekRanges,
+                            vacationRanges,
+                        )
                     }
                 },
                 enabled = !saving,
@@ -177,11 +213,11 @@ private fun DatePickerSheet(
     onConfirm: (LocalDate) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    val state = rememberDatePickerState(initialSelectedDateMillis = initialDate.toEpochMillis())
+    val state = rememberDatePickerState(initialSelectedDateMillis = initialDate.toUtcEpochMillis())
     DatePickerDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
-            TextButton(onClick = { state.selectedDateMillis?.let { onConfirm(it.toLocalDate()) } ?: onDismiss() }) {
+            TextButton(onClick = { state.selectedDateMillis?.let { onConfirm(it.toUtcLocalDate()) } ?: onDismiss() }) {
                 Text("确定")
             }
         },
@@ -213,37 +249,123 @@ private fun ReadOnlyDateField(
     }
 }
 
-/** 预算输入过滤：仅数字与一个小数点，整数 ≤9 位、小数 ≤2 位，前导小数点补 0。 */
-private fun filterBudgetInput(raw: String): String {
-    val filtered = raw.filter { it.isDigit() || it == '.' }
-    val dotIndex = filtered.indexOf('.')
-    if (dotIndex < 0) return filtered.take(MAX_INTEGER_DIGITS)
-    var integer = filtered.substring(0, dotIndex).take(MAX_INTEGER_DIGITS)
-    if (integer.isEmpty()) integer = "0"
-    val fraction = filtered.substring(dotIndex + 1).filter { it.isDigit() }.take(2)
-    return "$integer.$fraction"
-}
+/** 考试周 / 寒暑假区间编辑区块：可折叠，展示已有区间并可新增、删除。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun RangeSection(
+    title: String,
+    ranges: List<DateRange>,
+    onAdd: (DateRange) -> Unit,
+    onRemove: (Int) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var draftStart by remember { mutableStateOf<LocalDate?>(null) }
+    var draftEnd by remember { mutableStateOf<LocalDate?>(null) }
+    var showStartPicker by remember { mutableStateOf(false) }
+    var showEndPicker by remember { mutableStateOf(false) }
+    var rangeError by remember { mutableStateOf<String?>(null) }
 
-/** 将预算文本解析为「分」；空串、非法文本或结果 ≤0 均返回 null。 */
-private fun parseBudgetToCents(text: String): Long? {
-    val trimmed = text.trim()
-    if (trimmed.isEmpty()) return null
-    if (trimmed.count { it == '.' } > 1) return null
-    if (!trimmed.all { it.isDigit() || it == '.' }) return null
-    val parts = trimmed.split('.')
-    val integer = parts[0]
-    val fraction = parts.getOrNull(1) ?: ""
-    if (integer.isEmpty()) return null
-    if (fraction.length > 2) return null
-    val yuan = integer.toLongOrNull() ?: return null
-    if (yuan > Long.MAX_VALUE / 100L) return null
-    val cents = when (fraction.length) {
-        0 -> 0L
-        1 -> (fraction[0] - '0') * 10L
-        else -> (fraction[0] - '0') * 10L + (fraction[1] - '0')
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { expanded = !expanded },
+    ) {
+        Text(
+            title,
+            style = MaterialTheme.typography.titleSmall,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(
+            imageVector = if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+            contentDescription = if (expanded) "收起" else "展开",
+        )
     }
-    val total = yuan * 100L + cents
-    return if (total > 0L) total else null
+
+    if (expanded) {
+        Spacer(Modifier.height(8.dp))
+        ranges.forEachIndexed { index, range ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${range.start.toDisplayText()} ~ ${range.endInclusive.toDisplayText()}",
+                    style = MaterialTheme.typography.bodyMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                IconButton(onClick = { onRemove(index) }) {
+                    Icon(Icons.Default.Delete, contentDescription = "删除区间")
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ReadOnlyDateField(
+                value = draftStart?.toDisplayText() ?: "开始",
+                label = "开始",
+                onClick = { showStartPicker = true },
+                modifier = Modifier.weight(1f),
+            )
+            Text(
+                "~",
+                Modifier.padding(horizontal = 8.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ReadOnlyDateField(
+                value = draftEnd?.toDisplayText() ?: "结束",
+                label = "结束",
+                onClick = { showEndPicker = true },
+                modifier = Modifier.weight(1f),
+            )
+        }
+        Row {
+            Spacer(Modifier.weight(1f))
+            TextButton(
+                onClick = {
+                    val start = draftStart
+                    val end = draftEnd
+                    when {
+                        start == null || end == null -> rangeError = "请选择起止日期"
+                        start.isAfter(end) -> rangeError = "开始日期要早于结束日期"
+                        else -> {
+                            onAdd(DateRange(start, end))
+                            draftStart = null
+                            draftEnd = null
+                            rangeError = null
+                        }
+                    }
+                },
+            ) {
+                Text("添加区间")
+            }
+        }
+        rangeError?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+
+    if (showStartPicker) {
+        DatePickerSheet(
+            initialDate = draftStart ?: LocalDate.now(),
+            onConfirm = {
+                draftStart = it
+                showStartPicker = false
+            },
+            onDismiss = { showStartPicker = false },
+        )
+    }
+    if (showEndPicker) {
+        DatePickerSheet(
+            initialDate = draftEnd ?: LocalDate.now(),
+            onConfirm = {
+                draftEnd = it
+                showEndPicker = false
+            },
+            onDismiss = { showEndPicker = false },
+        )
+    }
 }
 
 /** 分 → 预算输入文本：整数元省略小数，否则保留两位。 */
@@ -252,11 +374,3 @@ private fun centsToBudgetText(cents: Long): String =
 
 private fun LocalDate.toDisplayText(): String =
     String.format(Locale.US, "%04d-%02d-%02d", year, monthValue, dayOfMonth)
-
-private fun LocalDate.toEpochMillis(): Long =
-    atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-private fun Long.toLocalDate(): LocalDate =
-    Instant.ofEpochMilli(this).atZone(ZoneId.systemDefault()).toLocalDate()
-
-private const val MAX_INTEGER_DIGITS = 9
