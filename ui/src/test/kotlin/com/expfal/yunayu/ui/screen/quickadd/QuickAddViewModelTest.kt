@@ -249,6 +249,44 @@ class QuickAddViewModelTest {
         assertEquals(mapOf(1L to "学习", 2L to "社交"), viewModel.uiState.value.rootNameById)
     }
 
+    @Test
+    fun `loadAllTags groups children by root`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+            childrenByParent = mapOf(
+                1L to listOf(tag(5L, "教材", parentId = 1L)),
+                2L to listOf(tag(6L, "社团", parentId = 2L)),
+            )
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        viewModel.loadAllTags()
+        runCurrent()
+
+        val mapping = viewModel.uiState.value.allTagsByRoot
+        assertEquals(2, mapping.size)
+        assertEquals(listOf(tag(5L, "教材", parentId = 1L)), mapping[tag(1L, "学习")])
+        assertEquals(listOf(tag(6L, "社团", parentId = 2L)), mapping[tag(2L, "社交")])
+    }
+
+    @Test
+    fun `save failure refreshes suggested tags with latest data`() = runTest {
+        val txRepo = FakeTransactionRepository().apply { addError = RuntimeException("db down") }
+        val tagRepo = FakeTagRepository().apply { recentTags = listOf(tag(1L, "学习")) }
+        val viewModel = viewModel(tagRepo, txRepo)
+        runCurrent()
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
+
+        tagRepo.recentTags = listOf(tag(2L, "社交"))
+        viewModel.onDigit('5')
+        viewModel.onSave()
+        runCurrent()
+
+        assertTrue(viewModel.uiState.value.saveFailed)
+        assertEquals(listOf(tag(2L, "社交")), viewModel.uiState.value.suggestedTags)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository,
         txRepo: TransactionRepository,
@@ -265,11 +303,13 @@ class QuickAddViewModelTest {
 
         var recentTags: List<Tag> = emptyList()
         var rootTags: List<Tag> = emptyList()
+        var childrenByParent: Map<Long, List<Tag>> = emptyMap()
         var recentError: Throwable? = null
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())
 
-        override suspend fun getChildren(parentId: Long?): List<Tag> = rootTags
+        override suspend fun getChildren(parentId: Long?): List<Tag> =
+            if (parentId == null) rootTags else childrenByParent[parentId] ?: emptyList()
 
         override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> {
             recentError?.let { throw it }

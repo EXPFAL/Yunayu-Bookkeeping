@@ -29,6 +29,7 @@ data class QuickAddUiState(
     val saveFailed: Boolean = false,
     val confirmRequested: Boolean = false,
     val rootNameById: Map<Long, String> = emptyMap(),
+    val allTagsByRoot: Map<Tag, List<Tag>> = emptyMap(),
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -96,6 +97,36 @@ class QuickAddViewModel @Inject constructor(
             }
             .getOrDefault(emptyList())
             .associate { it.id to it.name }
+
+    /**
+     * 加载全部标签并按根分组，供「更多分类」选择层展示（根标签自身也在分组内）。
+     *
+     * 根列表经 `getChildren(null)` 获取，再逐根 `getChildren(rootId)` 拉子标签；任一失败
+     * 降级为空列表并记日志，[kotlinx.coroutines.CancellationException] 直接重抛，绝不阻塞记账。
+     */
+    fun loadAllTags() {
+        viewModelScope.launch {
+            val mapping = runCatching { loadAllTagsByRoot() }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to load all tags", throwable)
+                }
+                .getOrDefault(emptyMap())
+            _uiState.update { it.copy(allTagsByRoot = mapping) }
+        }
+    }
+
+    private suspend fun loadAllTagsByRoot(): Map<Tag, List<Tag>> {
+        val roots = tagRepository.getChildren(parentId = null)
+        return roots.associateWith { root ->
+            runCatching { tagRepository.getChildren(parentId = root.id) }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to load children for root ${root.id}", throwable)
+                }
+                .getOrDefault(emptyList())
+        }
+    }
 
     /** 加载建议分类；useCase 失败时回退根标签，仍失败则保持空列表。 */
     private suspend fun loadSuggestedTags(): List<Tag> {
@@ -179,9 +210,11 @@ class QuickAddViewModel @Inject constructor(
                     )
                 }
             }.onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.e(TAG, "Failed to save transaction", throwable)
                 _events.tryEmit(QuickAddEvent.SaveFailed)
                 _uiState.update { it.copy(saving = false, saveFailed = true) }
+                refreshSuggestedTags()
             }
         }
     }

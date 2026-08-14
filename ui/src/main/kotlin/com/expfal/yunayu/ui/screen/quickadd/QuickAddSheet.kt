@@ -1,5 +1,6 @@
 package com.expfal.yunayu.ui.screen.quickadd
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -8,11 +9,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
@@ -20,12 +27,18 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.ui.util.formatCents
 import com.expfal.yunayu.ui.util.tagDisplayName
 import com.expfal.yunayu.ui.util.vibrateSuccess
@@ -45,6 +58,7 @@ fun QuickAddSheet(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    var showTagPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         viewModel.refreshSuggestedTags()
@@ -88,22 +102,27 @@ fun QuickAddSheet(
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            if (uiState.suggestedTags.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    uiState.suggestedTags.forEach { tag ->
-                        FilterChip(
-                            selected = uiState.selectedTagId == tag.id,
-                            onClick = { viewModel.onSelectTag(tag.id) },
-                            label = { Text(tagDisplayName(tag, uiState.rootNameById)) },
-                        )
-                    }
+            Spacer(modifier = Modifier.height(16.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                uiState.suggestedTags.forEach { tag ->
+                    FilterChip(
+                        selected = uiState.selectedTagId == tag.id,
+                        onClick = { viewModel.onSelectTag(tag.id) },
+                        label = { Text(tagDisplayName(tag, uiState.rootNameById)) },
+                    )
                 }
+                AssistChip(
+                    onClick = {
+                        viewModel.loadAllTags()
+                        showTagPicker = true
+                    },
+                    label = { Text("更多") },
+                )
             }
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -133,6 +152,87 @@ fun QuickAddSheet(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
+        }
+    }
+
+    if (showTagPicker) {
+        TagPickerSheet(
+            allTagsByRoot = uiState.allTagsByRoot,
+            selectedTagId = uiState.selectedTagId,
+            onSelect = { tagId ->
+                viewModel.onSelectTag(tagId)
+                showTagPicker = false
+            },
+            onDismiss = { showTagPicker = false },
+        )
+    }
+}
+
+/** 「更多分类」选择层：按根分组展示全部子标签（根标签自身也可选），点选即选中并关闭。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TagPickerSheet(
+    allTagsByRoot: Map<Tag, List<Tag>>,
+    selectedTagId: Long?,
+    onSelect: (Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    ModalBottomSheet(onDismissRequest = onDismiss) {
+        Text(
+            text = "选择标签",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.padding(horizontal = 24.dp),
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (allTagsByRoot.isEmpty()) {
+            Text(
+                text = "暂无可用标签",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
+            )
+        } else {
+            LazyColumn(modifier = Modifier.fillMaxWidth().padding(bottom = 28.dp)) {
+                allTagsByRoot.forEach { (root, children) ->
+                    item(key = "root-${root.id}") {
+                        Text(
+                            text = root.name,
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp),
+                        )
+                    }
+                    item(key = "self-${root.id}") {
+                        TagPickerRow(tag = root, selected = selectedTagId == root.id, onClick = { onSelect(root.id) })
+                    }
+                    items(children, key = { it.id }) { child ->
+                        TagPickerRow(tag = child, selected = selectedTagId == child.id, onClick = { onSelect(child.id) })
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** 选择层中的单个可点选标签行。 */
+@Composable
+private fun TagPickerRow(tag: Tag, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 24.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            text = tag.name,
+            modifier = Modifier.weight(1f),
+            style = MaterialTheme.typography.bodyLarge,
+            color = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
+        if (selected) {
+            Icon(Icons.Default.Check, contentDescription = "已选", tint = MaterialTheme.colorScheme.primary)
         }
     }
 }
