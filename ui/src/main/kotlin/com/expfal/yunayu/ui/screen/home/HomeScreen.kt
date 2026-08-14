@@ -1,6 +1,5 @@
 package com.expfal.yunayu.ui.screen.home
 
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,15 +17,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.ui.screen.budget.BudgetCard
+import com.expfal.yunayu.ui.screen.budget.BudgetViewModel
+import com.expfal.yunayu.ui.screen.budget.SemesterSetupSheet
 import com.expfal.yunayu.ui.screen.quickadd.QuickAddSheet
 
-/** 首页：悬浮「快速记账」按钮唤起快捷记账弹层，主体展示极简欢迎文案。 */
+/** 首页：预算看板卡片置顶，悬浮「快速记账」按钮唤起快捷记账弹层。 */
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
     var showQuickAdd by remember { mutableStateOf(false) }
+    var showSemesterSetup by remember { mutableStateOf(false) }
+    val budgetViewModel: BudgetViewModel = viewModel()
+    val budgetState by budgetViewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
         modifier = modifier,
@@ -41,9 +47,15 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
         ) {
+            BudgetCard(
+                loading = budgetState.loading,
+                semester = budgetState.semester,
+                snapshot = budgetState.snapshot,
+                onEdit = { showSemesterSetup = true },
+                onSetup = { showSemesterSetup = true },
+            )
+            Spacer(modifier = Modifier.height(32.dp))
             Text(text = "Yunayu 记账", style = MaterialTheme.typography.headlineMedium)
             Spacer(modifier = Modifier.height(8.dp))
             Text(
@@ -58,6 +70,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         QuickAddSheet(
             onDismissRequest = { showQuickAdd = false },
             onSaved = { showQuickAdd = false },
+        )
+    }
+    if (showSemesterSetup) {
+        SemesterSetupSheet(
+            viewModel = budgetViewModel,
+            onDismissRequest = { showSemesterSetup = false },
         )
     }
 }
