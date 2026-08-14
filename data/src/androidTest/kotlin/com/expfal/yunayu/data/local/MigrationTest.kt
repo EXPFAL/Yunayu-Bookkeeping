@@ -5,6 +5,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -12,7 +13,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 
 /**
- * Schema v1 → v2 迁移测试（androidTest）。
+ * Schema v1 → v2 与 v2 → v3 迁移测试（androidTest）。
  *
  * 注意：本测试依赖 Android 框架 SQLite，需在设备/模拟器上执行；本机无模拟器/设备，
  * 故写好但不在本机运行，接入 CI 后启用。
@@ -56,6 +57,46 @@ class MigrationTest {
 
         db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_tags_parent_id_name'")
             .use { cursor -> assertTrue(cursor.moveToFirst()) }
+    }
+
+    @Test
+    fun migrate2To3_dropsSemesterTablesAndPreservesTransactionsAndTags() {
+        helper.createDatabase(TEST_DB, 2).apply {
+            execSQL(
+                "INSERT INTO tags (name, parent_id, sort_order, icon, created_at, updated_at) " +
+                    "VALUES ('学习', NULL, 0, '📚', 1, 1)",
+            )
+            execSQL(
+                "INSERT INTO transactions (amount_cents, type, note, tag_id, occurred_at, created_at) " +
+                    "VALUES (100, 'EXPENSE', NULL, 1, 1, 1)",
+            )
+            execSQL(
+                "INSERT INTO semesters (name, start_date, end_date, total_budget_cents) " +
+                    "VALUES ('2026春', '2026-02-23', '2026-06-28', 10000)",
+            )
+            execSQL(
+                "INSERT INTO date_ranges (semester_id, range_type, start_date, end_date) " +
+                    "VALUES (1, 'EXAM_WEEK', '2026-04-20', '2026-04-26')",
+            )
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 3, true, YunayuDatabase.MIGRATION_2_3)
+
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'semesters'")
+            .use { cursor -> assertFalse(cursor.moveToFirst()) }
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'date_ranges'")
+            .use { cursor -> assertFalse(cursor.moveToFirst()) }
+
+        db.query("SELECT amount_cents FROM transactions WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(100L, cursor.getLong(0))
+        }
+        db.query("SELECT name FROM tags WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("学习", cursor.getString(0))
+        }
     }
 
     private companion object {

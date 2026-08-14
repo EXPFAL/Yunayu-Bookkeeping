@@ -1,9 +1,14 @@
 package com.expfal.yunayu.data.repository
 
+import com.expfal.yunayu.data.local.dao.TransactionDao
+import com.expfal.yunayu.data.local.entity.TransactionEntity
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
@@ -56,5 +61,51 @@ class TransactionRepositoryImplTest {
         assertEquals("INCOME", entity.type)
         assertEquals("奖学金", entity.note)
         assertEquals(null, entity.tagId)
+    }
+
+    @Test
+    fun `observeExpenseSumBetween delegates to dao with window args`() = runTest {
+        val dao = FakeTransactionDao().apply { expenseSumFlow = flowOf(12_345L) }
+        val repository = TransactionRepositoryImpl(dao)
+
+        val sum = repository.observeExpenseSumBetween(100L, 200L).first()
+
+        assertEquals(12_345L, sum)
+        assertEquals(listOf(100L to 200L), dao.expenseSumCalls)
+    }
+
+    @Test
+    fun `observeRecent maps rows including null tagName`() = runTest {
+        val dao = FakeTransactionDao().apply {
+            recentRowsFlow = flowOf(
+                listOf(
+                    TransactionDao.RecentTransactionRow(
+                        transaction = TransactionEntity(
+                            id = 7L,
+                            amountCents = 2500L,
+                            type = "EXPENSE",
+                            note = null,
+                            tagId = null,
+                            occurredAt = 900L,
+                            createdAt = 1L,
+                        ),
+                        tagName = null,
+                        tagIcon = null,
+                    ),
+                ),
+            )
+        }
+        val repository = TransactionRepositoryImpl(dao)
+
+        val recent = repository.observeRecent(5).first()
+
+        assertEquals(1, recent.size)
+        val row = recent.single()
+        assertEquals(7L, row.id)
+        assertEquals(2500L, row.amountCents)
+        assertEquals(TransactionType.EXPENSE, row.type)
+        assertNull(row.tagName)
+        assertEquals(900L, row.occurredAt)
+        assertEquals(listOf(5), dao.recentCalls)
     }
 }
