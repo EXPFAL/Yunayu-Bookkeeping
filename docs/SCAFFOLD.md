@@ -2,7 +2,7 @@
 
 > 对齐文档：`docs/PRD.md`（PRD v1）
 > 分支：develop
-> MVP 范围红线（来自 PRD 第四节）：仅 P0 三项（3 秒极速记账 / 学期预算看板 / 学业关联标签）+ P1 自然语言记账。P2（课程表联动、兼职/奖学金追踪）与 PRD 第二节明确砍掉的功能一律不在本计划中出现。
+> MVP 范围红线（来自 PRD 第四节）：仅 P0 三项（3 秒极速记账 / 每月预算看板 / 学业关联标签）+ P1 自然语言记账。P2（课程表联动、兼职/奖学金追踪）与 PRD 第二节明确砍掉的功能一律不在本计划中出现。
 >
 > 本计划只定义工程结构与接口草图，不包含任何实现代码。
 
@@ -186,6 +186,8 @@ data class TagEntity(
 
 ## 5. 学期预算引擎接口签名草图（仅 interface，不写实现）
 
+> 本节为历史记录：学期引擎已随 §10 月度预算改造废止。
+
 对应 PRD P0-2「学期预算看板」：按学期设总预算 → 自动拆解周/月可用额度 → 进度条预警；考试周/寒暑假自动切换预算策略。
 
 ```kotlin
@@ -272,6 +274,8 @@ interface SemesterBudgetEngine {
 
 ### 7.4 v3 已知欠账
 
+> 本节为历史记录：学期引擎已随 §10 月度预算改造废止。
+
 以下为 Schema v2 遗留、留待 v3 迁移解决的已知欠账：
 
 1. **`date_ranges.range_type` 无 CHECK 约束**：非法取值无法在 DB 层拦截，目前仅由仓储层映射时丢弃并在日志告警。
@@ -303,8 +307,10 @@ interface SemesterBudgetEngine {
 
 ### 8.3 JVM 单元测试（data/src/test）
 
-- `SemesterRepositoryImplTest`：手写 fake `SemesterDao` / `SemesterDateRangeDao` + `FakeYunayuDatabase`（不引入 mock 库，覆盖 `RoomDatabase` 事务执行器与事务边界方法使 `withTransaction` 可在 JVM 执行），`runTest` 覆盖：save 新增（id=0 走 insert 并写区间）、save 更新（update 返回 1）、save 陈旧 id（update 返回 0 抛 `IllegalStateException`）、区间重写只删 `KNOWN_RANGE_TYPES`、observeAll 组装完整区间、非法日期记录被过滤且不崩溃、未知 rangeType 被过滤。
-- `TagRepositoryImplTest`：`getChildren` 映射正确性的基础用例。
+- `MonthlyBudgetRepositoryImplTest`：以 [PreferenceDataStoreFactory.create] 临时文件直测生产常量 `MONTHLY_BUDGET_CENTS_KEY` 的读写语义（初值 0、写后可读、覆盖写）。
+- `TagRepositoryImplTest`：`getChildren` 实体→领域映射、缺失父节点返回空列表、`getRecentUsedTags` 聚合行映射与入参透传。
+- `TransactionRepositoryImplTest`：`add` 支出/收入字段映射、`observeExpenseSumBetween` 窗口透传、`observeRecent` 行映射（含 tagName 为空）。
+- `TestFakes`：手写 fake DAO/仓储（不引入 mock 库）。
 
 运行方式：`./gradlew.bat test`（主命令，覆盖 :domain JVM 模块等全部本地单测）；`testDebugUnitTest` 仅覆盖 Android 模块（:app/:data/:ui）的本地单测，不含 :domain 的 JVM 测试任务。
 
@@ -326,6 +332,8 @@ interface SemesterBudgetEngine {
 - **千分位为统一展示规范**：`formatCents` 输出带千分位 + 固定两位小数；Sprint 1 QuickAdd 展示基线同步遵循该规范。
 
 ### 9.2 推迟项
+
+> 本节为历史记录：学期引擎已随 §10 月度预算改造废止。
 
 - **历史学期查阅与自动归档推迟**：数据保全（`semesters` 全量落库、引擎支持任意 `semesterId` 计算），但历史学期列表/切换 UI 待后续迭代。
 
@@ -357,6 +365,7 @@ interface SemesterBudgetEngine {
 ### 10.3 Schema v3 与 MIGRATION_2_3
 
 - schema 版本 2 → 3：`MIGRATION_2_3` 以事务包裹 `DROP TABLE date_ranges` 与 `DROP TABLE semesters`（先删区间子表再删学期主表），`transactions` / `tags` 表不变。
+- 升级影响：v2 存量学期配置随表删除一并清除、不做数据迁移（用户已确认废弃学期维度）；`tags` / `transactions` 两表及数据不受影响。
 - 导出 schema 见 `data/schemas/com.expfal.yunayu.data.local.YunayuDatabase/3.json`。
 
 ### 10.4 约束废止与门禁
