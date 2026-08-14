@@ -64,7 +64,7 @@ abstract class YunayuDatabase : RoomDatabase() {
                             "`icon` TEXT, " +
                             "`created_at` INTEGER NOT NULL, " +
                             "`updated_at` INTEGER NOT NULL, " +
-                            "FOREIGN KEY(`parent_id`) REFERENCES `tags_new`(`id`) " +
+                            "FOREIGN KEY(`parent_id`) REFERENCES `tags`(`id`) " +
                             "ON UPDATE NO ACTION ON DELETE CASCADE )",
                     )
                     db.execSQL(
