@@ -6,24 +6,24 @@ import com.expfal.yunayu.domain.repository.TagRepository
 /**
  * 预测用户最近常用的标签类别，支撑「3秒极速记账」首页快捷入口。
  *
- * 优先返回过去 7 天内按交易频次降序的已用标签（最多 [DEFAULT_LIMIT] 个）；
- * 若该时间窗内没有任何交易记录，则回退为全部根节点标签，保证入口始终可用。
+ * 单一返回路径：先取过去 7 天内按交易频次降序的已用标签（最多 [DEFAULT_LIMIT] 个），
+ * 再用根节点标签补足缺口（与已用标签按 `id` 去重），最终裁剪到 [DEFAULT_LIMIT] 个。
+ * 根节点不足时按实际数量返回，保证入口始终可用。
  */
 class GetRecentCategoriesUseCase(
     private val tagRepository: TagRepository,
 ) {
 
-    /** 返回最近常用标签；近 7 天无记录时回退根标签。 */
+    /** 返回补足后的最近常用标签（去重后不超过 [DEFAULT_LIMIT] 个）。 */
     suspend operator fun invoke(nowEpochMillis: Long = System.currentTimeMillis()): List<Tag> {
         val recent = tagRepository.getRecentUsedTags(
             sinceEpochMillis = nowEpochMillis - SEVEN_DAYS_MILLIS,
             limit = DEFAULT_LIMIT,
         )
-        return if (recent.isEmpty()) {
-            tagRepository.getChildren(parentId = null)
-        } else {
-            recent
-        }
+        val roots = runCatching { tagRepository.getChildren(parentId = null) }
+            .getOrDefault(emptyList())
+        return (recent + roots.filter { root -> recent.none { it.id == root.id } })
+            .take(DEFAULT_LIMIT)
     }
 
     private companion object {

@@ -15,17 +15,20 @@ class GetRecentCategoriesUseCaseTest {
     private val sevenDaysMillis = 7L * 24 * 60 * 60 * 1000
 
     @Test
-    fun `returns recent tags directly when non-empty`() = runTest {
+    fun `tops up recent tags with root tags up to limit`() = runTest {
         val recent = listOf(tag(11L, "教材"), tag(12L, "考证"))
         val repository = FakeTagRepository().apply {
             this.recentTags = recent
-            this.rootTags = listOf(tag(1L, "学习"))
+            this.rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"), tag(3L, "生活"))
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
         val result = useCase(now)
 
-        assertEquals(recent, result)
+        assertEquals(
+            listOf(tag(11L, "教材"), tag(12L, "考证"), tag(1L, "学习"), tag(2L, "社交")),
+            result,
+        )
     }
 
     @Test
@@ -51,6 +54,53 @@ class GetRecentCategoriesUseCaseTest {
         val result = useCase(now)
 
         assertEquals(root, result)
+    }
+
+    @Test
+    fun `fills up to four when only one recent tag`() = runTest {
+        val repository = FakeTagRepository().apply {
+            this.recentTags = listOf(tag(11L, "教材"))
+            this.rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"), tag(3L, "生活"), tag(4L, "娱乐"))
+        }
+        val useCase = GetRecentCategoriesUseCase(repository)
+
+        val result = useCase(now)
+
+        assertEquals(4, result.size)
+        assertEquals(
+            listOf(tag(11L, "教材"), tag(1L, "学习"), tag(2L, "社交"), tag(3L, "生活")),
+            result,
+        )
+    }
+
+    @Test
+    fun `deduplicates root tags already present in recent`() = runTest {
+        val repository = FakeTagRepository().apply {
+            this.recentTags = listOf(tag(1L, "学习"), tag(11L, "教材"))
+            this.rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"), tag(3L, "生活"))
+        }
+        val useCase = GetRecentCategoriesUseCase(repository)
+
+        val result = useCase(now)
+
+        assertEquals(
+            listOf(tag(1L, "学习"), tag(11L, "教材"), tag(2L, "社交"), tag(3L, "生活")),
+            result,
+        )
+    }
+
+    @Test
+    fun `does not append roots when recent already has four`() = runTest {
+        val recent = listOf(tag(11L, "教材"), tag(12L, "考证"), tag(13L, "实习"), tag(14L, "聚餐"))
+        val repository = FakeTagRepository().apply {
+            this.recentTags = recent
+            this.rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val useCase = GetRecentCategoriesUseCase(repository)
+
+        val result = useCase(now)
+
+        assertEquals(recent, result)
     }
 
     private fun tag(id: Long, name: String) = Tag(

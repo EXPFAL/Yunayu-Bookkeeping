@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.usecase
 
+import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.repository.TransactionRepository
@@ -61,5 +62,13 @@ class AddTransactionUseCaseTest {
         override fun observeAll(): Flow<List<Transaction>> = flowOf(emptyList())
 
         override fun observeByTag(tagId: Long): Flow<List<Transaction>> = flowOf(emptyList())
+
+        override fun observeExpenseSumBetween(
+            startInclusiveMs: Long,
+            endExclusiveMs: Long,
+        ): Flow<Long> = flowOf(0L)
+
+        override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
+            flowOf(emptyList())
     }
 }
