@@ -1,6 +1,7 @@
 package com.expfal.yunayu.domain.usecase
 
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -103,10 +104,43 @@ class GetRecentCategoriesUseCaseTest {
         assertEquals(recent, result)
     }
 
-    private fun tag(id: Long, name: String) = Tag(
+    @Test
+    fun `keeps sub-tags in recent and fills up with roots`() = runTest {
+        val recent = listOf(tag(11L, "教材", 1L), tag(12L, "考证", 1L))
+        val repository = FakeTagRepository().apply {
+            this.recentTags = recent
+            this.rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"), tag(3L, "生活"))
+        }
+        val useCase = GetRecentCategoriesUseCase(repository)
+
+        val result = useCase(now)
+
+        assertEquals(
+            listOf(tag(11L, "教材", 1L), tag(12L, "考证", 1L), tag(1L, "学习"), tag(2L, "社交")),
+            result,
+        )
+    }
+
+    @Test
+    fun `deduplicates sub-tag against root by id`() = runTest {
+        val repository = FakeTagRepository().apply {
+            this.recentTags = listOf(tag(1L, "高数", 1L))
+            this.rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"), tag(3L, "生活"), tag(4L, "娱乐"))
+        }
+        val useCase = GetRecentCategoriesUseCase(repository)
+
+        val result = useCase(now)
+
+        assertEquals(
+            listOf(tag(1L, "高数", 1L), tag(2L, "社交"), tag(3L, "生活"), tag(4L, "娱乐")),
+            result,
+        )
+    }
+
+    private fun tag(id: Long, name: String, parentId: Long? = null) = Tag(
         id = id,
         name = name,
-        parentId = null,
+        parentId = parentId,
         sortOrder = 0,
         icon = null,
         createdAt = 100L,
@@ -132,5 +166,13 @@ class GetRecentCategoriesUseCaseTest {
         }
 
         override suspend fun updateSortOrder(tags: List<Tag>) = Unit
+
+        override suspend fun addSubTag(parentId: Long, name: String, icon: String?): Long = 0L
+
+        override suspend fun renameTag(tagId: Long, newName: String) = Unit
+
+        override suspend fun getDeleteImpact(tagId: Long): TagDeleteImpact = TagDeleteImpact(0, 0, emptyList())
+
+        override suspend fun deleteTag(tagId: Long) = Unit
     }
 }
