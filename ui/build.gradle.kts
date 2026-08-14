@@ -27,6 +27,15 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+
+    // 本地单元测试启用 JUnit5；isReturnDefaultValues 使 android.util.Log 等 Android stub
+    // 返回默认值而非抛「not mocked」，供 ViewModel 单测使用
+    testOptions {
+        unitTests.all {
+            it.useJUnitPlatform()
+        }
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -45,4 +54,7 @@ dependencies {
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
+
+    testImplementation(libs.junit.jupiter)
+    testImplementation(libs.kotlinx.coroutines.test)
 }
