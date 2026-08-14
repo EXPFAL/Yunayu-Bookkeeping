@@ -14,6 +14,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,47 +28,57 @@ import com.expfal.yunayu.ui.screen.budget.BudgetCard
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetSheet
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetViewModel
 import com.expfal.yunayu.ui.screen.quickadd.QuickAddSheet
+import com.expfal.yunayu.ui.screen.tagmanage.TagManageScreen
 
 /** 首页：月度预算看板卡片置顶，下方最近记录列表，悬浮「快速记账」按钮唤起快捷记账弹层。 */
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
     var showQuickAdd by remember { mutableStateOf(false) }
     var showBudgetSetup by remember { mutableStateOf(false) }
+    var showTagManage by remember { mutableStateOf(false) }
     val budgetViewModel: MonthlyBudgetViewModel = viewModel()
     val budgetState by budgetViewModel.uiState.collectAsStateWithLifecycle()
     val homeViewModel: HomeViewModel = viewModel()
     val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
 
-    Scaffold(
-        modifier = modifier,
-        floatingActionButton = {
-            FloatingActionButton(onClick = { showQuickAdd = true }) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
-            }
-        },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(24.dp),
-        ) {
-            BudgetCard(
-                loading = budgetState.loading,
-                budgetCents = budgetState.budgetCents,
-                snapshot = budgetState.snapshot,
-                onEdit = { showBudgetSetup = true },
-                onSetup = { showBudgetSetup = true },
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            if (!homeState.loading && homeState.recent.isEmpty()) {
-                FirstRunHint()
+    if (showTagManage) {
+        TagManageScreen(onBack = { showTagManage = false })
+    } else {
+        Scaffold(
+            modifier = modifier,
+            floatingActionButton = {
+                FloatingActionButton(onClick = { showQuickAdd = true }) {
+                    Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
+                }
+            },
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(24.dp),
+            ) {
+                BudgetCard(
+                    loading = budgetState.loading,
+                    budgetCents = budgetState.budgetCents,
+                    snapshot = budgetState.snapshot,
+                    onEdit = { showBudgetSetup = true },
+                    onSetup = { showBudgetSetup = true },
+                )
                 Spacer(modifier = Modifier.height(16.dp))
+                TextButton(onClick = { showTagManage = true }) {
+                    Text("管理标签")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
+                if (!homeState.loading && homeState.recent.isEmpty()) {
+                    FirstRunHint()
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+                RecentTransactionsCard(
+                    uiState = homeState,
+                    modifier = Modifier.weight(1f),
+                )
             }
-            RecentTransactionsCard(
-                uiState = homeState,
-                modifier = Modifier.weight(1f),
-            )
         }
     }
 
