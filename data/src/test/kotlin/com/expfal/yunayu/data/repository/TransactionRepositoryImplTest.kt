@@ -14,6 +14,7 @@ class TransactionRepositoryImplTest {
     fun `add maps expense transaction fields to entity`() = runTest {
         val dao = FakeTransactionDao().apply { nextInsertId = 42L }
         val repository = TransactionRepositoryImpl(dao)
+        val now = System.currentTimeMillis()
 
         val id = repository.add(
             Transaction(
@@ -28,7 +29,7 @@ class TransactionRepositoryImplTest {
         assertEquals(42L, id)
         val entity = dao.inserted.single()
         assertEquals("EXPENSE", entity.type)
-        assertTrue(entity.createdAt >= 0L)
+        assertTrue(entity.createdAt in (now - 5_000L)..(now + 5_000L))
         assertEquals(2500L, entity.amountCents)
         assertEquals(null, entity.note)
         assertEquals(3L, entity.tagId)

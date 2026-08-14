@@ -3,6 +3,7 @@ package com.expfal.yunayu.ui.util
 import android.content.Context
 import android.os.VibrationEffect
 import android.os.Vibrator
+import androidx.core.content.ContextCompat
 
 /**
  * 记账成功后的轻量触觉反馈（30ms 单次震动）。
@@ -11,7 +12,7 @@ import android.os.Vibrator
  */
 fun Context.vibrateSuccess() {
     runCatching {
-        (getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator)
+        ContextCompat.getSystemService(this, Vibrator::class.java)
             ?.takeIf { it.hasVibrator() }
             ?.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE))
     }
