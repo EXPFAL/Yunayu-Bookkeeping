@@ -1,6 +1,7 @@
 package com.expfal.yunayu.ui.util
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertSame
 import org.junit.jupiter.api.Test
 
 /** [moveItem] 与 [reorderTargetIndex] 纯函数的 JVM 单元测试。 */
@@ -42,5 +43,12 @@ class ReorderTest {
         assertEquals(-4, reorderTargetIndex(5, 100, -9999f))
         assertEquals(0, reorderTargetIndex(1, 100, 500f))
         assertEquals(0, reorderTargetIndex(5, 0, 500f))
+    }
+
+    @Test
+    fun `long press without movement yields original list reference`() {
+        val list = listOf(1, 2, 3)
+        assertEquals(0, reorderTargetIndex(itemCount = 3, itemHeight = 100, dragOffsetY = 0f))
+        assertSame(list, moveItem(list, 0, 0))
     }
 }

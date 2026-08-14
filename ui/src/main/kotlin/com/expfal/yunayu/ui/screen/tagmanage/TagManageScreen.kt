@@ -81,11 +81,20 @@ fun TagManageScreen(
     var addRoot by remember { mutableStateOf<Tag?>(null) }
     var addSubmitted by remember { mutableStateOf(false) }
 
-    BackHandler(onBack = onBack)
+    val handleBack = {
+        viewModel.cancelDelete()
+        viewModel.dismissRename()
+        viewModel.clearError()
+        onBack()
+    }
+    BackHandler(onBack = handleBack)
 
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
-            if (event is TagManageEvent.Failed) snackbarHostState.showSnackbar("操作失败，请重试")
+            when (event) {
+                TagManageEvent.Deleted -> snackbarHostState.showSnackbar("已删除")
+                TagManageEvent.Failed -> snackbarHostState.showSnackbar("操作失败，请重试")
+            }
         }
     }
 
@@ -109,7 +118,7 @@ fun TagManageScreen(
             TopAppBar(
                 title = { Text("标签管理") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = handleBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
                 },
@@ -133,6 +142,7 @@ fun TagManageScreen(
                             onAdd = {
                                 addRoot = root
                                 addSubmitted = false
+                                viewModel.clearError()
                             },
                         )
                     }
@@ -162,7 +172,9 @@ fun TagManageScreen(
                                 if (current != target) dragList = moveItem(dragList, current, target)
                             },
                             onDragEnd = {
-                                viewModel.onReorder(root.id, dragList)
+                                if (dragList != uiState.childrenByRoot[root.id].orEmpty()) {
+                                    viewModel.onReorder(root.id, dragList)
+                                }
                                 clearDrag()
                             },
                             onDragCancel = { clearDrag() },
@@ -374,9 +386,17 @@ private fun DeleteConfirmDialog(
     onDismiss: () -> Unit,
 ) {
     val childrenCount = (impact.subtreeNodeCount - 1).coerceAtLeast(0)
+    val childNames = impact.subtreeNames.drop(1)
+    val nameSnippet = when {
+        childNames.isEmpty() -> ""
+        childNames.size > 3 -> "（${childNames.take(3).joinToString("、")} 等）"
+        else -> "（${childNames.joinToString("、")}）"
+    }
     val message = buildString {
         if (childrenCount > 0) {
-            append("删除「${tag.name}」会同时删除 $childrenCount 个子标签，")
+            append("删除「${tag.name}」会同时删除 $childrenCount 个子标签")
+            append(nameSnippet)
+            append("，")
         }
         append("${impact.affectedTransactionCount} 笔记账将变为未分类，确定吗？")
     }

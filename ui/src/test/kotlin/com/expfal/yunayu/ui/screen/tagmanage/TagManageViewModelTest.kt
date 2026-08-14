@@ -194,6 +194,26 @@ class TagManageViewModelTest {
         assertFalse(viewModel.uiState.value.busy)
     }
 
+    @Test
+    fun `onReorder success converges with observation flow pushing new order`() = runTest {
+        val repo = fourRootRepo().apply {
+            childrenFlows[1L] = MutableStateFlow(listOf(tag(11, "a", 1L), tag(12, "b", 1L)))
+        }
+        val viewModel = TagManageViewModel(repo)
+        runCurrent()
+
+        val reordered = listOf(tag(12, "b", 1L), tag(11, "a", 1L))
+        viewModel.onReorder(1L, reordered)
+        runCurrent()
+
+        // 模拟持久化成功后观察链重发射新序，最终态应与提交的新序一致
+        repo.childrenFlows.getValue(1L).value = reordered
+        runCurrent()
+
+        assertEquals(reordered, viewModel.uiState.value.childrenByRoot.getValue(1L))
+        assertFalse(viewModel.uiState.value.busy)
+    }
+
     private fun fourRootRepo(): FakeTagRepository {
         val repo = FakeTagRepository()
         val roots = listOf(tag(1, "学习"), tag(2, "社交"), tag(3, "生活"), tag(4, "娱乐"))
