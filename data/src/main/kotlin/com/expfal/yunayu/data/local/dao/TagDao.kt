@@ -28,4 +28,24 @@ interface TagDao {
 
     @Insert
     suspend fun insertAll(tags: List<TagEntity>): List<Long>
+
+    /** 全量加载标签（影响面计算时用于在内存中构建父子邻接表）。 */
+    @Query("SELECT * FROM tags")
+    suspend fun getAll(): List<TagEntity>
+
+    /** 统计指定父节点下同名标签数量（重名校验，父节点为根不适用）。 */
+    @Query("SELECT COUNT(*) FROM tags WHERE parent_id = :parentId AND name = :name")
+    suspend fun countByName(parentId: Long, name: String): Int
+
+    /** 取指定父节点下下一个可用 sortOrder（无子节点时从 0 开始）。 */
+    @Query("SELECT COALESCE(MAX(sort_order), -1) + 1 FROM tags WHERE parent_id = :parentId")
+    suspend fun nextSortOrder(parentId: Long): Int
+
+    /** 按 id 重命名标签并更新 updatedAt。 */
+    @Query("UPDATE tags SET name = :name, updated_at = :updatedAt WHERE id = :tagId")
+    suspend fun renameById(tagId: Long, name: String, updatedAt: Long)
+
+    /** 按 id 删除标签（子树级联由外键 ON DELETE CASCADE 执行）。 */
+    @Query("DELETE FROM tags WHERE id = :tagId")
+    suspend fun deleteById(tagId: Long)
 }

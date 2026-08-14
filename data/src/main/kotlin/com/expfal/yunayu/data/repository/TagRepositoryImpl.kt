@@ -1,21 +1,19 @@
 package com.expfal.yunayu.data.repository
 
+import android.database.sqlite.SQLiteConstraintException
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TagEntity
+import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** [TagRepository] 的 Room 实现。
- *
- * TODO(schema-v2): 当引入子标签新增入口（add）时，需在仓储层对「同父节点同名」做显式防御：
- * 唯一索引 (parent_id, name) 对 NULL parent_id 不生效（SQLite 允许多个 NULL 共存），
- * 因此根节点（parentId == null）的同名校验必须在写入前完成并返回明确错误。
- */
+/** [TagRepository] 的 Room 实现。 */
 @Singleton
 class TagRepositoryImpl @Inject constructor(
     private val tagDao: TagDao,
@@ -36,6 +34,73 @@ class TagRepositoryImpl @Inject constructor(
         tagDao.updateSortOrder(
             tags.mapIndexed { index, tag -> tag.toEntity(sortOrder = index, updatedAt = now) },
         )
+    }
+
+    override suspend fun addSubTag(parentId: Long, name: String, icon: String?): Long {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "标签名不可为空" }
+        return try {
+            if (tagDao.countByName(parentId, trimmed) > 0) {
+                throw DuplicateTagNameException("父标签 $parentId 下已存在同名标签「$trimmed」")
+            }
+            val sortOrder = tagDao.nextSortOrder(parentId)
+            val now = System.currentTimeMillis()
+            tagDao.insert(
+                TagEntity(
+                    id = 0L,
+                    name = trimmed,
+                    parentId = parentId,
+                    sortOrder = sortOrder,
+                    icon = icon,
+                    createdAt = now,
+                    updatedAt = now,
+                ),
+            )
+        } catch (e: SQLiteConstraintException) {
+            throw DuplicateTagNameException("父标签 $parentId 下已存在同名标签「$trimmed」")
+        }
+    }
+
+    override suspend fun renameTag(tagId: Long, newName: String) {
+        val trimmed = newName.trim()
+        if (trimmed.isEmpty()) throw IllegalArgumentException("标签名不可为空")
+        val all = tagDao.getAll()
+        val target = all.firstOrNull { it.id == tagId }
+            ?: throw IllegalArgumentException("标签不存在：$tagId")
+        if (target.parentId == null) throw IllegalArgumentException("根标签不可重命名")
+        if (all.any { it.id != tagId && it.parentId == target.parentId && it.name == trimmed }) {
+            throw DuplicateTagNameException("父标签 ${target.parentId} 下已存在同名标签「$trimmed」")
+        }
+        tagDao.renameById(tagId, trimmed, System.currentTimeMillis())
+    }
+
+    override suspend fun getDeleteImpact(tagId: Long): TagDeleteImpact {
+        val all = tagDao.getAll()
+        val byId = all.associateBy { it.id }
+        if (byId[tagId] == null) throw IllegalArgumentException("标签不存在：$tagId")
+        val childrenByParent = all.groupBy { it.parentId }
+        val visited = linkedSetOf<Long>()
+        val queue = ArrayDeque<Long>()
+        queue.add(tagId)
+        while (queue.isNotEmpty()) {
+            val current = queue.removeFirst()
+            if (!visited.add(current)) continue
+            childrenByParent[current]?.forEach { queue.add(it.id) }
+        }
+        require(visited.isNotEmpty()) { "删除影响面计算异常：子树为空" }
+        val affected = transactionDao.countByTagIds(visited.toList())
+        return TagDeleteImpact(
+            subtreeNodeCount = visited.size,
+            affectedTransactionCount = affected,
+            subtreeNames = visited.map { byId.getValue(it).name },
+        )
+    }
+
+    override suspend fun deleteTag(tagId: Long) {
+        val target = tagDao.getAll().firstOrNull { it.id == tagId }
+            ?: throw IllegalArgumentException("标签不存在：$tagId")
+        if (target.parentId == null) throw IllegalArgumentException("根标签不可删除")
+        tagDao.deleteById(tagId)
     }
 
     private fun TagEntity.toDomain(): Tag = Tag(

@@ -69,4 +69,8 @@ interface TransactionDao {
             "ORDER BY t.occurred_at DESC, t.id DESC LIMIT :limit",
     )
     fun observeRecent(limit: Int): Flow<List<RecentTransactionRow>>
+
+    /** 统计挂在一组标签下的交易数（删除影响面提示）。 */
+    @Query("SELECT COUNT(*) FROM transactions WHERE tag_id IN (:tagIds)")
+    suspend fun countByTagIds(tagIds: List<Long>): Int
 }
