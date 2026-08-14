@@ -41,6 +41,19 @@ abstract class YunayuDatabase : RoomDatabase() {
         )
 
         /**
+         * 种子子标签：根类名 → 子标签名列表（列表顺序即 sortOrder 递增）。
+         *
+         * 来源：用户 2026-06~08 三个月真实账单（307 笔）的消费分类结构归纳，2026-08 决策。
+         * 仅首次建库（onCreate）执行一次，存量库需卸载重装（或经标签管理界面手工添加）才会生效。
+         */
+        private val SEED_SUB_TAGS = mapOf(
+            "学习" to listOf("课本教辅", "考证", "实习", "订阅"),
+            "社交" to listOf("聚餐"),
+            "生活" to listOf("餐饮", "饮品", "交通", "购物", "生活缴费"),
+            "娱乐" to listOf("游戏", "运动", "出游"),
+        )
+
+        /**
          * Schema v1 → v2 迁移（见 SCAFFOLD.md「Schema v2 增强记录」）。
          *
          * 1. tags 表重建：新增自引用外键 parent_id → id (CASCADE) 与唯一索引 (parent_id, name)。
@@ -148,7 +161,12 @@ abstract class YunayuDatabase : RoomDatabase() {
             }
         }
 
-        /** 首次建库种子化四大类根节点（SCAFFOLD.md 4.4）。 */
+        /**
+         * 首次建库种子化四大类根节点及其子标签（SCAFFOLD.md 4.4 / §12）。
+         *
+         * 子标签来源：用户 2026-06~08 真实账单消费结构归纳（2026-08 决策）。
+         * 本回调仅在 onCreate 首次建库事务内执行一次，存量库需卸载重装才会生效。
+         */
         fun seedCallback(): Callback = object : Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 super.onCreate(db)
@@ -160,7 +178,25 @@ abstract class YunayuDatabase : RoomDatabase() {
                         arrayOf(name, index, icon, now, now),
                     )
                 }
+                ROOT_TAGS.forEach { (rootName, _) ->
+                    val rootId = queryRootId(db, rootName)
+                    SEED_SUB_TAGS[rootName].orEmpty().forEachIndexed { index, subName ->
+                        db.execSQL(
+                            "INSERT INTO tags (name, parent_id, sort_order, icon, created_at, updated_at) " +
+                                "VALUES (?, ?, ?, ?, ?, ?)",
+                            arrayOf(subName, rootId, index, null, now, now),
+                        )
+                    }
+                }
             }
         }
+
+        /** 按名称回查根节点 id（不硬编码自增主键，兼容未来根类调整）。 */
+        private fun queryRootId(db: SupportSQLiteDatabase, name: String): Long =
+            db.query("SELECT id FROM tags WHERE name = ? AND parent_id IS NULL", arrayOf(name))
+                .use { cursor ->
+                    check(cursor.moveToFirst()) { "种子根标签缺失: $name" }
+                    cursor.getLong(0)
+                }
     }
 }
