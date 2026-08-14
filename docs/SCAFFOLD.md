@@ -312,3 +312,26 @@ interface SemesterBudgetEngine {
 
 - `MigrationTest`：`MigrationTestHelper` + `InstrumentationRegistry`，校验 v1 → v2 迁移后 `tags` 数据保留、`transactions.tag_id` 关联恢复、唯一索引 `index_tags_parent_id_name` 存在。
 - 本机无模拟器/设备，该测试写好但不执行，接入 CI 后启用。
+
+---
+
+## 9. P0-2 评审修复决策留痕
+
+> 触发时机：三维评审合并清单落地（DatePicker UTC 错位、统一时间源、金额输入收紧、观察链防崩溃、考试周/假期区间配置 UI 等）。
+
+### 9.1 本次已交付
+
+- **月额度展示**：预算看板激活态辅助区展示「本月可花 ¥…」，数据来自快照 `monthlyQuotaCents`。
+- **考试周 / 假期区间配置 UI**：学期设置弹层新增两个可折叠区块，支持查看、删除、添加区间（起≤止校验）；编辑模式预填现有区间，UI 成为区间唯一来源。
+- **千分位为统一展示规范**：`formatCents` 输出带千分位 + 固定两位小数；Sprint 1 QuickAdd 展示基线同步遵循该规范。
+
+### 9.2 推迟项
+
+- **历史学期查阅与自动归档推迟**：数据保全（`semesters` 全量落库、引擎支持任意 `semesterId` 计算），但历史学期列表/切换 UI 待后续迭代。
+
+### 9.3 硬约束与约定
+
+- **禁止持久化 `date_ranges.id`**：区间采用「先删（仅已知类型 EXAM_WEEK / VACATION）后重写」语义，`date_ranges.id` 不稳定，调用方不得依赖区间主键。
+- **DI 装配约定**：domain 用例装配可置于 `:data`，后续新增用例遵循既有装配位置，不在 `:domain` 内自建 DI。
+- **transactions 全表 Flow 规模假设**：预算引擎对 `transactions` 全表 Flow 实时聚合，假设单用户万笔量级；超过后再改为按学期聚合查询。
+- **门禁主命令**：`./gradlew.bat test`（覆盖 `:domain` 等全部本地单测），辅以 `ktlintCheck` 与 `assembleDebug`。
