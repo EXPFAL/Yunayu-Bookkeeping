@@ -399,8 +399,14 @@ interface SemesterBudgetEngine {
 
 - **手势方案（主路径）**：长按拖拽手柄（`detectDragGesturesAfterLongPress`），累计纵向偏移经纯函数 `reorderTargetIndex(itemCount, itemHeight, dragOffsetY)` 换算目标索引，`moveItem` 生成新序；拖拽期间以本地 `dragList` 门控观察链重发射覆盖，`onDragEnd` 提交 `onReorder(parentId, 新序列表)` 乐观更新 + 持久化，失败回滚并透出「排序保存失败」。
 - **偏差记录**：`animateItem()` 在 Compose 1.6.8（BOM 2024.08.00）不存在，改用等价的 `Modifier.animateItemPlacement()`；拖拽为「槽位式」重排（跨半行即换位），未做手指跟随平移的额外视觉，属可接受简化。
+- **sortOrder 空洞约束**：`sortOrder` 由 `MAX+1` 生成且删除会留空洞，故允许不连续；消费方（排序、拖拽整层重写、同级比较）只允许按数值比较先后，不允许假设密集（如按下标取位、假设连续递增）。
 
 ### 11.5 测试与门禁
 
 - 新增 `TagManageViewModelTest`（11 例）、`TagDisplayNameTest`（4 例）、`ReorderTest`（5 例），并为 `QuickAddViewModelTest` 补 1 例根名映射 + 4 个 fake stub。
 - 门禁沿用 `./gradlew.bat test` + `ktlintCheck` + `clean assembleDebug`。
+
+### 11.6 更多分类选择层
+
+- QuickAdd 建议 chips 行末尾新增「更多」入口（始终可见），打开底部选择层：按四根类分组展示全部子标签（根类名做分组标题，根标签自身也可选），点选任意标签即选中并关闭选择层，解决「新建子标签永远无法被首次选中」的首用闭环缺口。
+- 数据经 `QuickAddViewModel.loadAllTags()` 加载（`getChildren(null)` 取根 + 逐根 `getChildren(rootId)` 取子），失败置空并记日志降级（`CancellationException` 重抛），选择层仅在打开时触发加载，不阻塞记账主流程。
