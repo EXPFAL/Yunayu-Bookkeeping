@@ -372,3 +372,35 @@ interface SemesterBudgetEngine {
 
 - 旧 §9.3「禁止持久化 `date_ranges.id`」约束随 `date_ranges` 表删除而废止。
 - 门禁主命令沿用 `./gradlew.bat test`（覆盖 `:domain` 等全部本地单测），辅以 `ktlintCheck` 与 `assembleDebug`。
+
+---
+
+## 11. P0-3 学业关联标签交付记录
+
+> 触发时机：P0-3「学业关联标签」UI 层与文档落地。Domain/Data 已先行交付（`TagRepository` 扩展 `addSubTag` / `renameTag` / `getDeleteImpact` / `deleteTag`，`TagDeleteImpact` 影响面快照，`TagRepositoryImpl` BFS 影响面计算与根只读规则）。
+
+### 11.1 全屏 Screen 方案决策
+
+- **全屏而非弹层**：标签管理是低频但结构较深的配置页（4 根分区 + 各根下可变子标签 + 拖拽排序），用全屏 Screen + `TopAppBar` 返回 + `BackHandler` 承接系统返回，比底部弹层更能容纳拖拽手势与多级确认弹窗；首页经「管理标签」入口进入。
+- **单一 LazyColumn 平铺**：根头与子标签平铺进同一个 `LazyColumn`（`items(key = tag.id)`），规避「垂直滚动 Column 内嵌 LazyColumn」的无限高度约束崩溃；子标签用 `Modifier.animateItemPlacement()` 做重排动画（Compose 1.6.8 无 `animateItem()`，为其等价物，见 §11.4 偏差）。
+
+### 11.2 BFS 影响面 vs 递归 SQL 取舍
+
+- 删除影响面采用**内存 BFS**（`TagRepositoryImpl.getDeleteImpact` 拉全量标签、按 `parentId` 分组、队列遍历子树），而非递归 CTE 或逐层 SQL。
+- 取舍：单用户标签量级小（几十到数百），全量载入 + BFS 一次遍历的复杂度可忽略；SQLite 递归 CTE 可读性差、Room 不支持直接建模，逐层递归 SQL 又会放大连接开销。交易影响数经 `countByTagIds` 一次 `IN` 查询聚合，避免 N+1。
+
+### 11.3 根只读与删除规则闭环
+
+- **根标签只读**：四大类根节点不提供改名/删除/拖拽入口，由 `TagRepositoryImpl.renameTag` / `deleteTag` 对 `parentId == null` 抛 `IllegalArgumentException` 兜底（UI 不暴露入口 + 仓储层拒绝双重防护）。
+- **删除两段式**：`requestDelete` 先经 `getDeleteImpact` 计算影响面（子树节点数含自身、受影响交易数、子树名列表）置入 `pendingDelete`，`DeleteConfirmDialog` 按 `subtreeNodeCount - 1` 与 `affectedTransactionCount` 组织文案，`subtreeNodeCount == 1` 时省略前半句；确认后 `deleteTag` 并清态发 `Deleted` 事件。
+- §7.2「删除入口安全规则」在本屏形成闭环：先查影响面 → 二次确认 → 经仓储封装删除，不走 DAO 直删。
+
+### 11.4 拖拽排序口径与偏差
+
+- **手势方案（主路径）**：长按拖拽手柄（`detectDragGesturesAfterLongPress`），累计纵向偏移经纯函数 `reorderTargetIndex(itemCount, itemHeight, dragOffsetY)` 换算目标索引，`moveItem` 生成新序；拖拽期间以本地 `dragList` 门控观察链重发射覆盖，`onDragEnd` 提交 `onReorder(parentId, 新序列表)` 乐观更新 + 持久化，失败回滚并透出「排序保存失败」。
+- **偏差记录**：`animateItem()` 在 Compose 1.6.8（BOM 2024.08.00）不存在，改用等价的 `Modifier.animateItemPlacement()`；拖拽为「槽位式」重排（跨半行即换位），未做手指跟随平移的额外视觉，属可接受简化。
+
+### 11.5 测试与门禁
+
+- 新增 `TagManageViewModelTest`（11 例）、`TagDisplayNameTest`（4 例）、`ReorderTest`（5 例），并为 `QuickAddViewModelTest` 补 1 例根名映射 + 4 个 fake stub。
+- 门禁沿用 `./gradlew.bat test` + `ktlintCheck` + `clean assembleDebug`。
