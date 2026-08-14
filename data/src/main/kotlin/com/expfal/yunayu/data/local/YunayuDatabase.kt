@@ -4,17 +4,13 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
-import com.expfal.yunayu.data.local.dao.SemesterDao
-import com.expfal.yunayu.data.local.dao.SemesterDateRangeDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
-import com.expfal.yunayu.data.local.entity.SemesterDateRangeEntity
-import com.expfal.yunayu.data.local.entity.SemesterEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 
 /**
- * Yunayu 数据库。包含 tags / transactions / semesters / date_ranges 四张表。
+ * Yunayu 数据库。包含 tags / transactions 两张表（月度预算经 DataStore 存储，不落库）。
  *
  * Schema 变更策略：version 递增 + 显式 Migration，禁止 fallbackToDestructiveMigration
  * （用户数据不可丢失）；schema 经 exportSchema 输出至 data/schemas。
@@ -23,10 +19,8 @@ import com.expfal.yunayu.data.local.entity.TransactionEntity
     entities = [
         TagEntity::class,
         TransactionEntity::class,
-        SemesterEntity::class,
-        SemesterDateRangeEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class YunayuDatabase : RoomDatabase() {
@@ -34,10 +28,6 @@ abstract class YunayuDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
 
     abstract fun transactionDao(): TransactionDao
-
-    abstract fun semesterDao(): SemesterDao
-
-    abstract fun semesterDateRangeDao(): SemesterDateRangeDao
 
     companion object {
         const val NAME = "yunayu.db"
@@ -131,6 +121,26 @@ abstract class YunayuDatabase : RoomDatabase() {
                         "CREATE INDEX IF NOT EXISTS `index_date_ranges_semester_id` " +
                             "ON `date_ranges` (`semester_id`)",
                     )
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /**
+         * Schema v2 → v3 迁移：删除学期两表（semesters / date_ranges）。
+         *
+         * 学期预算已改为月度预算，semesters 与 date_ranges 不再使用；tags / transactions
+         * 数据保留。先 DROP 子表 date_ranges（含指向 semesters 的外键），再 DROP 父表 semesters，
+         * 避免外键强制开启时因引用顺序导致约束失败；整体包事务，防止半迁移状态。
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    db.execSQL("DROP TABLE `date_ranges`")
+                    db.execSQL("DROP TABLE `semesters`")
                     db.setTransactionSuccessful()
                 } finally {
                     db.endTransaction()

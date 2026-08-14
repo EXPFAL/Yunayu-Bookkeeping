@@ -6,8 +6,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import com.expfal.yunayu.data.local.YunayuDatabase
-import com.expfal.yunayu.data.local.dao.SemesterDao
-import com.expfal.yunayu.data.local.dao.SemesterDateRangeDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import dagger.Module
@@ -28,7 +26,7 @@ object DatabaseModule {
         Room.databaseBuilder(context, YunayuDatabase::class.java, YunayuDatabase.NAME)
             .openHelperFactory(foreignKeyEnforcingFactory())
             .addCallback(YunayuDatabase.seedCallback())
-            .addMigrations(YunayuDatabase.MIGRATION_1_2)
+            .addMigrations(YunayuDatabase.MIGRATION_1_2, YunayuDatabase.MIGRATION_2_3)
             .build()
 
     /**
@@ -77,12 +75,4 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideTransactionDao(database: YunayuDatabase): TransactionDao = database.transactionDao()
-
-    @Provides
-    @Singleton
-    fun provideSemesterDao(database: YunayuDatabase): SemesterDao = database.semesterDao()
-
-    @Provides
-    @Singleton
-    fun provideSemesterDateRangeDao(database: YunayuDatabase): SemesterDateRangeDao = database.semesterDateRangeDao()
 }
