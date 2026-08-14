@@ -440,3 +440,71 @@ interface SemesterBudgetEngine {
 - **无 schema 变更**：本迭代仅改 `seedCallback`，`data/schemas/.../3.json` 与 migration 均不动；子标签插入按根类名回查 `id`（`parent_id IS NULL`），不硬编码自增主键。
 - **调整途径**：标签管理界面（P0-3）可新增 / 重命名 / 删除子标签、拖拽排序，四根类保持只读。
 
+---
+
+## 13. P1 自然语言记账原型记录
+
+> 触发时机：P1「自然语言记账」原型落地；端侧 LiteRT-LM 路线真机实测 NO-GO 后，经用户拍板转用在线 OpenAI 兼容 API。本节记录三阶段决策轨迹与架构取舍。
+
+### 13.1 范围
+
+- P1 = 自然语言记账「解析引擎 + `NLTransactionParser` 接缝」，**不含新 UI**（无界面入口，仅有引擎 + 接缝）。
+- 交付物集中在 `:domain` 纯 Kotlin 接缝与 `:data` 在线后端装配。
+
+### 13.2 决策轨迹（三阶段）
+
+**阶段一：端侧路线（LiteRT-LM + Qwen2.5-1.5B q8）→ NO-GO**
+
+- 为接入 `com.google.ai.edge.litertlm:litertlm-android:0.16.0`，构建栈整体升级：Kotlin 2.0.10 → 2.3.21（连带 KSP 2.3.11 / AGP 8.13.2 / Gradle 8.13 / Hilt 2.57.2 / Room 2.8.4）；compileSdk/targetSdk=34、minSdk=26 保持不变。
+- 独立 spike 真机实测（Redmi K80 Ultra / 天玑 9400+）：
+
+| 指标 | 结果 |
+| --- | --- |
+| init | 4.3s |
+| 端到端 | ~2.3s |
+| JSON 可解析 | 100% |
+| 金额命中 | 100% |
+| 标签映射命中 | 25%（CPU）/ 0%（GPU） |
+| decode | 15-17 tok/s |
+| 峰值 RSS | 3.7-4GB |
+
+- **VERDICT：NO-GO**。根因：1.5B 模型太小，把输入自由词回填为标签，而非从候选标签集选取。
+- **FUSE 教训**：`adb push` 到应用私有外部目录的文件属主为 shell，应用进程经 FUSE 读不到；改用共享存储 `/sdcard/Download` + `MANAGE_EXTERNAL_STORAGE` 解决。
+
+**阶段二：3B 路线调研（端侧备选）**
+
+- **llama.cpp**：GGUF 原生 + GBNF grammar 约束解码，可行且能确定性修复标签映射，为**首选端侧备选**。
+- **MLC-LLM**：GPU 后端，工程量 2-3 倍，暂缓。
+- **MediaTek NeuroPilot**：SDK 需联发科商务申请、无 Qwen2.5-3B 现成 NPU 产物，个人不可自助，仅长期愿景。
+
+**阶段三：最终决策 —— 在线 OpenAI 兼容 API（用户拍板）**
+
+- **理由**：最快跑通、云端大模型彻底解决标签映射。
+- **已接受代价**：放弃离线（PRD 原 P1 为本地 + 离线）、记账数据上云、按量计费、需 `INTERNET` 权限。
+- 同时移除端侧 LiteRT 后端（NO-GO 且占 ~46MB）。
+
+### 13.3 架构决策
+
+- **接缝后端无关**：`NLTransactionParser`（`isAvailable` / `generate`）定义于 `:domain`；在线实现 `ApiNlParser` 位于 `:data/nlparse`，用 `java.net.HttpURLConnection` + 框架自带 `org.json`，零新增第三方库；`NlParseModule` 仿 `BudgetModule` 以 `@Provides @Singleton` 装配。
+- **配置注入**：`:data` 开启 `buildConfig`，从根 `local.properties` 读取 `NL_API_BASE_URL` / `NL_API_MODEL` / `NL_API_KEY` 生成 `BuildConfig` 字段；默认 DeepSeek（`https://api.deepseek.com` / `deepseek-chat`）；API key 不进仓库（`local.properties` 已被 `.gitignore` 忽略）。
+- **`:domain` 复用未改动**：提示词构建（`NlPromptBuilder`）、宽松 JSON 解析（`NlOutputParser`）、编排（`ParseNaturalLanguageTransactionUseCase`）与全部测试复用。
+
+### 13.4 门禁与产物
+
+- 三门禁三绿（`./gradlew.bat test` + `ktlintCheck` + `assembleDebug`）。
+- APK 由 ~56MB 瘦身至 ~9.8MiB（移除 `liblitertlm_jni.so`）。
+- `:domain` 新增 32 个 nl 测试全绿。
+
+### 13.5 回滚路径
+
+- **在线后端**：删除 `ApiNlParser` / `NlParseModule` 装配 / `INTERNET` 权限 / `buildConfigField` 即可还原；`:domain` 接缝与测试作为资产保留。
+- **端侧路线重启**：走 llama.cpp + GBNF（见 13.2 阶段二调研结论）。
+
+### 13.6 已知限制 / 后续
+
+- 本原型无 UI 入口（仅有引擎 + 接缝）。
+- NL_API_KEY 经 BuildConfig 以明文存在于 APK（反编译可提取）——原型可接受，正式版应改为自建后端代理密钥或运行时安全注入。
+- NL_API_BASE_URL 需填最终 https 地址（本实现不跨协议跟随重定向）。
+- 若需离线，再评估端侧 llama.cpp。
+- 若将来端侧采用 Qwen2.5-3B，须注意其为 Qwen RESEARCH 许可（商用需申请）。
+

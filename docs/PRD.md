@@ -22,7 +22,9 @@
 ### P1（MVP 验证通过后做）
 4. 自然语言记账
    - 方案：输入"昨天图书馆买咖啡28"→ 解析为 {时间:昨日, 金额:28, 类别:学习-饮品}
-   - 技术要点：本地 Qwen2.5-1.5B-Instruct + Function Calling；离线可用
+   - 技术要点：在线 OpenAI 兼容 API 完成自然语言→交易字段解析（经决策调整：端侧 LiteRT-LM 路线真机实测 NO-GO 后转在线，详见 SCAFFOLD §13）
+   - 取舍：换取模型能力与交付速度，放弃离线，引入记账数据上云与按量计费
+   - 未来离线/端侧选项：llama.cpp + GBNF 约束解码（详见 SCAFFOLD §13）
 5. 消费复盘周报
    - 方案：每周日自动生成 Top3 支出类别 + 预算执行率 + 异常消费提醒
    - 技术要点：Room 聚合查询；Markdown 渲染；系统通知推送
@@ -63,6 +65,6 @@
 ## 五、建议 ISSUE 拆分（供 Sprint 规划参考）
 - feat(core): monthly-based budget engine with weekly auto-calculation
 - feat(ui): floating quick-add button with recent-category prediction
-- feat(ai): local qwen2.5-1.5b for natural language transaction parsing
+- feat(ai): online OpenAI-compatible API for natural language transaction parsing
 - feat(report): weekly consumption review with anomaly detection
 - refactor(data): category schema for student-specific tags
