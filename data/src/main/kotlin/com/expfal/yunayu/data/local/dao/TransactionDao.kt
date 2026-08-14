@@ -20,6 +20,13 @@ interface TransactionDao {
         @ColumnInfo(name = "usage_count") val usageCount: Long,
     )
 
+    /** 最近交易行：交易实体 + 左连接标签名与图标。 */
+    data class RecentTransactionRow(
+        @Embedded val transaction: TransactionEntity,
+        @ColumnInfo(name = "tag_name") val tagName: String?,
+        @ColumnInfo(name = "tag_icon") val tagIcon: String?,
+    )
+
     @Insert
     suspend fun insert(transaction: TransactionEntity): Long
 
@@ -46,4 +53,20 @@ interface TransactionDao {
             "LIMIT :limit",
     )
     suspend fun getRecentFrequentTags(sinceEpochMillis: Long, limit: Int): List<RecentTagRow>
+
+    /** 观察时间窗内的支出总额（分），无匹配行时返回 0。 */
+    @Query(
+        "SELECT COALESCE(SUM(amount_cents), 0) FROM transactions " +
+            "WHERE occurred_at >= :startInclusiveMs AND occurred_at < :endExclusiveMs " +
+            "AND type = 'EXPENSE'",
+    )
+    fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long>
+
+    /** 观察最近 [limit] 笔交易（含标签名与图标），按发生时间倒序。 */
+    @Query(
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
+            "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "ORDER BY t.occurred_at DESC LIMIT :limit",
+    )
+    fun observeRecent(limit: Int): Flow<List<RecentTransactionRow>>
 }

@@ -1,9 +1,9 @@
 package com.expfal.yunayu.data.di
 
-import com.expfal.yunayu.data.repository.SemesterRepositoryImpl
+import com.expfal.yunayu.data.repository.MonthlyBudgetRepositoryImpl
 import com.expfal.yunayu.data.repository.TagRepositoryImpl
 import com.expfal.yunayu.data.repository.TransactionRepositoryImpl
-import com.expfal.yunayu.domain.repository.SemesterRepository
+import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import dagger.Binds
@@ -27,5 +27,5 @@ abstract class RepositoryModule {
 
     @Binds
     @Singleton
-    abstract fun bindSemesterRepository(impl: SemesterRepositoryImpl): SemesterRepository
+    abstract fun bindMonthlyBudgetRepository(impl: MonthlyBudgetRepositoryImpl): MonthlyBudgetRepository
 }

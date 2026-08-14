@@ -3,10 +3,12 @@ package com.expfal.yunayu.data.repository
 import android.util.Log
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TransactionEntity
+import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -25,6 +27,27 @@ class TransactionRepositoryImpl @Inject constructor(
 
     override fun observeByTag(tagId: Long): Flow<List<Transaction>> =
         transactionDao.observeByTag(tagId).map { entities -> entities.map { it.toDomain() } }
+
+    override fun observeExpenseSumBetween(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): Flow<Long> = transactionDao.observeExpenseSumBetween(startInclusiveMs, endExclusiveMs)
+
+    override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
+        transactionDao.observeRecent(limit)
+            .map { rows -> rows.map { it.toRecentDomain() } }
+            .distinctUntilChanged()
+
+    private fun TransactionDao.RecentTransactionRow.toRecentDomain(): RecentTransaction =
+        RecentTransaction(
+            id = transaction.id,
+            amountCents = transaction.amountCents,
+            type = runCatching { TransactionType.valueOf(transaction.type) }
+                .onFailure { Log.w(TAG, "Unknown transaction type \"${transaction.type}\" for id=${transaction.id}, fallback to EXPENSE") }
+                .getOrDefault(TransactionType.EXPENSE),
+            tagName = tagName,
+            occurredAt = transaction.occurredAt,
+        )
 
     private fun Transaction.toEntity(): TransactionEntity = TransactionEntity(
         id = id,
