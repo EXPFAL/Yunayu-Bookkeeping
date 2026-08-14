@@ -1,7 +1,9 @@
 package com.expfal.yunayu.ui.screen.home
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -22,13 +24,15 @@ import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetSheet
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetViewModel
 import com.expfal.yunayu.ui.screen.quickadd.QuickAddSheet
 
-/** 首页：月度预算看板卡片置顶，悬浮「快速记账」按钮唤起快捷记账弹层。 */
+/** 首页：月度预算看板卡片置顶，下方最近记录列表，悬浮「快速记账」按钮唤起快捷记账弹层。 */
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
     var showQuickAdd by remember { mutableStateOf(false) }
     var showBudgetSetup by remember { mutableStateOf(false) }
     val budgetViewModel: MonthlyBudgetViewModel = viewModel()
     val budgetState by budgetViewModel.uiState.collectAsStateWithLifecycle()
+    val homeViewModel: HomeViewModel = viewModel()
+    val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
         modifier = modifier,
@@ -50,6 +54,11 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 snapshot = budgetState.snapshot,
                 onEdit = { showBudgetSetup = true },
                 onSetup = { showBudgetSetup = true },
+            )
+            Spacer(modifier = Modifier.height(24.dp))
+            RecentTransactionsCard(
+                uiState = homeState,
+                modifier = Modifier.weight(1f),
             )
         }
     }
