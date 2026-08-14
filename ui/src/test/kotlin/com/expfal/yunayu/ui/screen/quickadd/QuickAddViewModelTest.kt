@@ -4,8 +4,13 @@ import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.Transaction
+import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.nl.NLTransactionParser
+import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
+import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
 import kotlinx.coroutines.CompletableDeferred
@@ -22,6 +27,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -287,13 +293,251 @@ class QuickAddViewModelTest {
         assertEquals(2L, viewModel.uiState.value.selectedTagId)
     }
 
+    @Test
+    fun `parses NL text into draft and syncs matched tagId to selection`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+            childrenByParent = mapOf(2L to listOf(tag(11L, "餐饮", parentId = 2L)))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"生活·餐饮\",\"note\":\"午饭\"}"
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+
+        val state = viewModel.uiState.value
+        assertNull(state.nlFailure)
+        assertEquals(2000L, state.nlDraft?.amountCents)
+        assertEquals("午饭", state.nlDraft?.note)
+        assertEquals(11L, state.selectedTagId)
+    }
+
+    @Test
+    fun `sets failure state when NL output is malformed`() = runTest {
+        val nlParser = FakeNlParser().apply { generateResult = "没有 JSON 输出" }
+        val viewModel = viewModel(FakeTagRepository(), FakeTransactionRepository(), nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+
+        assertEquals(NlParseFailure.MALFORMED_OUTPUT, viewModel.uiState.value.nlFailure)
+        assertNull(viewModel.uiState.value.nlDraft)
+    }
+
+    @Test
+    fun `sets ENGINE_UNAVAILABLE when parser unavailable`() = runTest {
+        val nlParser = FakeNlParser().apply { available = false }
+        val viewModel = viewModel(FakeTagRepository(), FakeTransactionRepository(), nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+
+        assertEquals(NlParseFailure.ENGINE_UNAVAILABLE, viewModel.uiState.value.nlFailure)
+    }
+
+    @Test
+    fun `saves parsed draft preserving note type and occurredAt then emits Saved`() = runTest {
+        val txRepo = FakeTransactionRepository().apply { nextId = 99L }
+        val tagRepo = FakeTagRepository().apply { rootTags = listOf(tag(1L, "学习")) }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"15.5\",\"tag\":\"学习\",\"note\":\"午饭\"}"
+        }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser)
+
+        val events = mutableListOf<QuickAddEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events.add(it) }
+        }
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭15.5")
+        viewModel.onParseNl()
+        runCurrent()
+        viewModel.onSaveNl()
+        runCurrent()
+
+        val saved = txRepo.added.single()
+        assertEquals(1550L, saved.amountCents)
+        assertEquals(TransactionType.EXPENSE, saved.type)
+        assertEquals("午饭", saved.note)
+        assertEquals(1L, saved.tagId)
+        assertTrue(saved.occurredAt > 0L)
+        assertEquals(listOf(QuickAddEvent.Saved), events)
+    }
+
+    @Test
+    fun `NL large amount requests confirmation then saves via confirm`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply { rootTags = listOf(tag(1L, "学习")) }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"150\",\"tag\":\"学习\"}"
+        }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("买书150")
+        viewModel.onParseNl()
+        runCurrent()
+
+        viewModel.onSaveNl()
+        assertTrue(viewModel.uiState.value.confirmRequested)
+        assertEquals(0, txRepo.added.size)
+
+        viewModel.onConfirmNecessary()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals(15000L, txRepo.added.single().amountCents)
+        assertEquals(1L, txRepo.added.single().tagId)
+    }
+
+    @Test
+    fun `NL unmatched tag phrase does not leak preselected tag into save`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"))
+            rootTags = listOf(tag(1L, "学习"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\"}"
+        }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+
+        assertNull(viewModel.uiState.value.nlDraft?.tagId)
+        assertNull(viewModel.uiState.value.nlTagId)
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
+
+        viewModel.onSaveNl()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertNull(txRepo.added.single().tagId)
+    }
+
+    @Test
+    fun `NL unmatched tag phrase uses user picked tag after correction`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\"}"
+        }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+
+        viewModel.onSelectTag(2L)
+        assertEquals(2L, viewModel.uiState.value.nlTagId)
+
+        viewModel.onSaveNl()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals(2L, txRepo.added.single().tagId)
+    }
+
+    @Test
+    fun `sets NO_AMOUNT failure when NL output has JSON but no amount`() = runTest {
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"tag\":\"学习\",\"note\":\"午饭\"}"
+        }
+        val viewModel = viewModel(FakeTagRepository(), FakeTransactionRepository(), nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭")
+        viewModel.onParseNl()
+        runCurrent()
+
+        assertEquals(NlParseFailure.NO_AMOUNT, viewModel.uiState.value.nlFailure)
+        assertNull(viewModel.uiState.value.nlDraft)
+    }
+
+    @Test
+    fun `NL save failure emits SaveFailed keeps draft and clears confirm`() = runTest {
+        val txRepo = FakeTransactionRepository().apply { addError = RuntimeException("db down") }
+        val tagRepo = FakeTagRepository().apply { rootTags = listOf(tag(1L, "学习")) }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"150\",\"tag\":\"学习\"}"
+        }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser)
+
+        val events = mutableListOf<QuickAddEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events.add(it) }
+        }
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("买书150")
+        viewModel.onParseNl()
+        runCurrent()
+
+        viewModel.onSaveNl()
+        assertTrue(viewModel.uiState.value.confirmRequested)
+        viewModel.onConfirmNecessary()
+        runCurrent()
+
+        assertEquals(listOf(QuickAddEvent.SaveFailed), events)
+        assertTrue(viewModel.uiState.value.saveFailed)
+        assertFalse(viewModel.uiState.value.confirmRequested)
+        assertNotNull(viewModel.uiState.value.nlDraft)
+    }
+
+    @Test
+    fun `resetForOpen clears stale amount and NL state`() = runTest {
+        val tagRepo = FakeTagRepository().apply { rootTags = listOf(tag(1L, "学习")) }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"学习\"}"
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser)
+
+        viewModel.onDigit('5')
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+        assertNotNull(viewModel.uiState.value.nlDraft)
+
+        viewModel.resetForOpen()
+
+        val state = viewModel.uiState.value
+        assertEquals("", state.amountText)
+        assertFalse(state.nlMode)
+        assertEquals("", state.nlInputText)
+        assertNull(state.nlDraft)
+        assertNull(state.nlFailure)
+        assertNull(state.nlTagId)
+        assertFalse(state.confirmRequested)
+        assertFalse(state.saveFailed)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository,
         txRepo: TransactionRepository,
+        nlParser: NLTransactionParser = FakeNlParser(),
     ) = QuickAddViewModel(
         tagRepository = tagRepo,
         getRecentCategoriesUseCase = GetRecentCategoriesUseCase(tagRepo),
         addTransactionUseCase = AddTransactionUseCase(txRepo),
+        parseNaturalLanguageTransactionUseCase = ParseNaturalLanguageTransactionUseCase(nlParser, tagRepo),
+        addParsedTransactionUseCase = AddParsedTransactionUseCase(txRepo),
     )
 
     private fun tag(id: Long, name: String, parentId: Long? = null) = Tag(id = id, name = name, parentId = parentId)
@@ -349,6 +593,20 @@ class QuickAddViewModelTest {
         override fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long> = flowOf(0L)
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = flowOf(emptyList())
+    }
+
+    /** [NLTransactionParser] 手写 fake：可控可用性与返回，用于 NL 解析路径。 */
+    private class FakeNlParser : NLTransactionParser {
+        var available: Boolean = true
+        var generateResult: String? = "{}"
+        var generateThrows: Throwable? = null
+
+        override suspend fun isAvailable(): Boolean = available
+
+        override suspend fun generate(systemInstruction: String, userText: String): String? {
+            generateThrows?.let { throw it }
+            return generateResult
+        }
     }
 }
 

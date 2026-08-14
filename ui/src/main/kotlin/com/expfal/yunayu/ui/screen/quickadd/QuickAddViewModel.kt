@@ -4,7 +4,12 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
+import com.expfal.yunayu.domain.nl.model.NlParseFailure
+import com.expfal.yunayu.domain.nl.model.NlParseResult
+import com.expfal.yunayu.domain.nl.model.NlTransactionDraft
 import com.expfal.yunayu.domain.repository.TagRepository
+import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -18,6 +23,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 /** 「3秒极速记账」快捷录入的 UI 状态快照。 */
@@ -30,6 +36,13 @@ data class QuickAddUiState(
     val confirmRequested: Boolean = false,
     val rootNameById: Map<Long, String> = emptyMap(),
     val allTagsByRoot: Map<Tag, List<Tag>> = emptyMap(),
+    val nlMode: Boolean = false,
+    val nlInputText: String = "",
+    val nlParsing: Boolean = false,
+    val nlDraft: NlTransactionDraft? = null,
+    val nlFailure: NlParseFailure? = null,
+    /** NL 模式下最终落库的标签 id，独立于两模式共享的 [selectedTagId]，避免残留预选污染 NL 交易。 */
+    val nlTagId: Long? = null,
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -43,22 +56,28 @@ sealed interface QuickAddEvent {
 }
 
 /**
- * 「3秒极速记账」ViewModel：数字键盘直输金额 + 最近常用分类预选 + 大额二次确认。
+ * 「3秒极速记账」ViewModel：数字键盘直输金额 + 自然语言记账 + 最近常用分类预选 + 大额二次确认。
  *
- * 金额在内存中以文本维护（整数 ≤7 位、小数 ≤2 位），落库前经 [parseAmountToCents]
- * 转换为「分」。成功保存后经 [events] 发出一次性 [QuickAddEvent.Saved]，失败发出
- * [QuickAddEvent.SaveFailed]。事件流无回放、缓冲为 1 且满时丢弃最旧，杜绝下次打开
- * 弹层回放陈旧事件。
+ * 数字模式金额以文本维护（整数 ≤7 位、小数 ≤2 位），落库前经 [parseAmountToCents]
+ * 转换为「分」；自然语言模式调用 [ParseNaturalLanguageTransactionUseCase] 产出草稿预览，
+ * 确认后经 [AddParsedTransactionUseCase] 直通落库。成功保存后经 [events] 发出一次性
+ * [QuickAddEvent.Saved]，失败发出 [QuickAddEvent.SaveFailed]。事件流无回放、缓冲为 1 且
+ * 满时丢弃最旧，杜绝下次打开弹层回放陈旧事件。
  */
 @HiltViewModel
 class QuickAddViewModel @Inject constructor(
     private val tagRepository: TagRepository,
     private val getRecentCategoriesUseCase: GetRecentCategoriesUseCase,
     private val addTransactionUseCase: AddTransactionUseCase,
+    private val parseNaturalLanguageTransactionUseCase: ParseNaturalLanguageTransactionUseCase,
+    private val addParsedTransactionUseCase: AddParsedTransactionUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(QuickAddUiState())
     val uiState: StateFlow<QuickAddUiState> = _uiState.asStateFlow()
+
+    /** 大额确认弹窗当前由 NL 保存触发时为 `true`，供 [onConfirmNecessary] 路由到直通落库。 */
+    private var nlConfirmPending = false
 
     private val _events = MutableSharedFlow<QuickAddEvent>(
         extraBufferCapacity = 1,
@@ -68,6 +87,26 @@ class QuickAddViewModel @Inject constructor(
 
     init {
         refreshSuggestedTags()
+    }
+
+    /**
+     * 弹层每次打开时重置所有陈旧输入与 NL 状态，避免跨开闭存活导致上次内容残留；
+     * 建议分类的刷新由调用方随后执行 [refreshSuggestedTags] 完成。
+     */
+    fun resetForOpen() {
+        nlConfirmPending = false
+        _uiState.update {
+            it.copy(
+                amountText = "",
+                nlMode = false,
+                nlInputText = "",
+                nlDraft = null,
+                nlFailure = null,
+                confirmRequested = false,
+                saveFailed = false,
+                nlTagId = null,
+            )
+        }
     }
 
     /** 重新加载建议分类与根标签名映射；幂等，弹层每次打开时可安全调用以刷新陈旧建议。 */
@@ -154,11 +193,16 @@ class QuickAddViewModel @Inject constructor(
         }
     }
 
-    /** 切换分类选中态：再次点击已选分类则取消选中。 */
+    /** 切换分类选中态：再次点击已选分类则取消选中；NL 模式下同步更新 NL 专属标签态。 */
     fun onSelectTag(tagId: Long) {
         if (_uiState.value.saving) return
         _uiState.update { state ->
-            state.copy(selectedTagId = if (state.selectedTagId == tagId) null else tagId)
+            val nextSelected = if (state.selectedTagId == tagId) null else tagId
+            if (state.nlMode) {
+                state.copy(selectedTagId = nextSelected, nlTagId = nextSelected)
+            } else {
+                state.copy(selectedTagId = nextSelected)
+            }
         }
     }
 
@@ -171,21 +215,27 @@ class QuickAddViewModel @Inject constructor(
         if (state.saving) return
         val amountCents = parseAmountToCents(state.amountText) ?: return
         if (amountCents > NECESSARY_THRESHOLD_CENTS && !state.confirmRequested) {
+            nlConfirmPending = false
             _uiState.update { it.copy(confirmRequested = true) }
             return
         }
         persist(amountCents)
     }
 
-    /** 确认「这笔属于必要支出」，继续落库。 */
+    /** 确认「这笔属于必要支出」，继续落库；据确认来源路由到数字保存或 NL 直通保存。 */
     fun onConfirmNecessary() {
         if (_uiState.value.saving) return
-        val amountCents = parseAmountToCents(_uiState.value.amountText) ?: return
-        persist(amountCents)
+        if (nlConfirmPending) {
+            persistNl()
+        } else {
+            val amountCents = parseAmountToCents(_uiState.value.amountText) ?: return
+            persist(amountCents)
+        }
     }
 
     /** 关闭大额确认弹窗，不落库。 */
     fun onDismissConfirm() {
+        nlConfirmPending = false
         _uiState.update { it.copy(confirmRequested = false) }
     }
 
@@ -199,6 +249,7 @@ class QuickAddViewModel @Inject constructor(
                     occurredAt = System.currentTimeMillis(),
                 )
             }.onSuccess {
+                nlConfirmPending = false
                 _events.tryEmit(QuickAddEvent.Saved)
                 _uiState.update { state ->
                     state.copy(
@@ -213,9 +264,130 @@ class QuickAddViewModel @Inject constructor(
                 if (throwable is CancellationException) throw throwable
                 Log.e(TAG, "Failed to save transaction", throwable)
                 _events.tryEmit(QuickAddEvent.SaveFailed)
-                _uiState.update { it.copy(saving = false, saveFailed = true) }
+                _uiState.update { it.copy(saving = false, saveFailed = true, confirmRequested = false) }
                 refreshSuggestedTags()
             }
+        }
+    }
+
+    /**
+     * 切换「数字键盘 / 自然语言」输入模式；saving / nlParsing 期间禁止切换。
+     * 切换即清空 NL 输入与预览，防止下次进入看到陈旧状态。
+     */
+    fun setNlMode(enabled: Boolean) {
+        if (_uiState.value.saving || _uiState.value.nlParsing) return
+        nlConfirmPending = false
+        _uiState.update {
+            it.copy(
+                nlMode = enabled,
+                nlInputText = "",
+                nlDraft = null,
+                nlFailure = null,
+                confirmRequested = false,
+                nlTagId = null,
+            )
+        }
+    }
+
+    /** 更新自然语言输入文本。 */
+    fun onNlInputChange(text: String) {
+        _uiState.update { it.copy(nlInputText = text) }
+    }
+
+    /**
+     * 解析自然语言文本：先清预览/失败，再调用解析用例；超时或异常统一降级为
+     * [NlParseFailure.ENGINE_UNAVAILABLE]。成功后回填草稿并把命中 tagId 写入 NL 专属
+     * [QuickAddUiState.nlTagId]（命中时同步高亮 [QuickAddUiState.selectedTagId]，未命中则
+     * 置空 nlTagId 且不触碰数字模式预选的 selectedTagId）。
+     */
+    fun onParseNl() {
+        val state = _uiState.value
+        if (state.nlParsing || state.saving) return
+        val text = state.nlInputText
+        _uiState.update { it.copy(nlParsing = true, nlDraft = null, nlFailure = null) }
+        viewModelScope.launch {
+            val outcome = runCatching {
+                withTimeoutOrNull(NL_PARSE_TIMEOUT_MILLIS) { parseNaturalLanguageTransactionUseCase(text) }
+            }
+            val result = outcome.getOrNull()
+            if (result == null) {
+                val throwable = outcome.exceptionOrNull()
+                if (throwable is CancellationException) throw throwable
+                if (throwable != null) Log.e(TAG, "Failed to parse NL transaction", throwable)
+                _uiState.update {
+                    it.copy(nlParsing = false, nlDraft = null, nlFailure = NlParseFailure.ENGINE_UNAVAILABLE)
+                }
+                return@launch
+            }
+            _uiState.update { current ->
+                when (result) {
+                    is NlParseResult.Success -> {
+                        val tagId = result.draft.tagId
+                        current.copy(
+                            nlParsing = false,
+                            nlDraft = result.draft,
+                            nlFailure = null,
+                            nlTagId = tagId,
+                            selectedTagId = tagId ?: current.selectedTagId,
+                        )
+                    }
+                    is NlParseResult.Failure -> current.copy(
+                        nlParsing = false,
+                        nlDraft = null,
+                        nlFailure = result.reason,
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * 确认保存 NL 预览草稿：金额超阈值且未确认时仅弹大额确认；否则直通落库。
+     * 落库 tagId 一律取 NL 专属 [QuickAddUiState.nlTagId]，杜绝残留预选污染。
+     */
+    fun onSaveNl() {
+        val state = _uiState.value
+        if (state.saving || state.nlParsing) return
+        val draft = state.nlDraft ?: return
+        if (draft.amountCents > NECESSARY_THRESHOLD_CENTS && !state.confirmRequested) {
+            nlConfirmPending = true
+            _uiState.update { it.copy(confirmRequested = true) }
+            return
+        }
+        persistNl()
+    }
+
+    /** 将解析草稿直通落库，保留 note/type/occurredAt；成功发出 [QuickAddEvent.Saved]。 */
+    private fun persistNl() {
+        nlConfirmPending = false
+        val state = _uiState.value
+        val draft = state.nlDraft ?: return
+        val finalDraft = draft.copy(tagId = state.nlTagId)
+        _uiState.update { it.copy(saving = true, saveFailed = false) }
+        viewModelScope.launch {
+            runCatching { addParsedTransactionUseCase(finalDraft) }
+                .onSuccess {
+                    _events.tryEmit(QuickAddEvent.Saved)
+                    _uiState.update { current ->
+                        current.copy(
+                            amountText = "",
+                            selectedTagId = null,
+                            saving = false,
+                            saveFailed = false,
+                            confirmRequested = false,
+                            nlDraft = null,
+                            nlFailure = null,
+                            nlInputText = "",
+                            nlTagId = null,
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.e(TAG, "Failed to save NL transaction", throwable)
+                    _events.tryEmit(QuickAddEvent.SaveFailed)
+                    _uiState.update { it.copy(saving = false, saveFailed = true, confirmRequested = false) }
+                }
         }
     }
 
@@ -246,6 +418,9 @@ class QuickAddViewModel @Inject constructor(
 
         /** 超过该金额（分）需二次确认是否属于必要支出。 */
         private const val NECESSARY_THRESHOLD_CENTS = 10_000L
+
+        /** NL 解析最坏耗时上限，超时按引擎不可用降级处理。 */
+        private const val NL_PARSE_TIMEOUT_MILLIS = 20_000L
 
         /**
          * 将金额文本解析为「分」。仅接受数字与至多一个小数点，小数位 ≤2；

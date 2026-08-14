@@ -61,6 +61,7 @@ fun QuickAddSheet(
     var showTagPicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
+        viewModel.resetForOpen()
         viewModel.refreshSuggestedTags()
     }
 
@@ -85,7 +86,7 @@ fun QuickAddSheet(
 
     ModalBottomSheet(
         onDismissRequest = {
-            if (!uiState.saving) onDismissRequest()
+            if (!uiState.saving && !uiState.nlParsing) onDismissRequest()
         },
     ) {
         Column(
@@ -94,15 +95,22 @@ fun QuickAddSheet(
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 28.dp),
         ) {
-            Text(
-                text = "¥ " + formatCents(QuickAddViewModel.parseAmountToCents(uiState.amountText) ?: 0L),
-                style = MaterialTheme.typography.displayLarge,
-                color = MaterialTheme.colorScheme.onSurface,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
+            NlModeToggle(
+                nlMode = uiState.nlMode,
+                onModeChange = viewModel::setNlMode,
             )
-
             Spacer(modifier = Modifier.height(16.dp))
+            if (!uiState.nlMode) {
+                Text(
+                    text = "¥ " + formatCents(QuickAddViewModel.parseAmountToCents(uiState.amountText) ?: 0L),
+                    style = MaterialTheme.typography.displayLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -126,20 +134,37 @@ fun QuickAddSheet(
             }
 
             Spacer(modifier = Modifier.height(20.dp))
-            NumberPad(
-                onDigit = viewModel::onDigit,
-                onDelete = viewModel::onDelete,
-            )
+            if (uiState.nlMode) {
+                NlParseSection(
+                    inputText = uiState.nlInputText,
+                    parsing = uiState.nlParsing,
+                    saving = uiState.saving,
+                    draft = uiState.nlDraft,
+                    failure = uiState.nlFailure,
+                    nlTagId = uiState.nlTagId,
+                    suggestedTags = uiState.suggestedTags,
+                    rootNameById = uiState.rootNameById,
+                    allTagsByRoot = uiState.allTagsByRoot,
+                    onInputChange = viewModel::onNlInputChange,
+                    onParse = viewModel::onParseNl,
+                    onSave = viewModel::onSaveNl,
+                )
+            } else {
+                NumberPad(
+                    onDigit = viewModel::onDigit,
+                    onDelete = viewModel::onDelete,
+                )
 
-            Spacer(modifier = Modifier.height(20.dp))
-            Button(
-                onClick = viewModel::onSave,
-                enabled = !uiState.saving && QuickAddViewModel.parseAmountToCents(uiState.amountText) != null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-            ) {
-                Text(text = if (uiState.saving) "记一笔中…" else "记一笔")
+                Spacer(modifier = Modifier.height(20.dp))
+                Button(
+                    onClick = viewModel::onSave,
+                    enabled = !uiState.saving && QuickAddViewModel.parseAmountToCents(uiState.amountText) != null,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp),
+                ) {
+                    Text(text = if (uiState.saving) "记一笔中…" else "记一笔")
+                }
             }
 
             if (uiState.saveFailed) {
