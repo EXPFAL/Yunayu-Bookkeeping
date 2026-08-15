@@ -589,3 +589,38 @@ interface SemesterBudgetEngine {
 
 - `MigrationTest` 与 `TransactionDaoTest` 新用例写好，待设备/CI 执行（沿用既有惯例）。
 
+---
+
+## 17. 记录管理三项功能交付记录
+
+> 触发时机：P1「收支管理界面」与 P2「记录展示优化 / 标签选择折叠优化」落地，记录新增文件边界、筛选查询契约、报告失效机制与接口扩展纪律。
+
+### 17.1 新增文件与模块边界
+
+- **`ui/component`（新增目录）**：此前 `:ui` 仅有 screen / theme / util，本次引入共享组件目录，收敛跨屏复用：
+  - `TransactionRow.kt`：公共交易行——左列标签名 + 时间 + 备注次级行，右列方向化金额；`trailing` 插槽供删除按钮等扩展。首页「最近记录」与收支管理列表复用。
+  - `TagTreeList.kt`：标签树折叠列表——父类分组头可展开/收起 + 箭头 + 分组分隔线、根自身行独立可点选、子类默认折叠且仅展开时渲染；展开集合用 `rememberSaveable`。只把点击转为 `onToggleSelect`、不关心关闭逻辑，故单选（QuickAdd「更多分类」，点选即关闭）与多选（收支管理标签筛选，点选不关闭）共用。
+- **`ui/util`**：`formatSignedCents`（`AmountFormat.kt`）/ `formatTime`（`TimeFormat.kt`）上提为公共纯函数，供最近记录与收支管理复用。
+- **`ui/screen/transactionmanage`**：`TransactionManageScreen` + `TransactionManageViewModel`；`ui/di/TransactionManageModule.kt` 显式 `@Provides` 组装 `DeleteTransactionUseCase`（用例本身无 `@Inject`，仿 `BudgetModule` 先例）。
+
+### 17.2 筛选查询契约
+
+- `TransactionDao` 新增 `deleteById` + `observeFiltered` / `observeFilteredByTags` **双查询重载**，规避 Room 对空集合 `IN ()` 的处理差异；标签过滤经 `t.tag_id IN (:tagIds)`，其余条件两查询一致。
+- 接口签名：`observeFiltered(startInclusiveMs, endExclusiveMs, tagIds, noteKeyword)`。空参语义：时间参数 `null` = 不设对应边界；`noteKeyword` `null` / 空白 = 不按备注过滤；`tagIds` 空 = 不按标签过滤（由 `TransactionRepositoryImpl` 路由到无标签查询，非双查询语义冲突）。
+- **转义归属**：`%` / `_` / `\` 转义在 `TransactionRepositoryImpl.escapeLikeKeyword` 实现（顺序敏感：先 `\` 再 `%`、`_`），DAO 侧用 `ESCAPE '\'` + 参数绑定；ViewModel 只负责 300ms 防抖，不感知转义细节。
+
+### 17.3 报告失效机制与已知限制
+
+- `DeleteTransactionUseCase`：先删除交易（异常上抛），成功后 `invalidateWhereWindowContains(occurredAt)` 置 FAILED（`window_start_ms <= ms < window_end_ms`，月报与年报窗口均按此口径存储，单条更新同时命中二者）；标脏失败不阻断删除成功，仅 `CancellationException` 重抛。
+- **置 FAILED 复用重试属既定语义**：沿用报告页既有「生成失败 → 手动重试」UX，非新机制；零 schema 变更。持有资金 / 月度预算经 Room Flow 失效自动重算，零改动。
+- **已知限制**：删除后已生成报告的结构化数据（正文 / `top_categories`）保留至重试成功，重试前仍展示旧内容（属既定语义，非 bug）。
+- **全量 Flow 规模假设**：`observeFiltered` 返回全量匹配 Flow，沿用 §9.3 / §14.3 口径——单用户万笔量级实时聚合可接受，>5 万条记录时再考虑 LIMIT 分页。
+
+### 17.4 接口扩展 fake 同步纪律
+
+- 接口扩展（`TransactionRepository` 新增 `delete` / `observeFiltered`、`ReportRepository` 新增 `invalidateWhereWindowContains`、`TransactionDao` 新增 `deleteById` / 双查询）**不设默认实现**，`:domain` 无 mock 库、无默认实现先例，须同步更新全部手写 fake：
+  - `FakeTransactionRepository` 8 处：`EnsureReportsUseCaseTest`、`GenerateReportUseCaseTest`、`AddParsedTransactionUseCaseTest`、`MonthlyBudgetEngineImplTest`、`AddTransactionUseCaseTest`、`ReportViewModelTest`、`QuickAddViewModelTest`、`HomeViewModelTest`。
+  - `FakeReportRepository` 3 处：`EnsureReportsUseCaseTest`、`GenerateReportUseCaseTest`、`ReportViewModelTest`。
+  - `FakeTransactionDao` 1 处：`data/.../TestFakes.kt`（补 `deleteById` / `observeFiltered` / `observeFilteredByTags` 并记录调用入参）。
+- 本次新增测试自带 2 处 fake（`DeleteTransactionUseCaseTest`、`TransactionManageViewModelTest`）不计入既有同步清单；后续再扩接口，先更新上述 fake 再编译。
+
