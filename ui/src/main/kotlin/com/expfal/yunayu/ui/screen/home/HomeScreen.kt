@@ -1,5 +1,6 @@
 package com.expfal.yunayu.ui.screen.home
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.FloatingActionButton
@@ -32,9 +34,10 @@ import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetViewModel
 import com.expfal.yunayu.ui.screen.quickadd.QuickAddSheet
 import com.expfal.yunayu.ui.screen.report.ReportScreen
 import com.expfal.yunayu.ui.screen.tagmanage.TagManageScreen
+import com.expfal.yunayu.ui.screen.transactionmanage.TransactionManageScreen
 
-/** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告，四态互斥。 */
-private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS, REPORT }
+/** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告 / 收支管理，五态互斥。 */
+private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS, REPORT, TRANSACTIONS }
 
 /** 首页：月度预算看板卡片置顶，下方最近记录列表，悬浮「快速记账」按钮唤起快捷记账弹层。 */
 @Composable
@@ -51,6 +54,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.REPORT -> ReportScreen(onBack = { fullScreen = FullScreen.NONE })
+        FullScreen.TRANSACTIONS -> TransactionManageScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.NONE -> {
             Scaffold(
                 modifier = modifier,
@@ -76,7 +80,12 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                     Spacer(modifier = Modifier.height(16.dp))
                     HeldFundsCard(heldCents = homeState.heldCents)
                     Spacer(modifier = Modifier.height(16.dp))
-                    Row {
+                    Row(
+                        modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    ) {
+                        TextButton(onClick = { fullScreen = FullScreen.TRANSACTIONS }) {
+                            Text("收支管理")
+                        }
                         TextButton(onClick = { fullScreen = FullScreen.TAG_MANAGE }) {
                             Text("管理标签")
                         }
