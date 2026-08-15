@@ -30,10 +30,11 @@ import com.expfal.yunayu.ui.screen.budget.BudgetCard
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetSheet
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetViewModel
 import com.expfal.yunayu.ui.screen.quickadd.QuickAddSheet
+import com.expfal.yunayu.ui.screen.report.ReportScreen
 import com.expfal.yunayu.ui.screen.tagmanage.TagManageScreen
 
-/** 首页全屏子界面：无 / 标签管理 / API 管理，三态互斥。 */
-private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS }
+/** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告，四态互斥。 */
+private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS, REPORT }
 
 /** 首页：月度预算看板卡片置顶，下方最近记录列表，悬浮「快速记账」按钮唤起快捷记账弹层。 */
 @Composable
@@ -49,6 +50,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     when (fullScreen) {
         FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = { fullScreen = FullScreen.NONE })
+        FullScreen.REPORT -> ReportScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.NONE -> {
             Scaffold(
                 modifier = modifier,
@@ -80,6 +82,9 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         }
                         TextButton(onClick = { fullScreen = FullScreen.API_SETTINGS }) {
                             Text("API 管理")
+                        }
+                        TextButton(onClick = { fullScreen = FullScreen.REPORT }) {
+                            Text("报告")
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))

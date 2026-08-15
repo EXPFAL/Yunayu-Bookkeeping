@@ -1,10 +1,12 @@
 package com.expfal.yunayu.ui.screen.quickadd
 
+import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
@@ -671,6 +673,16 @@ class QuickAddViewModelTest {
         override fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long> = flowOf(0L)
 
         override fun observeHeldCents(): Flow<Long> = flowOf(0L)
+
+        override suspend fun getWindowTotals(
+            startInclusiveMs: Long,
+            endExclusiveMs: Long,
+        ): WindowTotals = WindowTotals(0L, 0L)
+
+        override suspend fun getExpenseByCategory(
+            startInclusiveMs: Long,
+            endExclusiveMs: Long,
+        ): List<CategoryExpense> = emptyList()
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = flowOf(emptyList())
     }

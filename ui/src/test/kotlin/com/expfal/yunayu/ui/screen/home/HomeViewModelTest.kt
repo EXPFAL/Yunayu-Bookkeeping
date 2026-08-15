@@ -1,8 +1,10 @@
 package com.expfal.yunayu.ui.screen.home
 
+import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -112,6 +114,16 @@ class HomeViewModelTest {
         override fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long> = flowOf(0L)
 
         override fun observeHeldCents(): Flow<Long> = heldCentsOverride ?: heldCentsFlow
+
+        override suspend fun getWindowTotals(
+            startInclusiveMs: Long,
+            endExclusiveMs: Long,
+        ): WindowTotals = WindowTotals(0L, 0L)
+
+        override suspend fun getExpenseByCategory(
+            startInclusiveMs: Long,
+            endExclusiveMs: Long,
+        ): List<CategoryExpense> = emptyList()
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = recentFlow
     }
