@@ -33,6 +33,8 @@ class TransactionRepositoryImpl @Inject constructor(
         endExclusiveMs: Long,
     ): Flow<Long> = transactionDao.observeExpenseSumBetween(startInclusiveMs, endExclusiveMs)
 
+    override fun observeHeldCents(): Flow<Long> = transactionDao.observeHeldCents()
+
     override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
         transactionDao.observeRecent(limit)
             .map { rows -> rows.map { it.toRecentDomain() } }

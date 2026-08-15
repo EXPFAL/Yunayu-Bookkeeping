@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.nl.model.NlParseResult
@@ -43,6 +44,8 @@ data class QuickAddUiState(
     val nlFailure: NlParseFailure? = null,
     /** NL 模式下最终落库的标签 id，独立于两模式共享的 [selectedTagId]，避免残留预选污染 NL 交易。 */
     val nlTagId: Long? = null,
+    /** 数字模式的收/支方向，默认支出；NL 模式忽略，以解析草稿 [nlDraft] 的 type 为准。 */
+    val transactionType: TransactionType = TransactionType.EXPENSE,
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -105,6 +108,7 @@ class QuickAddViewModel @Inject constructor(
                 confirmRequested = false,
                 saveFailed = false,
                 nlTagId = null,
+                transactionType = TransactionType.EXPENSE,
             )
         }
     }
@@ -207,6 +211,14 @@ class QuickAddViewModel @Inject constructor(
     }
 
     /**
+     * 切换数字模式收/支方向；saving / nlParsing / confirmRequested 期间忽略，守卫同 [setNlMode]。
+     */
+    fun setType(type: TransactionType) {
+        if (_uiState.value.saving || _uiState.value.nlParsing || _uiState.value.confirmRequested) return
+        _uiState.update { it.copy(transactionType = type) }
+    }
+
+    /**
      * 尝试保存：金额非法或非正数时不响应；金额超过阈值且未确认时仅弹确认；
      * 否则真正落库。saving 期间重复调用直接忽略。
      */
@@ -240,6 +252,7 @@ class QuickAddViewModel @Inject constructor(
     }
 
     private fun persist(amountCents: Long) {
+        val type = _uiState.value.transactionType
         _uiState.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
             runCatching {
@@ -247,6 +260,7 @@ class QuickAddViewModel @Inject constructor(
                     amountCents = amountCents,
                     tagId = _uiState.value.selectedTagId,
                     occurredAt = System.currentTimeMillis(),
+                    type = type,
                 )
             }.onSuccess {
                 nlConfirmPending = false
@@ -285,6 +299,7 @@ class QuickAddViewModel @Inject constructor(
                 nlFailure = null,
                 confirmRequested = false,
                 nlTagId = null,
+                transactionType = TransactionType.EXPENSE,
             )
         }
     }

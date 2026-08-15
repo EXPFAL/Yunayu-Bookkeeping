@@ -24,6 +24,16 @@ class AddTransactionUseCaseTest {
     }
 
     @Test
+    fun `creates income transaction when type specified`() = runTest {
+        val repository = FakeTransactionRepository()
+        val useCase = AddTransactionUseCase(repository)
+
+        useCase(amountCents = 500L, tagId = null, occurredAt = 1L, type = TransactionType.INCOME)
+
+        assertEquals(TransactionType.INCOME, repository.added.single().type)
+    }
+
+    @Test
     fun `passes amountCents tagId and occurredAt through`() = runTest {
         val repository = FakeTransactionRepository()
         val useCase = AddTransactionUseCase(repository)
@@ -67,6 +77,8 @@ class AddTransactionUseCaseTest {
             startInclusiveMs: Long,
             endExclusiveMs: Long,
         ): Flow<Long> = flowOf(0L)
+
+        override fun observeHeldCents(): Flow<Long> = flowOf(0L)
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
             flowOf(emptyList())

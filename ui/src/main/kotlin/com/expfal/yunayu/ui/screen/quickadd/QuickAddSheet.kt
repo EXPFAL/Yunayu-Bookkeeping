@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.ui.util.formatCents
 import com.expfal.yunayu.ui.util.tagDisplayName
 import com.expfal.yunayu.ui.util.vibrateSuccess
@@ -78,7 +79,13 @@ fun QuickAddSheet(
     }
 
     if (uiState.confirmRequested) {
+        val isIncome = if (uiState.nlMode) {
+            uiState.nlDraft?.type == TransactionType.INCOME
+        } else {
+            uiState.transactionType == TransactionType.INCOME
+        }
         NecessaryExpenseDialog(
+            isIncome = isIncome,
             onConfirm = viewModel::onConfirmNecessary,
             onDismiss = viewModel::onDismissConfirm,
         )
@@ -101,6 +108,11 @@ fun QuickAddSheet(
             )
             Spacer(modifier = Modifier.height(16.dp))
             if (!uiState.nlMode) {
+                TypeToggle(
+                    transactionType = uiState.transactionType,
+                    onTypeChange = viewModel::setType,
+                )
+                Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = "¥ " + formatCents(QuickAddViewModel.parseAmountToCents(uiState.amountText) ?: 0L),
                     style = MaterialTheme.typography.displayLarge,
@@ -262,16 +274,41 @@ private fun TagPickerRow(tag: Tag, selected: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 大额交易的温和二次确认，措辞克制、不说教。 */
+/** 数字模式收/支方向切换控件：仅数字模式展示，样式与 [NlModeToggle] 一致。 */
+@Composable
+private fun TypeToggle(
+    transactionType: TransactionType,
+    onTypeChange: (TransactionType) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = transactionType == TransactionType.EXPENSE,
+            onClick = { onTypeChange(TransactionType.EXPENSE) },
+            label = { Text("支出") },
+        )
+        FilterChip(
+            selected = transactionType == TransactionType.INCOME,
+            onClick = { onTypeChange(TransactionType.INCOME) },
+            label = { Text("收入") },
+        )
+    }
+}
+
+/** 大额交易的温和二次确认，措辞克制、不说教；收入侧不出现「必要支出」表述。 */
 @Composable
 private fun NecessaryExpenseDialog(
+    isIncome: Boolean,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("这笔属于必要支出吗？") },
-        text = { Text("只是帮你多确认一下。") },
+        title = { Text(if (isIncome) "确认记一笔收入？" else "这笔属于必要支出吗？") },
+        text = { Text(if (isIncome) "收入会计入持有资金，不计入本月支出。" else "只是帮你多确认一下。") },
         confirmButton = {
             TextButton(onClick = onConfirm) { Text("记一笔") }
         },

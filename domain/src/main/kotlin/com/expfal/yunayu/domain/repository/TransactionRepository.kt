@@ -24,4 +24,10 @@ interface TransactionRepository {
 
     /** 观察最近 [limit] 笔交易摘要（含标签名），按发生时间倒序。 */
     fun observeRecent(limit: Int): Flow<List<RecentTransaction>>
+
+    /**
+     * 观察持有资金（分）：口径为「累计收入 − 累计支出」（全历史净结余），
+     * 无任何交易时发射 `0`。
+     */
+    fun observeHeldCents(): Flow<Long>
 }

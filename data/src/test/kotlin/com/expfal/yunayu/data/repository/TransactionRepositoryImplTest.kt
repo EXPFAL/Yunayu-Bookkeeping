@@ -75,6 +75,16 @@ class TransactionRepositoryImplTest {
     }
 
     @Test
+    fun `observeHeldCents delegates to dao`() = runTest {
+        val dao = FakeTransactionDao().apply { heldCentsFlow = flowOf(-5_000L) }
+        val repository = TransactionRepositoryImpl(dao)
+
+        val held = repository.observeHeldCents().first()
+
+        assertEquals(-5_000L, held)
+    }
+
+    @Test
     fun `observeRecent maps rows including null tagName`() = runTest {
         val dao = FakeTransactionDao().apply {
             recentRowsFlow = flowOf(

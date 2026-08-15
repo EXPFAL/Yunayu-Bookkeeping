@@ -122,6 +122,84 @@ class QuickAddViewModelTest {
     }
 
     @Test
+    fun `saves income transaction when type switched`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val viewModel = viewModel(FakeTagRepository(), txRepo)
+
+        viewModel.setType(TransactionType.INCOME)
+        viewModel.onDigit('5')
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals(TransactionType.INCOME, txRepo.added.single().type)
+        assertEquals(500L, txRepo.added.single().amountCents)
+    }
+
+    @Test
+    fun `setType is ignored while saving`() = runTest {
+        val gate = CompletableDeferred<Long>()
+        val txRepo = FakeTransactionRepository().apply { addGate = gate }
+        val viewModel = viewModel(FakeTagRepository(), txRepo)
+
+        viewModel.onDigit('1')
+        viewModel.onSave()
+
+        assertTrue(viewModel.uiState.value.saving)
+
+        viewModel.setType(TransactionType.INCOME)
+        assertEquals(TransactionType.EXPENSE, viewModel.uiState.value.transactionType)
+
+        gate.complete(7L)
+        runCurrent()
+        assertFalse(viewModel.uiState.value.saving)
+    }
+
+    @Test
+    fun `resetForOpen resets transactionType to expense`() = runTest {
+        val viewModel = viewModel(FakeTagRepository(), FakeTransactionRepository())
+
+        viewModel.setType(TransactionType.INCOME)
+        assertEquals(TransactionType.INCOME, viewModel.uiState.value.transactionType)
+
+        viewModel.resetForOpen()
+        assertEquals(TransactionType.EXPENSE, viewModel.uiState.value.transactionType)
+    }
+
+    @Test
+    fun `setNlMode resets transactionType to expense`() = runTest {
+        val viewModel = viewModel(FakeTagRepository(), FakeTransactionRepository())
+
+        viewModel.setType(TransactionType.INCOME)
+        assertEquals(TransactionType.INCOME, viewModel.uiState.value.transactionType)
+
+        viewModel.setNlMode(true)
+        assertEquals(TransactionType.EXPENSE, viewModel.uiState.value.transactionType)
+    }
+
+    @Test
+    fun `income large amount confirms then saves as income`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val viewModel = viewModel(FakeTagRepository(), txRepo)
+
+        viewModel.setType(TransactionType.INCOME)
+        viewModel.onDigit('1')
+        viewModel.onDigit('5')
+        viewModel.onDigit('0')
+        viewModel.onSave()
+
+        assertTrue(viewModel.uiState.value.confirmRequested)
+        assertEquals(0, txRepo.added.size)
+
+        viewModel.onConfirmNecessary()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals(TransactionType.INCOME, txRepo.added.single().type)
+        assertEquals(15000L, txRepo.added.single().amountCents)
+    }
+
+    @Test
     fun `ignores repeated save while saving`() = runTest {
         val gate = CompletableDeferred<Long>()
         val txRepo = FakeTransactionRepository().apply { addGate = gate }
@@ -591,6 +669,8 @@ class QuickAddViewModelTest {
         override fun observeByTag(tagId: Long): Flow<List<Transaction>> = flowOf(emptyList())
 
         override fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long> = flowOf(0L)
+
+        override fun observeHeldCents(): Flow<Long> = flowOf(0L)
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = flowOf(emptyList())
     }

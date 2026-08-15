@@ -62,6 +62,13 @@ interface TransactionDao {
     )
     fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long>
 
+    /** 观察持有资金（分）= 累计收入 − 累计支出（全历史），无交易时返回 0。 */
+    @Query(
+        "SELECT COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount_cents ELSE -amount_cents END), 0) " +
+            "FROM transactions",
+    )
+    fun observeHeldCents(): Flow<Long>
+
     /** 观察最近 [limit] 笔交易（含标签名与图标），按发生时间倒序。 */
     @Query(
         "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +

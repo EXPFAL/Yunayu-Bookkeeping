@@ -64,6 +64,7 @@ class FakeTransactionDao : TransactionDao {
     val recentFrequentTagsCalls = mutableListOf<Pair<Long, Int>>()
     var expenseSumFlow: Flow<Long> = flowOf(0L)
     val expenseSumCalls = mutableListOf<Pair<Long, Long>>()
+    var heldCentsFlow: Flow<Long> = flowOf(0L)
     var recentRowsFlow: Flow<List<TransactionDao.RecentTransactionRow>> = flowOf(emptyList())
     val recentCalls = mutableListOf<Int>()
     var countByTagIdsResult: Int = 0
@@ -95,6 +96,8 @@ class FakeTransactionDao : TransactionDao {
         expenseSumCalls += startInclusiveMs to endExclusiveMs
         return expenseSumFlow
     }
+
+    override fun observeHeldCents(): Flow<Long> = heldCentsFlow
 
     override fun observeRecent(limit: Int): Flow<List<TransactionDao.RecentTransactionRow>> {
         recentCalls += limit

@@ -208,6 +208,8 @@ class MonthlyBudgetEngineImplTest {
             }
         }
 
+        override fun observeHeldCents(): Flow<Long> = flowOf(0L)
+
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
             flowOf(emptyList())
     }
