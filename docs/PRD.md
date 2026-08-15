@@ -37,23 +37,33 @@
    - 技术要点：combine → 备注防抖(300ms) → flatMapLatest 订阅 observeFiltered；DeleteTransactionUseCase 删除成功后置 FAILED，复用报告页手动重试
    - 口径：本期仅删除、不含编辑、不预留编辑入口；± 为展示符号，不改 amountCents 存储口径
    - 验收要点：标签多选跨父子类生效；时间快捷项即时过滤；备注关键词模糊命中；删除需二次确认且成功/失败均有反馈
+8. 收入分类推荐（已随本次迭代交付）
+   - 方案：分类推荐按收支方向分别统计，收入记账展示收入语境标签；收入历史为空回退根标签补足；不新增收入专属根类（P3 增强）
+   - 技术要点：getRecentFrequentTags SQL 加 type 过滤（参数绑定，复用 (occurred_at,type) 复合索引，零 schema 变更）；TagRepository.getRecentUsedTags / GetRecentCategoriesUseCase 逐层加 type（无默认值）；QuickAddViewModel setType 联动刷新（refreshJob 取消重放防竞态、NL 模式刷新不触碰 selectedTagId/nlTagId）
+   - 验收要点：切换收/支方向即时刷新推荐；收入历史为空回退根标签；收入不展示支出语境标签
 
 ### P2（暂缓，日常使用率验证通过前不开发）
-8. 课程表联动（iCal 解析；上课日/周末/假期维度分析）
-9. 兼职/奖学金追踪（收入标签组 + 攒钱目标进度条）
-10. NL 备注兜底
+9. 课程表联动（iCal 解析；上课日/周末/假期维度分析）
+10. 兼职/奖学金追踪（收入标签组 + 攒钱目标进度条）
+11. NL 备注兜底
    - 方案：NL 链路每条记录必有备注（Prompt 强指令 + 本地启发式剥离兜底，≤8 字）
    - 技术要点：NlPromptBuilder 强 note 指令 + NlNoteFallback 本地剥离（日期→金额→标签短语→填充词→截断≤8→≥2字校验），仅 LLM 未输出 note 时生效
-11. 月度/年度报告
+12. 月度/年度报告
    - 方案：打开应用补生成上月月报/1 月补上年年报（封顶 2 份）；报告页列表/详情/失败手动重试
    - 技术要点：LLM ≤500 字分析走现有 OpenAI 兼容 API 通道；reports 表 + 幂等补生成
-12. 记录展示优化（已随本次迭代交付）
+13. 记录展示优化（已随本次迭代交付）
    - 方案：最近记录行新增备注次级行（时间下方、非空才显示、最多 2 行省略）；金额统一方向化符号——收入「+金额」主色、支出「-金额」常规色（ASCII 符号）
    - 技术要点：RecentTransaction 加 note（默认 null）；首页与收支管理页共用公共行 TransactionRow；formatSignedCents / formatTime 上提 ui/util 公共纯函数
    - 口径：± 仅展示层，amountCents 恒为正数不改存储；备注非空且非空白才显示
-13. 标签选择折叠优化（已随本次迭代交付）
+14. 标签选择折叠优化（已随本次迭代交付）
    - 方案：父类分组头可点击展开/收起 + 箭头指示 + 分组分隔线；根标签自身行（self 行）独立可点选；子类默认折叠、仅展开时渲染
    - 技术要点：共享折叠树组件 TagTreeList（rememberSaveable 展开集合）；快速记账「更多分类」弹层改用之；数字与 NL 模式共用
+   - 迭代增强（已随本次迭代交付）：父类分组头 titleSmall→titleMedium(16sp)、颜色 onSurface→onSurfaceVariant，与子类 bodyMedium(14sp)/onSurface 形成字号+颜色双重层级（选中态主色+Check、分隔线、子类 32dp 缩进不变）；上滑后展开/收起滚动位置跳变修复——显式 rememberLazyListState + toggle 前记录 firstVisibleItemIndex/offset + LaunchedEffect(expandedRootIds) scrollToItem 恢复 + heightIn(max=420.dp) 稳定 ModalBottomSheet 尺寸，QuickAdd 单选与收支管理多选两场景共用
+15. 无匹配标签应对（已随本次迭代交付）
+   - 方案：未分类兜底（tagId 可空落库现状固化 + 显式用例）+ 弹层新建标签（QuickAddSheet TagPickerSheet「新建标签」入口 → QuickAddNewTag 表单：命名+选根类+创建即选中落库）+ AI 辅助决策（NL 未匹配短语自动建议卡、数字模式新建表单「AI 推荐所属根类」仅预填）
+   - 技术要点：新建走 TagRepository.addSubTag，重名 DuplicateTagNameException→「同名标签已存在」不崩；AI 复用 NLTransactionParser.generate 接缝，新增 domain 纯函数链 TagSuggestionPromptBuilder / TagSuggestionOutputParser + SuggestNewTagUseCase（任何失败返回 null 静默降级、20s 超时）；AI 仅建议、创建必须用户确认、绝不自动落库
+   - 口径：NL 建议确认后「创建并使用」一次完成创建+选中+落库，拒绝降级未分类/手动；refreshSuggestedTags 增 preselectTagId 防新建后选中被异步覆盖
+   - 验收要点：无匹配标签仍可正常记账（未分类）；重名新建不崩溃且提示清晰；AI 建议失败静默降级不阻塞记账
 
 ## 二、明确砍掉的功能（scope 红线，实现任何一项即视为违规）
 - 多成员/共享记账（个人使用无需权限体系）

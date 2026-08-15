@@ -624,3 +624,53 @@ interface SemesterBudgetEngine {
   - `FakeTransactionDao` 1 处：`data/.../TestFakes.kt`（补 `deleteById` / `observeFiltered` / `observeFilteredByTags` 并记录调用入参）。
 - 本次新增测试自带 2 处 fake（`DeleteTransactionUseCaseTest`、`TransactionManageViewModelTest`）不计入既有同步清单；后续再扩接口，先更新上述 fake 再编译。
 
+---
+
+## 18. 标签与分类四项迭代交付记录
+
+> 触发时机：P1「收入分类推荐」、P2「无匹配标签应对（A+B+AI）」与 TagTreeList 层级视觉 / 滚动修复落地。零 schema 变更（复用既有 `(occurred_at, type)` 复合索引）。
+
+### 18.1 type 感知推荐契约
+
+- `TransactionDao.getRecentFrequentTags(sinceEpochMillis, type: String, limit: Int)`：SQL 新增 `AND transactions.type = :type`（参数绑定），复用 §7.2 既有 `(occurred_at, type)` 复合索引，零 schema 变更。
+- `TagRepository.getRecentUsedTags(sinceEpochMillis, type: TransactionType, limit: Int)` 与 `GetRecentCategoriesUseCase.invoke(type: TransactionType, ...)`：`type` 均无默认值，强制调用方显式声明方向，收入与支出各自独立统计、互不污染。
+- `TagRepositoryImpl.getRecentUsedTags` 透传 `type.name`；收入历史为空经 §10.2 既有根标签补足语义兜底。
+- 竞态处理：`QuickAddViewModel.setType` 切换方向即 `refreshSuggestedTags()`；`refreshSuggestedTags` 以 `suggestedTagsJob?.cancel()` 取消重放，防陈旧方向结果覆盖新方向。`resetForOpen` 不再内部刷新（移除双重刷新），刷新由 `QuickAddSheet` 的 `LaunchedEffect` 显式执行。
+- NL 守卫：`refreshSuggestedTags` 在 NL 模式下仅更新 `suggestedTags` / `rootNameById`，不触碰 `selectedTagId` / `nlTagId`，防异步刷新抹掉解析命中或手动修正。
+
+### 18.2 新建标签链路与重名语义
+
+- 入口：QuickAdd「更多分类」选择层（`TagPickerSheet`）顶部「新建标签」→ `QuickAddNewTag` 表单（命名 + 根类 FilterChip 选择 + 创建）。
+- 落库：`TagRepository.addSubTag(parentId, name, icon = null)`；`parentId` 为非空 `Long`，类型层面禁止创建根标签（根只读规则沿用 §11.3）。
+- 重名双保险：`TagRepositoryImpl.addSubTag` 先 `countByName` 预检，命中抛 `DuplicateTagNameException`；再 catch `SQLiteConstraintException`（UNIQUE）兜底二次判断。
+- 重名语义：UI 捕获 `DuplicateTagNameException` → 「同名标签已存在」，其余异常「创建失败，请重试」，均不崩溃。
+- 创建即选中：成功按模式写入选中态（NL 同步 `nlTagId` + `selectedTagId`，数字仅 `selectedTagId`），`loadAllTags()` 刷新全量 + `refreshSuggestedTags(preselectTagId = newId)` 防异步覆盖。
+
+### 18.3 AI 建议接缝设计与降级语义
+
+- 设计决策：复用 `NLTransactionParser`（`isAvailable` / `generate`）通用接缝，不新建独立引擎通道；新增 domain 纯函数链 `TagSuggestionPromptBuilder`（object，systemInstruction = 角色 + schema + few-shot + 候选根类）+ `TagSuggestionOutputParser`（object，抽首个 `{`~`}` JSON 片段、逐字段容错、root 不在候选集返回 null）+ `TagSuggestion` 模型 + `SuggestNewTagUseCase` 编排。
+- 全链路降级：`SuggestNewTagUseCase` 任何非取消异常 → null（domain 无日志），`CancellationException` 重抛；ViewModel 层 `withTimeoutOrNull(20_000L)` 超时 → null。AI 仅建议、创建必须用户确认、绝不自动落库（可控性优先于适应性）。
+- 触发路径：NL 模式解析成功且 `tagId == null` 且 `tagPhrase` 非空白 → 自动 `suggestTagForDraft` → 建议卡「创建并使用」/「不用了」；确认走 `confirmNlTagSuggestion`（resolveRootId + createSubTag，一次完成创建+选中+落库），拒绝仅清空建议降级未分类/手动。数字模式新建表单「AI 推荐所属根类」仅预填 `newTagRootId`（可改），失败提示「AI 推荐不可用，请手动选择」。
+- 状态清理：`newTagName` / `newTagRootId` / `newTagBusy` / `newTagError` / `newTagSuggesting` / `nlTagSuggestion` 纳入 `resetForOpen` / `setNlMode` 清理，防跨开闭残留。
+
+### 18.4 TagTreeList 滚动修复与层级视觉
+
+- 问题：ModalBottomSheet 内 LazyColumn 动态插入/移除子项 items 实现折叠，上滑后展开/收起导致滚动位置跳变/重置。
+- 修复：显式 `rememberLazyListState()`；toggle 前记录 `scrollAnchor = firstVisibleItemIndex to firstVisibleItemScrollOffset`；`LaunchedEffect(expandedRootIds)` 内 `scrollToItem(index, offset)` 恢复后清空 anchor；外层 `heightIn(max = 420.dp)` 稳定各宿主 ModalBottomSheet 尺寸、防止重测量。
+- 两场景共用：QuickAdd「更多分类」单选（点选即关闭）与收支管理标签筛选多选（点选不关闭）共用同一组件，滚动修复同时生效。
+- 层级视觉：父类分组头 `titleMedium(16sp)` + Bold + `onSurfaceVariant`，子类 `bodyMedium(14sp)` + `onSurface`，形成字号 + 颜色双重层级；选中态主色 + Check、分组分隔线、子类 32dp 缩进不变。
+
+### 18.5 接口扩展 fake 同步纪律
+
+- 接口扩展（`TagRepository.getRecentUsedTags` 加 `type`、`TransactionDao.getRecentFrequentTags` 加 `type`）不设默认实现，须同步更新全部手写 fake：
+  - `GetRecentCategoriesUseCaseTest`、`QuickAddViewModelTest`、`ParseNaturalLanguageTransactionUseCaseTest`、`TagManageViewModelTest`、`TransactionManageViewModelTest` 共 5 处；
+  - `TestFakes.kt` 的 `FakeTransactionDao.getRecentFrequentTags` 记录 `(since, type, limit)` 入参；
+  - `TagRepositoryImplTest` 补 `getRecentUsedTags` 带 `type` 透传断言。
+- 本次新增 `TagSuggestionPromptBuilderTest` / `TagSuggestionOutputParserTest` 自带 fake，不计入同步清单。
+
+### 18.6 已知限制
+
+- AI 建议为「未匹配标签」罕见路径的第二跳网络请求，最坏 20s 超时（`TAG_SUGGESTION_TIMEOUT_MILLIS`）；超时/失败均静默降级，不阻塞记账主流程。
+- 推荐 type 过滤复用既有 `(occurred_at, type)` 复合索引；更优的 `(type, occurred_at)` 前缀索引属未来 schema 项，当前单用户万笔量级无需。
+- 报告失效机制沿用 §17.3：新建/删除标签不触碰 reports 失效逻辑，仅删除交易触发置 FAILED。
+
