@@ -10,9 +10,16 @@ object NlOutputParser {
      * 从模型原始文本中抽取首个 `{` 到末个 `}` 的 JSON 片段，逐字段容错解析。
      *
      * 金额为关键字段：缺失或非法时返回 `null`；标签短语/备注/日期为可选字段，日期缺失或
-     * 非法时回退为 [nowEpochMillis]；`type` 缺省为 `EXPENSE`。
+     * 非法时回退为 [nowEpochMillis]；`type` 缺省为 `EXPENSE`。当模型未输出 `note` 时，
+     * 用 [originalInput] 经 [NlNoteFallback] 本地兜底生成备注；[originalInput] 缺省为
+     * `null`（不兜底），保持两参调用兼容。最终 `note`（无论模型产出还是兜底）统一经
+     * [NlNoteFallback.truncateNote] 截断至 ≤8 字，避免 UTF-16 孤立代理。
      */
-    fun parseToDraft(rawOutput: String?, nowEpochMillis: Long): NlTransactionDraft? {
+    fun parseToDraft(
+        rawOutput: String?,
+        nowEpochMillis: Long,
+        originalInput: String? = null,
+    ): NlTransactionDraft? {
         val raw = rawOutput?.trim().orEmpty()
         if (raw.isEmpty()) return null
         val start = raw.indexOf('{')
@@ -25,7 +32,9 @@ object NlOutputParser {
 
         val type = resolveType(extractField(json, KEY_TYPE))
         val tagPhrase = extractField(json, KEY_TAG)?.trim()?.takeIf { it.isNotEmpty() }
-        val note = extractField(json, KEY_NOTE)?.trim()?.takeIf { it.isNotEmpty() }
+        val modelNote = extractField(json, KEY_NOTE)?.trim()?.takeIf { it.isNotEmpty() }
+        val note = (modelNote ?: NlNoteFallback.extractNote(originalInput, tagPhrase))
+            ?.let { NlNoteFallback.truncateNote(it) }
         val occurredAt = NlAmountDate.parseOccurredAtEpochMillis(
             extractField(json, KEY_DATE),
             nowEpochMillis,

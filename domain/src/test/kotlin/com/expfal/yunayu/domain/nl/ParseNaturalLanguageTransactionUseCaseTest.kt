@@ -136,6 +136,22 @@ class ParseNaturalLanguageTransactionUseCaseTest {
         assertTrue(call.first.contains("生活·餐饮"))
     }
 
+    @Test
+    fun `backfills note via fallback when model omits note`() = runTest {
+        val parser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"生活·餐饮\"}"
+        }
+        val repository = FakeTagRepository().apply {
+            childrenByParent[null] = listOf(tag(1L, "生活"))
+            childrenByParent[1L] = listOf(tag(11L, "餐饮", 1L))
+        }
+        val useCase = ParseNaturalLanguageTransactionUseCase(parser, repository)
+
+        val draft = assertSuccess(useCase("午饭花了20块", now))
+
+        assertEquals("午饭", draft.note)
+    }
+
     private fun assertSuccess(result: NlParseResult): NlTransactionDraft =
         (result as? NlParseResult.Success)?.draft
             ?: error("expected success but was $result")

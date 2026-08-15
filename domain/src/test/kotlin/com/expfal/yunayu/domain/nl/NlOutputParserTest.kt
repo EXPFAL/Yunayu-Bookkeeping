@@ -67,4 +67,50 @@ class NlOutputParserTest {
 
         assertEquals(now, draft.occurredAtEpochMillis)
     }
+
+    @Test
+    fun `backfills note from original input when note absent`() {
+        val draft = NlOutputParser.parseToDraft(
+            "{\"amount\":\"20\",\"type\":\"expense\"}",
+            now,
+            "午饭花了20块",
+        )!!
+
+        assertEquals("午饭", draft.note)
+    }
+
+    @Test
+    fun `keeps model note over fallback`() {
+        val draft = NlOutputParser.parseToDraft(
+            "{\"amount\":\"20\",\"note\":\"午餐\"}",
+            now,
+            "午饭花了20块",
+        )!!
+
+        assertEquals("午餐", draft.note)
+    }
+
+    @Test
+    fun `still returns null when amount missing despite original input`() {
+        assertNull(
+            NlOutputParser.parseToDraft("{\"type\":\"expense\"}", now, "午饭花了20块"),
+        )
+    }
+
+    @Test
+    fun `does not fallback when original input omitted`() {
+        val draft = NlOutputParser.parseToDraft("{\"amount\":\"20\"}", now)!!
+
+        assertNull(draft.note)
+    }
+
+    @Test
+    fun `truncates long model note to eight chars`() {
+        val draft = NlOutputParser.parseToDraft(
+            "{\"amount\":\"20\",\"note\":\"一二三四五六七八九十\"}",
+            now,
+        )!!
+
+        assertEquals("一二三四五六七八", draft.note)
+    }
 }

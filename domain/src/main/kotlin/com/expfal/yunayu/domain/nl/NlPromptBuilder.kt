@@ -21,7 +21,7 @@ object NlPromptBuilder {
             "- \"amount\"：金额，纯数字字符串，单位元（如 \"20\"、\"35.5\"）\n" +
             "- \"type\"：\"expense\" 或 \"income\"，缺省 expense\n" +
             "- \"tag\"：标签短语，只能从下方候选标签中选一个，没有把握就省略\n" +
-            "- \"note\"：备注短语，可省略\n" +
+            "- \"note\"：必须从原句提取 2~8 字核心短语作为 note，不含金额与日期，不可省略\n" +
             "- \"date\"：\"今天\"、\"昨天\"、\"前天\" 或 \"YYYY-MM-DD\"，缺省当作今天\n\n"
 
     private const val TAG_PREFIX = "候选标签："

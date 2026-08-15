@@ -41,7 +41,7 @@ class ParseNaturalLanguageTransactionUseCase(
         val raw = parser.generate(instruction, input)
             ?: return NlParseResult.Failure(NlParseFailure.ENGINE_UNAVAILABLE)
 
-        val draft = NlOutputParser.parseToDraft(raw, nowEpochMillis)
+        val draft = NlOutputParser.parseToDraft(raw, nowEpochMillis, input)
             ?: return NlParseResult.Failure(parseFailureFor(raw))
 
         return NlParseResult.Success(
