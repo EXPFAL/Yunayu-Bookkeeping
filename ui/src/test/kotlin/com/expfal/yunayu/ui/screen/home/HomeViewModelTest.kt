@@ -8,6 +8,7 @@ import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -63,6 +64,30 @@ class HomeViewModelTest {
         assertEquals(listOf(1L, 2L), viewModel.uiState.value.recent.map { it.id })
     }
 
+    @Test
+    fun `combines held cents into state`() = runTest {
+        val repo = FakeTransactionRepository().apply { heldCentsFlow.value = 7_500L }
+        val viewModel = HomeViewModel(repo)
+
+        val state = viewModel.uiState.value
+        assertFalse(state.loading)
+        assertEquals(7_500L, state.heldCents)
+    }
+
+    @Test
+    fun `held failure does not clear recent`() = runTest {
+        val repo = FakeTransactionRepository().apply {
+            recentFlow.value = listOf(recent(id = 1L, tagName = "学习"))
+            heldCentsOverride = flow { error("held down") }
+        }
+        val viewModel = HomeViewModel(repo)
+
+        val state = viewModel.uiState.value
+        assertFalse(state.loading)
+        assertEquals(1, state.recent.size)
+        assertEquals(0L, state.heldCents)
+    }
+
     private fun recent(id: Long, tagName: String? = null, amountCents: Long = 1_000L) = RecentTransaction(
         id = id,
         amountCents = amountCents,
@@ -75,6 +100,8 @@ class HomeViewModelTest {
     private class FakeTransactionRepository : TransactionRepository {
 
         val recentFlow = MutableStateFlow<List<RecentTransaction>>(emptyList())
+        val heldCentsFlow = MutableStateFlow(0L)
+        var heldCentsOverride: Flow<Long>? = null
 
         override suspend fun add(transaction: Transaction): Long = 0L
 
@@ -83,6 +110,8 @@ class HomeViewModelTest {
         override fun observeByTag(tagId: Long): Flow<List<Transaction>> = flowOf(emptyList())
 
         override fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long> = flowOf(0L)
+
+        override fun observeHeldCents(): Flow<Long> = heldCentsOverride ?: heldCentsFlow
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = recentFlow
     }

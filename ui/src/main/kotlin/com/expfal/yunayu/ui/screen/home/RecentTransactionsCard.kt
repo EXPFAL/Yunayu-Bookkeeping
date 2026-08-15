@@ -15,6 +15,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.expfal.yunayu.domain.model.RecentTransaction
+import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.ui.util.formatCents
 import java.time.Instant
 import java.time.ZoneId
@@ -50,9 +51,10 @@ fun RecentTransactionsCard(
     }
 }
 
-/** 单条最近记录行：标签名 + 时间（左），金额（右）。 */
+/** 单条最近记录行：标签名 + 时间（左），金额（右），收入以「+」前缀与主色区方向。 */
 @Composable
 private fun RecentTransactionRow(transaction: RecentTransaction) {
+    val isIncome = transaction.type == TransactionType.INCOME
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -65,7 +67,11 @@ private fun RecentTransactionRow(transaction: RecentTransaction) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        Text(formatCents(transaction.amountCents), style = MaterialTheme.typography.bodyMedium)
+        Text(
+            text = (if (isIncome) "+" else "") + formatCents(transaction.amountCents),
+            style = MaterialTheme.typography.bodyMedium,
+            color = if (isIncome) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
     }
 }
 

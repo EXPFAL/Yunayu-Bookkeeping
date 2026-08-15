@@ -72,6 +72,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                         onSetup = { showBudgetSetup = true },
                     )
                     Spacer(modifier = Modifier.height(16.dp))
+                    HeldFundsCard(heldCents = homeState.heldCents)
+                    Spacer(modifier = Modifier.height(16.dp))
                     Row {
                         TextButton(onClick = { fullScreen = FullScreen.TAG_MANAGE }) {
                             Text("管理标签")
