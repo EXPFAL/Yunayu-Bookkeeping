@@ -666,6 +666,8 @@ class QuickAddViewModelTest {
             return nextId
         }
 
+        override suspend fun delete(transactionId: Long) = Unit
+
         override fun observeAll(): Flow<List<Transaction>> = flowOf(emptyList())
 
         override fun observeByTag(tagId: Long): Flow<List<Transaction>> = flowOf(emptyList())
@@ -685,6 +687,13 @@ class QuickAddViewModelTest {
         ): List<CategoryExpense> = emptyList()
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = flowOf(emptyList())
+
+        override fun observeFiltered(
+            startInclusiveMs: Long?,
+            endExclusiveMs: Long?,
+            tagIds: List<Long>,
+            noteKeyword: String?,
+        ): Flow<List<RecentTransaction>> = flowOf(emptyList())
     }
 
     /** [NLTransactionParser] 手写 fake：可控可用性与返回，用于 NL 解析路径。 */

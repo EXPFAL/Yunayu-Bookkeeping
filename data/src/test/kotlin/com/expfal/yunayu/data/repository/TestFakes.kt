@@ -73,6 +73,11 @@ class FakeTransactionDao : TransactionDao {
     val recentCalls = mutableListOf<Int>()
     var countByTagIdsResult: Int = 0
     val countByTagIdsCalls = mutableListOf<List<Long>>()
+    val deletedByIdCalls = mutableListOf<Long>()
+    var filteredRowsFlow: Flow<List<TransactionDao.RecentTransactionRow>> = flowOf(emptyList())
+    val filteredCalls = mutableListOf<Triple<Long?, Long?, String?>>()
+    var filteredByTagsRowsFlow: Flow<List<TransactionDao.RecentTransactionRow>> = flowOf(emptyList())
+    val filteredByTagsCalls = mutableListOf<Pair<Triple<Long?, Long?, String?>, List<Long>>>()
 
     override suspend fun insert(transaction: TransactionEntity): Long {
         inserted += transaction
@@ -80,6 +85,10 @@ class FakeTransactionDao : TransactionDao {
     }
 
     override suspend fun delete(transaction: TransactionEntity) = Unit
+
+    override suspend fun deleteById(id: Long) {
+        deletedByIdCalls += id
+    }
 
     override fun observeAll(): Flow<List<TransactionEntity>> = flowOf(emptyList())
 
@@ -122,6 +131,25 @@ class FakeTransactionDao : TransactionDao {
     override fun observeRecent(limit: Int): Flow<List<TransactionDao.RecentTransactionRow>> {
         recentCalls += limit
         return recentRowsFlow
+    }
+
+    override fun observeFiltered(
+        startInclusiveMs: Long?,
+        endExclusiveMs: Long?,
+        noteKeyword: String?,
+    ): Flow<List<TransactionDao.RecentTransactionRow>> {
+        filteredCalls += Triple(startInclusiveMs, endExclusiveMs, noteKeyword)
+        return filteredRowsFlow
+    }
+
+    override fun observeFilteredByTags(
+        startInclusiveMs: Long?,
+        endExclusiveMs: Long?,
+        noteKeyword: String?,
+        tagIds: List<Long>,
+    ): Flow<List<TransactionDao.RecentTransactionRow>> {
+        filteredByTagsCalls += Triple(startInclusiveMs, endExclusiveMs, noteKeyword) to tagIds
+        return filteredByTagsRowsFlow
     }
 
     override suspend fun countByTagIds(tagIds: List<Long>): Int {

@@ -15,6 +15,20 @@ object TimeWindows {
     fun monthStartMillis(today: LocalDate): Long =
         today.withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
+    /**
+     * 近 [days] 天窗口起点（系统默认时区）：今日零点回退 `days - 1` 天，含今日共 [days] 个自然日。
+     *
+     * 与 [monthStartMillis] 同用 `atStartOfDay(ZoneId.systemDefault())` 口径，保证时区处理一致；
+     * `days` 必须为正整数。
+     */
+    fun lastNDaysStartMillis(today: LocalDate, days: Int): Long {
+        require(days >= 1) { "近 N 天窗口天数必须 >= 1，实际: $days" }
+        return today.minusDays((days - 1).toLong())
+            .atStartOfDay(ZoneId.systemDefault())
+            .toInstant()
+            .toEpochMilli()
+    }
+
     /** 下月 1 日 00:00（系统默认时区）对应的毫秒，作为窗口不含端终点。 */
     fun nextMonthStartMillis(today: LocalDate): Long =
         monthEnd(today).plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()

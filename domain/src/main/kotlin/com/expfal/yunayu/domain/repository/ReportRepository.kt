@@ -15,4 +15,12 @@ interface ReportRepository {
 
     /** 插入或更新一份报告。 */
     suspend fun upsert(report: Report)
+
+    /**
+     * 将窗口覆盖 [epochMillis] 的报告状态置为 FAILED，供报告页手动重试前标脏。
+     *
+     * 覆盖口径为半开区间 `[windowStartMs, windowEndMs)`，月报与年报均按此口径存储，
+     * 因此单次调用同时命中月报与年报。
+     */
+    suspend fun invalidateWhereWindowContains(epochMillis: Long)
 }

@@ -194,6 +194,8 @@ class MonthlyBudgetEngineImplTest {
 
         override suspend fun add(transaction: Transaction): Long = 0L
 
+        override suspend fun delete(transactionId: Long) = Unit
+
         override fun observeAll(): Flow<List<Transaction>> = transactions
 
         override fun observeByTag(tagId: Long): Flow<List<Transaction>> = flowOf(emptyList())
@@ -224,5 +226,12 @@ class MonthlyBudgetEngineImplTest {
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
             flowOf(emptyList())
+
+        override fun observeFiltered(
+            startInclusiveMs: Long?,
+            endExclusiveMs: Long?,
+            tagIds: List<Long>,
+            noteKeyword: String?,
+        ): Flow<List<RecentTransaction>> = flowOf(emptyList())
     }
 }

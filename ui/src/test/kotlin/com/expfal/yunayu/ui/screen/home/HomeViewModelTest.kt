@@ -42,6 +42,18 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun `recent note passes through to state`() = runTest {
+        val repo = FakeTransactionRepository().apply {
+            recentFlow.value = listOf(recent(id = 1L, tagName = "学习", note = "买书"))
+        }
+        val viewModel = HomeViewModel(repo)
+
+        val state = viewModel.uiState.value
+        assertEquals(1, state.recent.size)
+        assertEquals("买书", state.recent.single().note)
+    }
+
+    @Test
     fun `empty recent list yields empty state`() = runTest {
         val viewModel = HomeViewModel(FakeTransactionRepository())
 
@@ -90,12 +102,18 @@ class HomeViewModelTest {
         assertEquals(0L, state.heldCents)
     }
 
-    private fun recent(id: Long, tagName: String? = null, amountCents: Long = 1_000L) = RecentTransaction(
+    private fun recent(
+        id: Long,
+        tagName: String? = null,
+        amountCents: Long = 1_000L,
+        note: String? = null,
+    ) = RecentTransaction(
         id = id,
         amountCents = amountCents,
         type = TransactionType.EXPENSE,
         tagName = tagName,
         occurredAt = 0L,
+        note = note,
     )
 
     /** [TransactionRepository] 手写 fake：以 MutableStateFlow 驱动最近列表。 */
@@ -106,6 +124,8 @@ class HomeViewModelTest {
         var heldCentsOverride: Flow<Long>? = null
 
         override suspend fun add(transaction: Transaction): Long = 0L
+
+        override suspend fun delete(transactionId: Long) = Unit
 
         override fun observeAll(): Flow<List<Transaction>> = flowOf(emptyList())
 
@@ -126,5 +146,12 @@ class HomeViewModelTest {
         ): List<CategoryExpense> = emptyList()
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = recentFlow
+
+        override fun observeFiltered(
+            startInclusiveMs: Long?,
+            endExclusiveMs: Long?,
+            tagIds: List<Long>,
+            noteKeyword: String?,
+        ): Flow<List<RecentTransaction>> = flowOf(emptyList())
     }
 }

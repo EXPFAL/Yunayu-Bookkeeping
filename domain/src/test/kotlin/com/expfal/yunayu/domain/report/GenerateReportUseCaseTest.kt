@@ -162,6 +162,8 @@ class GenerateReportUseCaseTest {
 
         override suspend fun add(transaction: Transaction): Long = 0L
 
+        override suspend fun delete(transactionId: Long) = Unit
+
         override fun observeAll(): Flow<List<Transaction>> = flowOf(emptyList())
 
         override fun observeByTag(tagId: Long): Flow<List<Transaction>> = flowOf(emptyList())
@@ -172,6 +174,13 @@ class GenerateReportUseCaseTest {
         override fun observeHeldCents(): Flow<Long> = flowOf(0L)
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = flowOf(emptyList())
+
+        override fun observeFiltered(
+            startInclusiveMs: Long?,
+            endExclusiveMs: Long?,
+            tagIds: List<Long>,
+            noteKeyword: String?,
+        ): Flow<List<RecentTransaction>> = flowOf(emptyList())
 
         override suspend fun getWindowTotals(
             startInclusiveMs: Long,
@@ -201,6 +210,8 @@ class GenerateReportUseCaseTest {
         override suspend fun upsert(report: Report) {
             upserted += report
         }
+
+        override suspend fun invalidateWhereWindowContains(epochMillis: Long) = Unit
     }
 
     /** [ReportAnalyzer] 手写 fake：可控可用性 / 返回 / 永久挂起（测超时）。 */

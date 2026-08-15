@@ -201,6 +201,7 @@ class ReportRepositoryImplTest {
         val upserted = mutableListOf<ReportEntity>()
         var observeResult: Flow<List<ReportEntity>> = flowOf(emptyList())
         var getByKeyResult: ReportEntity? = null
+        val invalidateCalls = mutableListOf<Long>()
 
         override fun observeByType(type: String): Flow<List<ReportEntity>> = observeResult
 
@@ -208,6 +209,10 @@ class ReportRepositoryImplTest {
 
         override suspend fun upsert(report: ReportEntity) {
             upserted += report
+        }
+
+        override suspend fun invalidateWhereWindowContains(epochMillis: Long) {
+            invalidateCalls += epochMillis
         }
     }
 }

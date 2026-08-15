@@ -12,6 +12,9 @@ interface TransactionRepository {
     /** 新增一笔交易，返回其主键。 */
     suspend fun add(transaction: Transaction): Long
 
+    /** 删除一笔交易（按主键）。 */
+    suspend fun delete(transactionId: Long)
+
     /** 观察全部交易，按发生时间倒序。 */
     fun observeAll(): Flow<List<Transaction>>
 
@@ -47,4 +50,17 @@ interface TransactionRepository {
         startInclusiveMs: Long,
         endExclusiveMs: Long,
     ): List<CategoryExpense>
+
+    /**
+     * 观察按时间窗、标签集合与备注关键字过滤的交易摘要（含标签名），按发生时间倒序。
+     *
+     * `tagIds` 为空表示不按标签过滤；`startInclusiveMs` / `endExclusiveMs` 为 null 表示不设对应边界；
+     * `noteKeyword` 为 null 或空白表示不按备注过滤。备注关键字的通配符（`%`/`_`/`\`）转义由实现层负责。
+     */
+    fun observeFiltered(
+        startInclusiveMs: Long?,
+        endExclusiveMs: Long?,
+        tagIds: List<Long>,
+        noteKeyword: String?,
+    ): Flow<List<RecentTransaction>>
 }

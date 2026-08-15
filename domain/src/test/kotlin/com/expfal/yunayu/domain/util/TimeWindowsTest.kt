@@ -21,6 +21,37 @@ class TimeWindowsTest {
     }
 
     @Test
+    fun `last N days start is today minus N minus 1 days at start of day`() {
+        val today = LocalDate.of(2026, 7, 15)
+
+        assertEquals(startOfDay(LocalDate.of(2026, 7, 9)), TimeWindows.lastNDaysStartMillis(today, 7))
+    }
+
+    @Test
+    fun `last N days start with single day equals today start of day`() {
+        val today = LocalDate.of(2026, 7, 15)
+
+        assertEquals(startOfDay(today), TimeWindows.lastNDaysStartMillis(today, 1))
+    }
+
+    @Test
+    fun `last N days start crosses month boundary`() {
+        val today = LocalDate.of(2026, 3, 2)
+
+        assertEquals(startOfDay(LocalDate.of(2026, 2, 26)), TimeWindows.lastNDaysStartMillis(today, 5))
+    }
+
+    @Test
+    fun `last N days start rejects non-positive days`() {
+        assertThrows(IllegalArgumentException::class.java) {
+            TimeWindows.lastNDaysStartMillis(LocalDate.of(2026, 7, 15), 0)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            TimeWindows.lastNDaysStartMillis(LocalDate.of(2026, 7, 15), -1)
+        }
+    }
+
+    @Test
     fun `month window crosses year boundary from december to january`() {
         val today = LocalDate.of(2026, 12, 31)
 

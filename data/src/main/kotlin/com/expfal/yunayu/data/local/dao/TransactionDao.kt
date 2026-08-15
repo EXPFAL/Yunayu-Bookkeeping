@@ -45,6 +45,10 @@ interface TransactionDao {
     @Delete
     suspend fun delete(transaction: TransactionEntity)
 
+    /** 按主键删除一笔交易。 */
+    @Query("DELETE FROM transactions WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
     /** 观察全部交易，按发生时间倒序。 */
     @Query("SELECT * FROM transactions ORDER BY occurred_at DESC")
     fun observeAll(): Flow<List<TransactionEntity>>
@@ -111,6 +115,44 @@ interface TransactionDao {
             "ORDER BY t.occurred_at DESC, t.id DESC LIMIT :limit",
     )
     fun observeRecent(limit: Int): Flow<List<RecentTransactionRow>>
+
+    /**
+     * 观察满足时间窗与备注关键字过滤的交易（含标签名与图标，不做标签过滤），按发生时间倒序。
+     * 时间参数为 null 表示不设对应边界；关键字为 null 表示不按备注过滤。
+     */
+    @Query(
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
+            "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "WHERE (:startInclusiveMs IS NULL OR t.occurred_at >= :startInclusiveMs) " +
+            "AND (:endExclusiveMs IS NULL OR t.occurred_at < :endExclusiveMs) " +
+            "AND (:noteKeyword IS NULL OR t.note LIKE '%' || :noteKeyword || '%' ESCAPE '\\') " +
+            "ORDER BY t.occurred_at DESC, t.id DESC",
+    )
+    fun observeFiltered(
+        startInclusiveMs: Long?,
+        endExclusiveMs: Long?,
+        noteKeyword: String?,
+    ): Flow<List<RecentTransactionRow>>
+
+    /**
+     * 观察满足时间窗、备注关键字与标签集合过滤的交易（含标签名与图标），按发生时间倒序。
+     * 时间参数为 null 表示不设对应边界；关键字为 null 表示不按备注过滤。
+     */
+    @Query(
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
+            "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "WHERE (:startInclusiveMs IS NULL OR t.occurred_at >= :startInclusiveMs) " +
+            "AND (:endExclusiveMs IS NULL OR t.occurred_at < :endExclusiveMs) " +
+            "AND (:noteKeyword IS NULL OR t.note LIKE '%' || :noteKeyword || '%' ESCAPE '\\') " +
+            "AND t.tag_id IN (:tagIds) " +
+            "ORDER BY t.occurred_at DESC, t.id DESC",
+    )
+    fun observeFilteredByTags(
+        startInclusiveMs: Long?,
+        endExclusiveMs: Long?,
+        noteKeyword: String?,
+        tagIds: List<Long>,
+    ): Flow<List<RecentTransactionRow>>
 
     /** 统计挂在一组标签下的交易数（删除影响面提示）。 */
     @Query("SELECT COUNT(*) FROM transactions WHERE tag_id IN (:tagIds)")

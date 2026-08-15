@@ -21,4 +21,16 @@ interface ReportDao {
     /** 插入或更新报告（冲突判定依赖唯一索引 `(report_type, period_key)`）。 */
     @Upsert
     suspend fun upsert(report: ReportEntity)
+
+    /**
+     * 将窗口覆盖 [epochMillis] 的报告状态置为 FAILED。
+     *
+     * 覆盖口径为半开区间 `[window_start_ms, window_end_ms)`，月报与年报窗口均按此口径存储，
+     * 因此单条更新天然同时命中月报与年报（供报告页手动重试前标脏）。
+     */
+    @Query(
+        "UPDATE reports SET status = 'FAILED' " +
+            "WHERE window_start_ms <= :epochMillis AND window_end_ms > :epochMillis",
+    )
+    suspend fun invalidateWhereWindowContains(epochMillis: Long)
 }

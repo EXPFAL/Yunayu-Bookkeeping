@@ -211,6 +211,8 @@ class ReportViewModelTest {
             val flow = flows.getOrPut(report.periodType) { MutableStateFlow(emptyList()) }
             flow.value = flow.value + report
         }
+
+        override suspend fun invalidateWhereWindowContains(epochMillis: Long) = Unit
     }
 
     /** [TransactionRepository] 手写 fake：记录窗口聚合调用，返回空汇总。 */
@@ -221,6 +223,8 @@ class ReportViewModelTest {
 
         override suspend fun add(transaction: Transaction): Long = 0L
 
+        override suspend fun delete(transactionId: Long) = Unit
+
         override fun observeAll(): Flow<List<Transaction>> = flowOf(emptyList())
 
         override fun observeByTag(tagId: Long): Flow<List<Transaction>> = flowOf(emptyList())
@@ -228,6 +232,13 @@ class ReportViewModelTest {
         override fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long> = flowOf(0L)
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = flowOf(emptyList())
+
+        override fun observeFiltered(
+            startInclusiveMs: Long?,
+            endExclusiveMs: Long?,
+            tagIds: List<Long>,
+            noteKeyword: String?,
+        ): Flow<List<RecentTransaction>> = flowOf(emptyList())
 
         override fun observeHeldCents(): Flow<Long> = flowOf(0L)
 

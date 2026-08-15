@@ -94,7 +94,7 @@ class TransactionRepositoryImplTest {
                             id = 7L,
                             amountCents = 2500L,
                             type = "EXPENSE",
-                            note = null,
+                            note = "买书",
                             tagId = null,
                             occurredAt = 900L,
                             createdAt = 1L,
@@ -116,6 +116,64 @@ class TransactionRepositoryImplTest {
         assertEquals(TransactionType.EXPENSE, row.type)
         assertNull(row.tagName)
         assertEquals(900L, row.occurredAt)
+        assertEquals("买书", row.note)
         assertEquals(listOf(5), dao.recentCalls)
+    }
+
+    @Test
+    fun `delete delegates transaction id to dao`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+
+        repository.delete(42L)
+
+        assertEquals(listOf(42L), dao.deletedByIdCalls)
+    }
+
+    @Test
+    fun `observeFiltered with empty tagIds delegates to non-tag query`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+
+        repository.observeFiltered(100L, 200L, emptyList(), "关键词").first()
+
+        assertEquals(1, dao.filteredCalls.size)
+        assertEquals(Triple(100L, 200L, "关键词"), dao.filteredCalls.single())
+        assertTrue(dao.filteredByTagsCalls.isEmpty())
+    }
+
+    @Test
+    fun `observeFiltered with tagIds delegates to by-tags query`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+
+        repository.observeFiltered(null, null, listOf(1L, 2L), null).first()
+
+        assertEquals(1, dao.filteredByTagsCalls.size)
+        assertEquals(
+            Triple<Long?, Long?, String?>(null, null, null) to listOf(1L, 2L),
+            dao.filteredByTagsCalls.single(),
+        )
+        assertTrue(dao.filteredCalls.isEmpty())
+    }
+
+    @Test
+    fun `observeFiltered escapes like wildcards in keyword`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+
+        repository.observeFiltered(null, null, emptyList(), "100%_a\\b").first()
+
+        assertEquals("""100\%\_a\\b""", dao.filteredCalls.single().third)
+    }
+
+    @Test
+    fun `observeFiltered treats blank keyword as null`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+
+        repository.observeFiltered(null, null, emptyList(), "   ").first()
+
+        assertEquals(null, dao.filteredCalls.single().third)
     }
 }

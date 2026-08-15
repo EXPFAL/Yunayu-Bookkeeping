@@ -24,6 +24,10 @@ class TransactionRepositoryImpl @Inject constructor(
     override suspend fun add(transaction: Transaction): Long =
         transactionDao.insert(transaction.toEntity())
 
+    override suspend fun delete(transactionId: Long) {
+        transactionDao.deleteById(transactionId)
+    }
+
     override fun observeAll(): Flow<List<Transaction>> =
         transactionDao.observeAll().map { entities -> entities.map { it.toDomain() } }
 
@@ -55,6 +59,23 @@ class TransactionRepositoryImpl @Inject constructor(
             .map { rows -> rows.map { it.toRecentDomain() } }
             .distinctUntilChanged()
 
+    override fun observeFiltered(
+        startInclusiveMs: Long?,
+        endExclusiveMs: Long?,
+        tagIds: List<Long>,
+        noteKeyword: String?,
+    ): Flow<List<RecentTransaction>> {
+        val keyword = noteKeyword?.takeIf { it.isNotBlank() }?.let { escapeLikeKeyword(it) }
+        val rows: Flow<List<TransactionDao.RecentTransactionRow>> =
+            if (tagIds.isEmpty()) {
+                transactionDao.observeFiltered(startInclusiveMs, endExclusiveMs, keyword)
+            } else {
+                transactionDao.observeFilteredByTags(startInclusiveMs, endExclusiveMs, keyword, tagIds)
+            }
+        return rows.map { list -> list.map { it.toRecentDomain() } }
+            .distinctUntilChanged()
+    }
+
     private fun TransactionDao.RecentTransactionRow.toRecentDomain(): RecentTransaction =
         RecentTransaction(
             id = transaction.id,
@@ -64,6 +85,7 @@ class TransactionRepositoryImpl @Inject constructor(
                 .getOrDefault(TransactionType.EXPENSE),
             tagName = tagName,
             occurredAt = transaction.occurredAt,
+            note = transaction.note,
         )
 
     private fun Transaction.toEntity(): TransactionEntity = TransactionEntity(
@@ -89,5 +111,14 @@ class TransactionRepositoryImpl @Inject constructor(
 
     private companion object {
         const val TAG = "TransactionRepo"
+
+        /**
+         * 转义 LIKE 关键字中的特殊字符，使关键字按字面量匹配。
+         *
+         * 顺序敏感：先转义反斜杠 `\` → `\\`，再转义 `%` → `\%`、`_` → `\_`，
+         * 避免后续转义产物中的反斜杠被二次处理。
+         */
+        fun escapeLikeKeyword(keyword: String): String =
+            keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     }
 }

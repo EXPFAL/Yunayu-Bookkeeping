@@ -28,6 +28,10 @@ class ReportRepositoryImpl @Inject constructor(
         reportDao.upsert(report.toEntity())
     }
 
+    override suspend fun invalidateWhereWindowContains(epochMillis: Long) {
+        reportDao.invalidateWhereWindowContains(epochMillis)
+    }
+
     private fun ReportEntity.toDomain(): Report = Report(
         id = id,
         periodType = runCatching { ReportPeriodType.valueOf(reportType) }
