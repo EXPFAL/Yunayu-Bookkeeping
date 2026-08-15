@@ -10,16 +10,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.nl.model.NlTransactionDraft
+import com.expfal.yunayu.domain.nl.model.TagSuggestion
 import com.expfal.yunayu.ui.util.formatCents
 import com.expfal.yunayu.ui.util.tagDisplayName
 import java.time.Instant
@@ -59,7 +62,7 @@ fun NlModeToggle(
     }
 }
 
-/** 自然语言输入区：输入框 + 解析按钮 + 解析中态 / 失败文案 / 预览卡 + 确认按钮。 */
+/** 自然语言输入区：输入框 + 解析按钮 + 解析中态 / 失败文案 / 预览卡 + 新建建议卡 + 确认按钮。 */
 @Composable
 fun NlParseSection(
     inputText: String,
@@ -71,9 +74,13 @@ fun NlParseSection(
     suggestedTags: List<Tag>,
     rootNameById: Map<Long, String>,
     allTagsByRoot: Map<Tag, List<Tag>>,
+    nlTagSuggestion: TagSuggestion?,
+    newTagSuggesting: Boolean,
     onInputChange: (String) -> Unit,
     onParse: () -> Unit,
     onSave: () -> Unit,
+    onConfirmSuggestion: () -> Unit,
+    onDismissSuggestion: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Column(modifier.fillMaxWidth()) {
@@ -86,12 +93,23 @@ fun NlParseSection(
         when {
             parsing -> NlParsingIndicator()
             failure != null -> NlFailureText(failure)
-            draft != null -> NlDraftPreview(
-                draft = draft,
-                saving = saving,
-                tagDisplayName = resolveNlTagDisplayName(nlTagId, suggestedTags, allTagsByRoot, rootNameById),
-                onSave = onSave,
-            )
+            draft != null -> {
+                NlDraftPreview(
+                    draft = draft,
+                    saving = saving,
+                    tagDisplayName = resolveNlTagDisplayName(nlTagId, suggestedTags, allTagsByRoot, rootNameById),
+                    onSave = onSave,
+                )
+                if (nlTagSuggestion != null) {
+                    NlTagSuggestionCard(
+                        suggestion = nlTagSuggestion,
+                        onConfirm = onConfirmSuggestion,
+                        onDismiss = onDismissSuggestion,
+                    )
+                } else if (newTagSuggesting) {
+                    NlSuggestionLoadingText()
+                }
+            }
         }
     }
 }
@@ -228,6 +246,46 @@ private fun PreviewRow(label: String, value: String) {
             style = MaterialTheme.typography.bodyMedium,
         )
     }
+}
+
+/** NL 新建标签建议卡：展示 AI 建议的新标签名与所属根类，可确认创建或拒绝。 */
+@Composable
+private fun NlTagSuggestionCard(
+    suggestion: TagSuggestion,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 12.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh),
+    ) {
+        Column(Modifier.fillMaxWidth().padding(16.dp)) {
+            Text(
+                text = "建议新建标签「${suggestion.tagName}」（属于 ${suggestion.rootName}）",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onClick = onConfirm) { Text("创建并使用") }
+                TextButton(onClick = onDismiss) { Text("不用了") }
+            }
+        }
+    }
+}
+
+/** 建议生成中的占位提示。 */
+@Composable
+private fun NlSuggestionLoadingText() {
+    Text(
+        text = "正在建议…",
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
+    )
 }
 
 /** 毫秒 → 「MM-dd HH:mm」本地时间文本（固定 Locale.US 保证跨设备一致）。 */
