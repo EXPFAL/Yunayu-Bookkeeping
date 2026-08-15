@@ -191,7 +191,7 @@ class ParseNaturalLanguageTransactionUseCaseTest {
         override suspend fun getChildren(parentId: Long?): List<Tag> =
             childrenByParent[parentId] ?: emptyList()
 
-        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> =
+        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag> =
             emptyList()
 
         override suspend fun updateSortOrder(tags: List<Tag>) = Unit

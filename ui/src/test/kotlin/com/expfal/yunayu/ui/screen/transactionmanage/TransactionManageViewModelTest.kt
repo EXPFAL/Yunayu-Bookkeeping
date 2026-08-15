@@ -295,7 +295,7 @@ class TransactionManageViewModelTest {
         override suspend fun getChildren(parentId: Long?): List<Tag> =
             if (parentId == null) rootTags else childrenByParent[parentId] ?: emptyList()
 
-        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> = emptyList()
+        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag> = emptyList()
 
         override suspend fun updateSortOrder(tags: List<Tag>) = Unit
 

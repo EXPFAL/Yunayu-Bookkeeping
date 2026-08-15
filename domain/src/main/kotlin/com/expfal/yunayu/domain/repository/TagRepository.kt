@@ -3,6 +3,7 @@ package com.expfal.yunayu.domain.repository
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TransactionType
 import kotlinx.coroutines.flow.Flow
 
 /** 学业关联标签仓储接口，由 :data 模块实现。 */
@@ -14,8 +15,11 @@ interface TagRepository {
     /** 一次性获取指定父节点下的子标签（根节点传 `null`）。 */
     suspend fun getChildren(parentId: Long?): List<Tag>
 
-    /** 按起始时间之后的交易频次降序返回已用标签（最多 [limit] 个）。 */
-    suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag>
+    /**
+     * 按起始时间之后、指定收支方向的交易频次降序返回已用标签（最多 [limit] 个）。
+     * [type] 为收支过滤方向，收入与支出各自独立统计，避免推荐语境污染。
+     */
+    suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag>
 
     /** 拖拽排序后整层重写 sortOrder。 */
     suspend fun updateSortOrder(tags: List<Tag>)

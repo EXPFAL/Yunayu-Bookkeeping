@@ -61,7 +61,7 @@ class FakeTransactionDao : TransactionDao {
     val inserted = mutableListOf<TransactionEntity>()
     var nextInsertId: Long = 1L
     var recentTagRows: List<TransactionDao.RecentTagRow> = emptyList()
-    val recentFrequentTagsCalls = mutableListOf<Pair<Long, Int>>()
+    val recentFrequentTagsCalls = mutableListOf<Triple<Long, String, Int>>()
     var expenseSumFlow: Flow<Long> = flowOf(0L)
     val expenseSumCalls = mutableListOf<Pair<Long, Long>>()
     var heldCentsFlow: Flow<Long> = flowOf(0L)
@@ -96,9 +96,10 @@ class FakeTransactionDao : TransactionDao {
 
     override suspend fun getRecentFrequentTags(
         sinceEpochMillis: Long,
+        type: String,
         limit: Int,
     ): List<TransactionDao.RecentTagRow> {
-        recentFrequentTagsCalls += sinceEpochMillis to limit
+        recentFrequentTagsCalls += Triple(sinceEpochMillis, type, limit)
         return recentTagRows
     }
 

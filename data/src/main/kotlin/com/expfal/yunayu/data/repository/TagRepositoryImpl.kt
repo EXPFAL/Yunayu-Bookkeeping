@@ -8,6 +8,7 @@ import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -27,8 +28,8 @@ class TagRepositoryImpl @Inject constructor(
     override suspend fun getChildren(parentId: Long?): List<Tag> =
         tagDao.getChildren(parentId).map { it.toDomain() }
 
-    override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> =
-        transactionDao.getRecentFrequentTags(sinceEpochMillis, limit).map { it.tag.toDomain() }
+    override suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag> =
+        transactionDao.getRecentFrequentTags(sinceEpochMillis, type.name, limit).map { it.tag.toDomain() }
 
     override suspend fun updateSortOrder(tags: List<Tag>) {
         val now = System.currentTimeMillis()

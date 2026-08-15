@@ -1,6 +1,7 @@
 package com.expfal.yunayu.ui.screen.quickadd
 
 import com.expfal.yunayu.domain.model.CategoryExpense
+import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
@@ -9,7 +10,9 @@ import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
+import com.expfal.yunayu.domain.nl.SuggestNewTagUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
+import com.expfal.yunayu.domain.nl.model.TagSuggestion
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
@@ -608,17 +611,470 @@ class QuickAddViewModelTest {
         assertFalse(state.saveFailed)
     }
 
+    @Test
+    fun `setType income reloads suggestions with income type`() = runTest {
+        val tagRepo = FakeTagRepository().apply { recentTags = listOf(tag(1L, "学习")) }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        assertEquals(listOf(TransactionType.EXPENSE), tagRepo.recentTypeCalls)
+
+        viewModel.setType(TransactionType.INCOME)
+        runCurrent()
+
+        assertEquals(TransactionType.INCOME, viewModel.uiState.value.transactionType)
+        assertEquals(listOf(TransactionType.EXPENSE, TransactionType.INCOME), tagRepo.recentTypeCalls)
+    }
+
+    @Test
+    fun `setType is ignored and does not refresh while saving`() = runTest {
+        val gate = CompletableDeferred<Long>()
+        val txRepo = FakeTransactionRepository().apply { addGate = gate }
+        val tagRepo = FakeTagRepository().apply { recentTags = listOf(tag(1L, "学习")) }
+        val viewModel = viewModel(tagRepo, txRepo)
+
+        viewModel.onDigit('1')
+        viewModel.onSave()
+        assertTrue(viewModel.uiState.value.saving)
+        val callsBefore = tagRepo.recentTypeCalls.size
+
+        viewModel.setType(TransactionType.INCOME)
+        assertEquals(TransactionType.EXPENSE, viewModel.uiState.value.transactionType)
+        assertEquals(callsBefore, tagRepo.recentTypeCalls.size)
+
+        gate.complete(7L)
+        runCurrent()
+        assertFalse(viewModel.uiState.value.saving)
+    }
+
+    @Test
+    fun `setType is ignored while nlParsing`() = runTest {
+        val gate = CompletableDeferred<String>()
+        val nlParser = FakeNlParser().apply { generateGate = gate }
+        val viewModel = viewModel(FakeTagRepository(), FakeTransactionRepository(), nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        assertTrue(viewModel.uiState.value.nlParsing)
+
+        viewModel.setType(TransactionType.INCOME)
+        assertEquals(TransactionType.EXPENSE, viewModel.uiState.value.transactionType)
+
+        gate.complete("{\"amount\":\"20\"}")
+        runCurrent()
+        assertFalse(viewModel.uiState.value.nlParsing)
+    }
+
+    @Test
+    fun `setType is ignored and does not refresh while confirmRequested`() = runTest {
+        val tagRepo = FakeTagRepository().apply { recentTags = listOf(tag(1L, "学习")) }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        viewModel.onDigit('1')
+        viewModel.onDigit('5')
+        viewModel.onDigit('0')
+        viewModel.onSave()
+        assertTrue(viewModel.uiState.value.confirmRequested)
+        val callsBefore = tagRepo.recentTypeCalls.size
+
+        viewModel.setType(TransactionType.INCOME)
+        assertEquals(TransactionType.EXPENSE, viewModel.uiState.value.transactionType)
+        assertEquals(callsBefore, tagRepo.recentTypeCalls.size)
+    }
+
+    @Test
+    fun `refreshSuggestedTags in NL mode does not touch selection`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        viewModel.setNlMode(true)
+        viewModel.onSelectTag(2L)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+        assertEquals(2L, viewModel.uiState.value.nlTagId)
+
+        tagRepo.recentTags = listOf(tag(3L, "生活"))
+        viewModel.refreshSuggestedTags()
+        runCurrent()
+
+        assertEquals(listOf(tag(3L, "生活")), viewModel.uiState.value.suggestedTags)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+        assertEquals(2L, viewModel.uiState.value.nlTagId)
+    }
+
+    @Test
+    fun `digital mode saves with null tagId when no tag selected`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = emptyList()
+            rootTags = emptyList()
+        }
+        val viewModel = viewModel(tagRepo, txRepo)
+
+        viewModel.onDigit('5')
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertNull(txRepo.added.single().tagId)
+    }
+
+    @Test
+    fun `NL mode saves with null tagId when no tag matched`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply { rootTags = listOf(tag(1L, "学习")) }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"note\":\"午饭\"}"
+        }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+        assertNull(viewModel.uiState.value.nlTagId)
+
+        viewModel.onSaveNl()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertNull(txRepo.added.single().tagId)
+    }
+
+    @Test
+    fun `createSubTag in digital mode selects new tag and refreshes by type`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+            recentTags = listOf(tag(1L, "学习"))
+            addSubTagResult = 99L
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        viewModel.createSubTag(2L, "咖啡")
+        runCurrent()
+
+        assertEquals(99L, viewModel.uiState.value.selectedTagId)
+        assertEquals(listOf(Triple(2L, "咖啡", null)), tagRepo.addedSubTags)
+        assertEquals(listOf(TransactionType.EXPENSE, TransactionType.EXPENSE), tagRepo.recentTypeCalls)
+        assertEquals("", viewModel.uiState.value.newTagName)
+        assertNull(viewModel.uiState.value.newTagRootId)
+        assertFalse(viewModel.uiState.value.newTagBusy)
+        assertNull(viewModel.uiState.value.newTagError)
+    }
+
+    @Test
+    fun `createSubTag in NL mode syncs nlTagId and selectedTagId`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+            addSubTagResult = 99L
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        viewModel.setNlMode(true)
+        viewModel.createSubTag(2L, "咖啡")
+        runCurrent()
+
+        assertEquals(99L, viewModel.uiState.value.selectedTagId)
+        assertEquals(99L, viewModel.uiState.value.nlTagId)
+    }
+
+    @Test
+    fun `duplicate tag name sets newTagError without crash`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            addSubTagError = DuplicateTagNameException("dup")
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        viewModel.createSubTag(1L, "咖啡")
+        runCurrent()
+
+        assertEquals("同名标签已存在", viewModel.uiState.value.newTagError)
+        assertFalse(viewModel.uiState.value.newTagBusy)
+    }
+
+    @Test
+    fun `createSubTag failure sets generic error`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            addSubTagError = RuntimeException("db down")
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+
+        viewModel.createSubTag(1L, "咖啡")
+        runCurrent()
+
+        assertEquals("创建失败，请重试", viewModel.uiState.value.newTagError)
+        assertFalse(viewModel.uiState.value.newTagBusy)
+    }
+
+    @Test
+    fun `NL unmatched tag triggers suggestion`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\",\"note\":\"午饭\"}"
+        }
+        val suggestParser = FakeNlParser().apply {
+            generateResult = "{\"tag_name\":\"咖啡\",\"root\":\"生活\"}"
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser, suggestParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+
+        assertEquals(TagSuggestion("咖啡", "生活"), viewModel.uiState.value.nlTagSuggestion)
+        assertFalse(viewModel.uiState.value.newTagSuggesting)
+    }
+
+    @Test
+    fun `confirming suggestion creates tag and saves with new id`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+            addSubTagResult = 99L
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\",\"note\":\"午饭\"}"
+        }
+        val suggestParser = FakeNlParser().apply {
+            generateResult = "{\"tag_name\":\"咖啡\",\"root\":\"生活\"}"
+        }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser, suggestParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+        assertEquals(TagSuggestion("咖啡", "生活"), viewModel.uiState.value.nlTagSuggestion)
+
+        viewModel.confirmNlTagSuggestion()
+        runCurrent()
+
+        // 确认后无需手动 onSaveNl：createSubTag 成功回调已自动串联落库并完成保存。
+        assertEquals(1, txRepo.added.size)
+        assertEquals(99L, txRepo.added.single().tagId)
+        assertNull(viewModel.uiState.value.nlTagSuggestion)
+        assertNull(viewModel.uiState.value.nlTagId)
+    }
+
+    @Test
+    fun `dismissing suggestion clears it and keeps nlTagId null`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\",\"note\":\"午饭\"}"
+        }
+        val suggestParser = FakeNlParser().apply {
+            generateResult = "{\"tag_name\":\"咖啡\",\"root\":\"生活\"}"
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser, suggestParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+        assertNotNull(viewModel.uiState.value.nlTagSuggestion)
+
+        viewModel.dismissNlTagSuggestion()
+
+        assertNull(viewModel.uiState.value.nlTagSuggestion)
+        assertNull(viewModel.uiState.value.nlTagId)
+    }
+
+    @Test
+    fun `suggestion failure degrades without blocking save`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\",\"note\":\"午饭\"}"
+        }
+        val suggestParser = FakeNlParser().apply { generateResult = null }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser, suggestParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+
+        assertNull(viewModel.uiState.value.nlTagSuggestion)
+        assertFalse(viewModel.uiState.value.newTagSuggesting)
+
+        viewModel.onSaveNl()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertNull(txRepo.added.single().tagId)
+    }
+
+    @Test
+    fun `in-flight NL suggestion is cancelled by re-parse and does not override matched draft`() = runTest {
+        val suggestGate = CompletableDeferred<String>()
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\",\"note\":\"午饭\"}"
+        }
+        val suggestParser = FakeNlParser().apply { generateGate = suggestGate }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser, suggestParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+        assertTrue(viewModel.uiState.value.newTagSuggesting)
+
+        // 重新解析 B：命中标签，取消 A 的在飞建议且不应再触发建议。
+        nlParser.generateResult = "{\"amount\":\"20\",\"tag\":\"学习\"}"
+        viewModel.onNlInputChange("买书20")
+        viewModel.onParseNl()
+        runCurrent()
+        assertNull(viewModel.uiState.value.nlTagSuggestion)
+        assertFalse(viewModel.uiState.value.newTagSuggesting)
+
+        // A 的迟到建议完成后不得覆盖 B 的结果。
+        suggestGate.complete("{\"tag_name\":\"咖啡\",\"root\":\"生活\"}")
+        runCurrent()
+
+        assertNull(viewModel.uiState.value.nlTagSuggestion)
+        assertFalse(viewModel.uiState.value.newTagSuggesting)
+    }
+
+    @Test
+    fun `resetForOpen cancels in-flight NL suggestion and ignores late writeback`() = runTest {
+        val suggestGate = CompletableDeferred<String>()
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\",\"note\":\"午饭\"}"
+        }
+        val suggestParser = FakeNlParser().apply { generateGate = suggestGate }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser, suggestParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+        assertTrue(viewModel.uiState.value.newTagSuggesting)
+
+        viewModel.resetForOpen()
+        runCurrent()
+        assertFalse(viewModel.uiState.value.newTagSuggesting)
+
+        // 重置后迟到建议完成，不得回写 nlTagSuggestion 或重开 loading。
+        suggestGate.complete("{\"tag_name\":\"咖啡\",\"root\":\"生活\"}")
+        runCurrent()
+
+        assertNull(viewModel.uiState.value.nlTagSuggestion)
+        assertFalse(viewModel.uiState.value.newTagSuggesting)
+    }
+
+    @Test
+    fun `suggestRootForNewTag prefills root`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+        }
+        val suggestParser = FakeNlParser().apply {
+            generateResult = "{\"tag_name\":\"咖啡\",\"root\":\"生活\"}"
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), suggestParser = suggestParser)
+
+        viewModel.onNewTagName("咖啡")
+        viewModel.suggestRootForNewTag()
+        runCurrent()
+
+        assertEquals(2L, viewModel.uiState.value.newTagRootId)
+        assertFalse(viewModel.uiState.value.rootSuggesting)
+    }
+
+    @Test
+    fun `suggestRootForNewTag failure sets error`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+        }
+        val suggestParser = FakeNlParser().apply { generateResult = null }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), suggestParser = suggestParser)
+
+        viewModel.onNewTagName("咖啡")
+        viewModel.suggestRootForNewTag()
+        runCurrent()
+
+        assertEquals("AI 推荐不可用，请手动选择", viewModel.uiState.value.newTagError)
+        assertFalse(viewModel.uiState.value.rootSuggesting)
+    }
+
+    @Test
+    fun `resetForOpen clears new tag state and suggestion`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "生活"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = "{\"amount\":\"20\",\"tag\":\"不存在·标签\",\"note\":\"午饭\"}"
+        }
+        val suggestParser = FakeNlParser().apply {
+            generateResult = "{\"tag_name\":\"咖啡\",\"root\":\"生活\"}"
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser, suggestParser)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+        assertNotNull(viewModel.uiState.value.nlTagSuggestion)
+        viewModel.onNewTagName("咖啡")
+        viewModel.onNewTagRootSelect(1L)
+
+        viewModel.resetForOpen()
+
+        val state = viewModel.uiState.value
+        assertEquals("", state.newTagName)
+        assertNull(state.newTagRootId)
+        assertFalse(state.newTagBusy)
+        assertNull(state.newTagError)
+        assertFalse(state.newTagSuggesting)
+        assertNull(state.nlTagSuggestion)
+    }
+
+    @Test
+    fun `setNlMode clears new tag state`() = runTest {
+        val viewModel = viewModel(FakeTagRepository(), FakeTransactionRepository())
+
+        viewModel.onNewTagName("咖啡")
+        viewModel.onNewTagRootSelect(1L)
+
+        viewModel.setNlMode(true)
+
+        val state = viewModel.uiState.value
+        assertEquals("", state.newTagName)
+        assertNull(state.newTagRootId)
+        assertNull(state.newTagError)
+        assertFalse(state.newTagSuggesting)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository,
         txRepo: TransactionRepository,
         nlParser: NLTransactionParser = FakeNlParser(),
-    ) = QuickAddViewModel(
-        tagRepository = tagRepo,
-        getRecentCategoriesUseCase = GetRecentCategoriesUseCase(tagRepo),
-        addTransactionUseCase = AddTransactionUseCase(txRepo),
-        parseNaturalLanguageTransactionUseCase = ParseNaturalLanguageTransactionUseCase(nlParser, tagRepo),
-        addParsedTransactionUseCase = AddParsedTransactionUseCase(txRepo),
-    )
+        suggestParser: NLTransactionParser = FakeNlParser(),
+    ): QuickAddViewModel {
+        val vm = QuickAddViewModel(
+            tagRepository = tagRepo,
+            getRecentCategoriesUseCase = GetRecentCategoriesUseCase(tagRepo),
+            addTransactionUseCase = AddTransactionUseCase(txRepo),
+            parseNaturalLanguageTransactionUseCase = ParseNaturalLanguageTransactionUseCase(nlParser, tagRepo),
+            addParsedTransactionUseCase = AddParsedTransactionUseCase(txRepo),
+            suggestNewTagUseCase = SuggestNewTagUseCase(suggestParser),
+        )
+        vm.refreshSuggestedTags()
+        return vm
+    }
 
     private fun tag(id: Long, name: String, parentId: Long? = null) = Tag(id = id, name = name, parentId = parentId)
 
@@ -629,20 +1085,29 @@ class QuickAddViewModelTest {
         var rootTags: List<Tag> = emptyList()
         var childrenByParent: Map<Long, List<Tag>> = emptyMap()
         var recentError: Throwable? = null
+        var addSubTagResult: Long = 0L
+        var addSubTagError: Throwable? = null
+        val addedSubTags = mutableListOf<Triple<Long, String, String?>>()
+        val recentTypeCalls = mutableListOf<TransactionType>()
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())
 
         override suspend fun getChildren(parentId: Long?): List<Tag> =
             if (parentId == null) rootTags else childrenByParent[parentId] ?: emptyList()
 
-        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> {
+        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag> {
+            recentTypeCalls += type
             recentError?.let { throw it }
             return recentTags
         }
 
         override suspend fun updateSortOrder(tags: List<Tag>) = Unit
 
-        override suspend fun addSubTag(parentId: Long, name: String, icon: String?): Long = 0L
+        override suspend fun addSubTag(parentId: Long, name: String, icon: String?): Long {
+            addSubTagError?.let { throw it }
+            addedSubTags += Triple(parentId, name, icon)
+            return addSubTagResult
+        }
 
         override suspend fun renameTag(tagId: Long, newName: String) = Unit
 
@@ -701,11 +1166,13 @@ class QuickAddViewModelTest {
         var available: Boolean = true
         var generateResult: String? = "{}"
         var generateThrows: Throwable? = null
+        var generateGate: CompletableDeferred<String>? = null
 
         override suspend fun isAvailable(): Boolean = available
 
         override suspend fun generate(systemInstruction: String, userText: String): String? {
             generateThrows?.let { throw it }
+            generateGate?.let { return it.await() }
             return generateResult
         }
     }

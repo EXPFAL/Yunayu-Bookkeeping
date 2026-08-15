@@ -58,17 +58,19 @@ interface TransactionDao {
     fun observeByTag(tagId: Long): Flow<List<TransactionEntity>>
 
     /**
-     * 统计起始时间之后各标签的使用频次，按频次降序、最近使用时间降序返回前 [limit] 个。
+     * 统计起始时间之后、指定收支类型下各标签的使用频次，按频次降序、最近使用时间降序返回前 [limit] 个。
+     * [type] 为收支方向过滤（参数绑定），复用 `(occurred_at, type)` 复合索引。
      */
     @Query(
         "SELECT tags.*, COUNT(transactions.id) AS usage_count " +
             "FROM transactions INNER JOIN tags ON tags.id = transactions.tag_id " +
             "WHERE transactions.occurred_at >= :sinceEpochMillis " +
+            "AND transactions.type = :type " +
             "GROUP BY tags.id " +
             "ORDER BY usage_count DESC, MAX(transactions.occurred_at) DESC " +
             "LIMIT :limit",
     )
-    suspend fun getRecentFrequentTags(sinceEpochMillis: Long, limit: Int): List<RecentTagRow>
+    suspend fun getRecentFrequentTags(sinceEpochMillis: Long, type: String, limit: Int): List<RecentTagRow>
 
     /** 观察时间窗内的支出总额（分），无匹配行时返回 0。 */
     @Query(

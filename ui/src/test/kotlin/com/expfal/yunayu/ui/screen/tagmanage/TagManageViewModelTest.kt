@@ -3,6 +3,7 @@ package com.expfal.yunayu.ui.screen.tagmanage
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.CompletableDeferred
@@ -247,7 +248,7 @@ class TagManageViewModelTest {
 
         override suspend fun getChildren(parentId: Long?): List<Tag> = emptyList()
 
-        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> = emptyList()
+        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag> = emptyList()
 
         override suspend fun updateSortOrder(tags: List<Tag>) {
             sortError?.let { throw it }

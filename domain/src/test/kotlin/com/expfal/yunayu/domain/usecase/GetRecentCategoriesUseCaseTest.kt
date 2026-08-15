@@ -2,6 +2,7 @@ package com.expfal.yunayu.domain.usecase
 
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -24,7 +25,7 @@ class GetRecentCategoriesUseCaseTest {
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
-        val result = useCase(now)
+        val result = useCase(TransactionType.EXPENSE, now)
 
         assertEquals(
             listOf(tag(11L, "教材"), tag(12L, "考证"), tag(1L, "学习"), tag(2L, "社交")),
@@ -37,7 +38,7 @@ class GetRecentCategoriesUseCaseTest {
         val repository = FakeTagRepository().apply { recentTags = listOf(tag(11L, "教材")) }
         val useCase = GetRecentCategoriesUseCase(repository)
 
-        useCase(now)
+        useCase(TransactionType.EXPENSE, now)
 
         assertEquals(now - sevenDaysMillis, repository.lastSince)
         assertEquals(4, repository.lastLimit)
@@ -52,7 +53,7 @@ class GetRecentCategoriesUseCaseTest {
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
-        val result = useCase(now)
+        val result = useCase(TransactionType.EXPENSE, now)
 
         assertEquals(root, result)
     }
@@ -65,7 +66,7 @@ class GetRecentCategoriesUseCaseTest {
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
-        val result = useCase(now)
+        val result = useCase(TransactionType.EXPENSE, now)
 
         assertEquals(4, result.size)
         assertEquals(
@@ -82,7 +83,7 @@ class GetRecentCategoriesUseCaseTest {
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
-        val result = useCase(now)
+        val result = useCase(TransactionType.EXPENSE, now)
 
         assertEquals(
             listOf(tag(1L, "学习"), tag(11L, "教材"), tag(2L, "社交"), tag(3L, "生活")),
@@ -99,7 +100,7 @@ class GetRecentCategoriesUseCaseTest {
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
-        val result = useCase(now)
+        val result = useCase(TransactionType.EXPENSE, now)
 
         assertEquals(recent, result)
     }
@@ -113,7 +114,7 @@ class GetRecentCategoriesUseCaseTest {
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
-        val result = useCase(now)
+        val result = useCase(TransactionType.EXPENSE, now)
 
         assertEquals(
             listOf(tag(11L, "教材", 1L), tag(12L, "考证", 1L), tag(1L, "学习"), tag(2L, "社交")),
@@ -129,12 +130,37 @@ class GetRecentCategoriesUseCaseTest {
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
-        val result = useCase(now)
+        val result = useCase(TransactionType.EXPENSE, now)
 
         assertEquals(
             listOf(tag(1L, "高数", 1L), tag(2L, "社交"), tag(3L, "生活"), tag(4L, "娱乐")),
             result,
         )
+    }
+
+    @Test
+    fun `passes type through to repository`() = runTest {
+        val repository = FakeTagRepository().apply { recentTags = listOf(tag(11L, "教材")) }
+        val useCase = GetRecentCategoriesUseCase(repository)
+
+        useCase(TransactionType.INCOME, now)
+
+        assertEquals(TransactionType.INCOME, repository.lastType)
+    }
+
+    @Test
+    fun `falls back to root tags when income history empty`() = runTest {
+        val root = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        val repository = FakeTagRepository().apply {
+            this.recentTags = emptyList()
+            this.rootTags = root
+        }
+        val useCase = GetRecentCategoriesUseCase(repository)
+
+        val result = useCase(TransactionType.INCOME, now)
+
+        assertEquals(root, result)
+        assertEquals(TransactionType.INCOME, repository.lastType)
     }
 
     private fun tag(id: Long, name: String, parentId: Long? = null) = Tag(
@@ -153,14 +179,16 @@ class GetRecentCategoriesUseCaseTest {
         var recentTags: List<Tag> = emptyList()
         var rootTags: List<Tag> = emptyList()
         var lastSince: Long? = null
+        var lastType: TransactionType? = null
         var lastLimit: Int? = null
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())
 
         override suspend fun getChildren(parentId: Long?): List<Tag> = rootTags
 
-        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, limit: Int): List<Tag> {
+        override suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag> {
             lastSince = sinceEpochMillis
+            lastType = type
             lastLimit = limit
             return recentTags
         }

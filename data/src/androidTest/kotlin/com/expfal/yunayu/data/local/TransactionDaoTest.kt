@@ -138,6 +138,31 @@ class TransactionDaoTest {
     }
 
     @Test
+    fun getRecentFrequentTags_filtersByType() = runBlocking {
+        val tagDao = database.tagDao()
+        val foodId = tagDao.insert(tag("餐饮"))
+        val gameId = tagDao.insert(tag("游戏"))
+        val salaryId = tagDao.insert(tag("工资"))
+        val base = 1_000_000L
+
+        // 支出：餐饮 x2、游戏 x1；收入：工资 x3，混合插入验证按 type 隔离
+        dao.insert(transaction(amountCents = 10L, type = "EXPENSE", tagId = foodId, occurredAt = base))
+        dao.insert(transaction(amountCents = 20L, type = "EXPENSE", tagId = foodId, occurredAt = base + 1))
+        dao.insert(transaction(amountCents = 30L, type = "EXPENSE", tagId = gameId, occurredAt = base + 2))
+        dao.insert(transaction(amountCents = 40L, type = "INCOME", tagId = salaryId, occurredAt = base + 3))
+        dao.insert(transaction(amountCents = 50L, type = "INCOME", tagId = salaryId, occurredAt = base + 4))
+        dao.insert(transaction(amountCents = 60L, type = "INCOME", tagId = salaryId, occurredAt = base + 5))
+
+        // 支出侧只返回支出语境标签，频次降序（餐饮 2 → 游戏 1）
+        val expense = dao.getRecentFrequentTags(0L, "EXPENSE", 10)
+        assertEquals(listOf(foodId to 2L, gameId to 1L), expense.map { it.tag.id to it.usageCount })
+
+        // 收入侧只返回收入语境标签（工资 3），不混入支出标签
+        val income = dao.getRecentFrequentTags(0L, "INCOME", 10)
+        assertEquals(listOf(salaryId to 3L), income.map { it.tag.id to it.usageCount })
+    }
+
+    @Test
     fun deleteById_emitsUpdatedFlows_withoutDeletedRecord() = runBlocking {
         val keepId = dao.insert(transaction(amountCents = 100L, type = "EXPENSE", note = "保留", occurredAt = 1_000L))
         dao.insert(transaction(amountCents = 200L, type = "EXPENSE", note = "待删", occurredAt = 2_000L))

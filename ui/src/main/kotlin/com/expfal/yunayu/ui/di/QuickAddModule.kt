@@ -1,5 +1,7 @@
 package com.expfal.yunayu.ui.di
 
+import com.expfal.yunayu.domain.nl.NLTransactionParser
+import com.expfal.yunayu.domain.nl.SuggestNewTagUseCase
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
@@ -34,4 +36,9 @@ object QuickAddModule {
     fun provideAddParsedTransactionUseCase(
         transactionRepository: TransactionRepository,
     ): AddParsedTransactionUseCase = AddParsedTransactionUseCase(transactionRepository)
+
+    @Provides
+    fun provideSuggestNewTagUseCase(
+        parser: NLTransactionParser,
+    ): SuggestNewTagUseCase = SuggestNewTagUseCase(parser)
 }

@@ -5,6 +5,7 @@ import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TransactionType
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -64,7 +65,7 @@ class TagRepositoryImplTest {
         }
         val repository = TagRepositoryImpl(FakeTagDao(), transactionDao)
 
-        val tags = repository.getRecentUsedTags(sinceEpochMillis = 1000L, limit = 4)
+        val tags = repository.getRecentUsedTags(sinceEpochMillis = 1000L, type = TransactionType.INCOME, limit = 4)
 
         assertEquals(
             listOf(
@@ -73,14 +74,14 @@ class TagRepositoryImplTest {
             ),
             tags,
         )
-        assertEquals(listOf(1000L to 4), transactionDao.recentFrequentTagsCalls)
+        assertEquals(listOf(Triple(1000L, "INCOME", 4)), transactionDao.recentFrequentTagsCalls)
     }
 
     @Test
     fun `getRecentUsedTags returns empty list when no rows`() = runTest {
         val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao())
 
-        val tags = repository.getRecentUsedTags(sinceEpochMillis = 0L, limit = 4)
+        val tags = repository.getRecentUsedTags(sinceEpochMillis = 0L, type = TransactionType.EXPENSE, limit = 4)
 
         assertEquals(emptyList<Tag>(), tags)
     }

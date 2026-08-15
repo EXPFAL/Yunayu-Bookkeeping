@@ -1,6 +1,7 @@
 package com.expfal.yunayu.domain.usecase
 
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.CancellationException
 
@@ -15,10 +16,11 @@ class GetRecentCategoriesUseCase(
     private val tagRepository: TagRepository,
 ) {
 
-    /** 返回补足后的最近常用标签（去重后不超过 [DEFAULT_LIMIT] 个）。 */
-    suspend operator fun invoke(nowEpochMillis: Long = System.currentTimeMillis()): List<Tag> {
+    /** 返回按 [type] 收支方向统计、补足后的最近常用标签（去重后不超过 [DEFAULT_LIMIT] 个）。 */
+    suspend operator fun invoke(type: TransactionType, nowEpochMillis: Long = System.currentTimeMillis()): List<Tag> {
         val recent = tagRepository.getRecentUsedTags(
             sinceEpochMillis = nowEpochMillis - SEVEN_DAYS_MILLIS,
+            type = type,
             limit = DEFAULT_LIMIT,
         )
         val roots = runCatching { tagRepository.getChildren(parentId = null) }
