@@ -1,9 +1,11 @@
 package com.expfal.yunayu.domain.usecase
 
+import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.MonthlyBudgetSnapshot
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -209,6 +211,16 @@ class MonthlyBudgetEngineImplTest {
         }
 
         override fun observeHeldCents(): Flow<Long> = flowOf(0L)
+
+        override suspend fun getWindowTotals(
+            startInclusiveMs: Long,
+            endExclusiveMs: Long,
+        ): WindowTotals = WindowTotals(0L, 0L)
+
+        override suspend fun getExpenseByCategory(
+            startInclusiveMs: Long,
+            endExclusiveMs: Long,
+        ): List<CategoryExpense> = emptyList()
 
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
             flowOf(emptyList())

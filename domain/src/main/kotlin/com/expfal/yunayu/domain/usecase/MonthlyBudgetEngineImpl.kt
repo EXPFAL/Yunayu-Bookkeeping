@@ -3,10 +3,10 @@ package com.expfal.yunayu.domain.usecase
 import com.expfal.yunayu.domain.model.MonthlyBudgetSnapshot
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import com.expfal.yunayu.domain.util.TimeWindows
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import java.time.LocalDate
-import java.time.ZoneId
 import java.time.temporal.ChronoUnit
 
 /**
@@ -36,8 +36,8 @@ class MonthlyBudgetEngineImpl(
         combine(
             monthlyBudgetRepository.observeMonthlyBudgetCents(),
             transactionRepository.observeExpenseSumBetween(
-                startInclusiveMs = monthStartMillis(today),
-                endExclusiveMs = nextMonthStartMillis(today),
+                startInclusiveMs = TimeWindows.monthStartMillis(today),
+                endExclusiveMs = TimeWindows.nextMonthStartMillis(today),
             ),
         ) { budgetCents, spentCents ->
             buildSnapshot(budgetCents, spentCents, today)
@@ -51,7 +51,7 @@ class MonthlyBudgetEngineImpl(
     ): MonthlyBudgetSnapshot {
         val remainingCents = (budgetCents - spentCents).coerceAtLeast(0L)
         val remainingDays =
-            (ChronoUnit.DAYS.between(today, monthEnd(today)).toInt() + 1)
+            (ChronoUnit.DAYS.between(today, TimeWindows.monthEnd(today)).toInt() + 1)
                 .coerceAtLeast(MIN_REMAINING_DAYS)
         return MonthlyBudgetSnapshot(
             monthlyBudgetCents = budgetCents,
@@ -61,18 +61,6 @@ class MonthlyBudgetEngineImpl(
             weeklyQuotaCents = remainingCents * DAYS_PER_WEEK / remainingDays,
         )
     }
-
-    /** 当月 1 日 00:00（系统默认时区）对应的毫秒，作为支出窗口的含端点起点。 */
-    private fun monthStartMillis(today: LocalDate): Long =
-        today.withDayOfMonth(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-    /** 下月 1 日 00:00（系统默认时区）对应的毫秒，作为支出窗口的不含端终点。 */
-    private fun nextMonthStartMillis(today: LocalDate): Long =
-        monthEnd(today).plusDays(1).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-
-    /** `today` 所在月的最后一天。 */
-    private fun monthEnd(today: LocalDate): LocalDate =
-        today.withDayOfMonth(today.lengthOfMonth())
 
     private companion object {
         const val DAYS_PER_WEEK = 7

@@ -1,7 +1,9 @@
 package com.expfal.yunayu.domain.repository
 
+import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
+import com.expfal.yunayu.domain.model.WindowTotals
 import kotlinx.coroutines.flow.Flow
 
 /** 交易仓储接口，由 :data 模块实现。 */
@@ -30,4 +32,19 @@ interface TransactionRepository {
      * 无任何交易时发射 `0`。
      */
     fun observeHeldCents(): Flow<Long>
+
+    /**
+     * 单次查询时间窗内的收支总额（分）：`[startInclusiveMs, endExclusiveMs)`，
+     * 无匹配交易时收入与支出均为 `0`。
+     */
+    suspend fun getWindowTotals(startInclusiveMs: Long, endExclusiveMs: Long): WindowTotals
+
+    /**
+     * 单次查询时间窗内的支出按分类聚合（含未分类，`tagName = null`），
+     * 按支出金额降序返回。
+     */
+    suspend fun getExpenseByCategory(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): List<CategoryExpense>
 }
