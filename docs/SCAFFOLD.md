@@ -508,3 +508,84 @@ interface SemesterBudgetEngine {
 - 若需离线，再评估端侧 llama.cpp。
 - 若将来端侧采用 Qwen2.5-3B，须注意其为 Qwen RESEARCH 许可（商用需申请）。
 
+---
+
+## 14. 收入与持有资金口径
+
+> 触发时机：P1「收入记录 + 持有资金」落地，补录收入落库、持有资金口径与相关取舍。
+
+### 14.1 收入落库
+
+- `AddTransactionUseCase` 新增 `type` 参数并给默认值 `EXPENSE`，兼容既有支出调用方；收入经同一用例落库，不另设独立入口。
+- 数字模式（QuickAdd 数字键盘）可切换收/支；NL 模式不显示收支切换，以 `draft.type` 为准。
+- 数字模式收入记录 `note` 仍为 `null`（沿用支出侧无备注口径，备注由 NL 链路保障）。
+
+### 14.2 持有资金口径
+
+- 持有资金 = 累计收入 − 累计支出，由 DAO 单查询净结余（`CASE WHEN type='INCOME'` 分支聚合）实时推导，不落库、不引入账户/期初余额。
+- 收入计入持有资金、不计入月支出统计（月支出仅统计 `type='EXPENSE'`）。
+
+### 14.3 全表扫决策
+
+- 持有资金聚合为全表扫，当前单用户量级（百~万笔）实测 <1ms，可接受；超过 5 万笔再评估按 `type` 索引，阈值留痕于此。
+- 收入污染「最近分类建议」：收入无 `tagId` 不参与分类聚合，影响轻微，已接受。
+
+---
+
+## 15. NL 备注兜底规则
+
+> 触发时机：P2「NL 备注兜底」落地，记录备注保障的双层兜底与边界。
+
+### 15.1 双层兜底
+
+- **Prompt 强指令**：`NlPromptBuilder` 要求模型输出 2~8 字 `note`。
+- **本地剥离兜底**：`NlNoteFallback` 仅在 LLM 未输出 `note` 时生效，按序剥离：日期 → 金额 → 标签短语 → 填充词 → 截断 ≤8 → ≥2 字校验，最终保证每条记录必有备注。
+
+### 15.2 优先级与契约
+
+- 强 note 指令优先级低于金额容错契约：金额缺失时仍返回 `null`（不因补备注掩盖金额缺失的失败语义）。
+- 兜底仅作用于 note 字段，不参与金额/时间/类别的容错判定。
+
+### 15.3 已知边界
+
+- 不做复杂分词：剥离基于启发式短语，长句/歧义场景可能产出欠优备注，属可接受边界。
+
+---
+
+## 16. 报告 schema v4 与生成链路
+
+> 触发时机：P2「月度/年度报告」落地，记录 reports 表 schema、补生成与超时语义。
+
+### 16.1 reports 表与迁移
+
+- `reports` 表：`UNIQUE(report_type, period_key)` 唯一索引；`engine='api'`、`content_version='1'` 为本次实际取值（留痕）。
+- schema 版本 3 → 4，`MIGRATION_3_4` 以事务包裹建表与唯一索引；导出 schema 见 `data/schemas/com.expfal.yunayu.data.local.YunayuDatabase/4.json`。
+
+### 16.2 时间窗口与补生成
+
+- `TimeWindows` 共享月窗口计算，预算 / 报告 / 补生成同源。
+- 打开应用补生成：上月月报、1 月补上年年报，封顶 2 份，串行补生成。
+
+### 16.3 幂等三层
+
+- 幂等由三层保障：`EnsureReportsUseCase` Mutex 防重入 + 数据库唯一索引 + 已存在记录（含 FAILED）跳过。
+- `EnsureReports` 与报告页手动重试的竞态由唯一索引兜底。
+
+### 16.4 失败与重试语义
+
+- FAILED 不自动重试，报告页提供手动重试入口。
+- 首装无 API 配置时落一条 FAILED 为既定设计（标记不可用状态，待用户配置后手动重试）。
+
+### 16.5 超时语义
+
+- `CompletionRequester` 抽取共用 HTTP，connect/read 双超时参数化：NL 10s/15s、报告 10s/30s。
+- `GenerateReportUseCase` 协程兜底 65s；readTimeout 为真正上界。
+
+### 16.6 top_categories 序列化
+
+- `top_categories` 序列化格式「名称:cents:percent;」，标签名中的 `:`/`;` 全角替换（`：`/`；`），解析侧单条非法跳过。
+
+### 16.7 测试与门禁
+
+- `MigrationTest` 与 `TransactionDaoTest` 新用例写好，待设备/CI 执行（沿用既有惯例）。
+
