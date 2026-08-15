@@ -3,9 +3,11 @@ package com.expfal.yunayu.ui.component
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -15,8 +17,10 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -31,6 +35,8 @@ import com.expfal.yunayu.domain.model.Tag
  *
  * 每个根分组依次渲染「分组头 → 根自身可点选行 →（展开时）子类行」，分组之间以分隔线隔开；
  * 展开状态在弹层生命周期内记忆（[rememberSaveable]），关闭即随组合销毁而重置。
+ * 展开/收起前会记录当前滚动位置（首个可见项下标与偏移），并在子项增删后恢复，避免滚动跳变；
+ * 外层列表默认限制最大高度 420dp，以稳定各宿主弹层尺寸、防止重测量。
  *
  * 本组件只负责把点击转换为 [onToggleSelect]，不关心关闭弹层等上层逻辑，因此可同时服务
  * 「单选（点选后由调用方关闭弹层）」与「多选（点选后不关闭）」两种场景。
@@ -48,8 +54,10 @@ fun TagTreeList(
     modifier: Modifier = Modifier,
 ) {
     var expandedRootIds by rememberSaveable { mutableStateOf(listOf<Long>()) }
+    val listState = rememberLazyListState()
+    var scrollAnchor by remember { mutableStateOf<Pair<Int, Int>?>(null) }
 
-    LazyColumn(modifier = modifier.fillMaxWidth()) {
+    LazyColumn(state = listState, modifier = modifier.fillMaxWidth().heightIn(max = 420.dp)) {
         allTagsByRoot.entries.forEachIndexed { index, (root, children) ->
             if (index > 0) {
                 item(key = "divider-${root.id}") {
@@ -62,6 +70,7 @@ fun TagTreeList(
                     hasChildren = children.isNotEmpty(),
                     expanded = root.id in expandedRootIds,
                     onToggle = {
+                        scrollAnchor = listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
                         expandedRootIds = if (root.id in expandedRootIds) {
                             expandedRootIds - root.id
                         } else {
@@ -91,9 +100,16 @@ fun TagTreeList(
             }
         }
     }
+
+    LaunchedEffect(expandedRootIds) {
+        scrollAnchor?.let { (index, offset) ->
+            listState.scrollToItem(index, offset)
+        }
+        scrollAnchor = null
+    }
 }
 
-/** 分组头行：父类名加粗深色（层级字号高于子类），行尾展示展开/收起箭头，整行点击切换。 */
+/** 分组头行：父类名加粗（字号高于子类、颜色用次强调色以区分层级），行尾展示展开/收起箭头，整行点击切换。 */
 @Composable
 private fun TagGroupHeader(
     root: Tag,
@@ -111,9 +127,9 @@ private fun TagGroupHeader(
         Text(
             text = root.name,
             modifier = Modifier.weight(1f),
-            style = MaterialTheme.typography.titleSmall,
+            style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         if (hasChildren) {
             Icon(
