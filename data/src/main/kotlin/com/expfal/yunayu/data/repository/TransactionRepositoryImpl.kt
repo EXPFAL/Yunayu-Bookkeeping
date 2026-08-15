@@ -3,9 +3,11 @@ package com.expfal.yunayu.data.repository
 import android.util.Log
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TransactionEntity
+import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -34,6 +36,19 @@ class TransactionRepositoryImpl @Inject constructor(
     ): Flow<Long> = transactionDao.observeExpenseSumBetween(startInclusiveMs, endExclusiveMs)
 
     override fun observeHeldCents(): Flow<Long> = transactionDao.observeHeldCents()
+
+    override suspend fun getWindowTotals(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): WindowTotals = transactionDao.getWindowTotals(startInclusiveMs, endExclusiveMs).let {
+        WindowTotals(incomeCents = it.incomeCents, expenseCents = it.expenseCents)
+    }
+
+    override suspend fun getExpenseByCategory(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): List<CategoryExpense> = transactionDao.getExpenseByCategory(startInclusiveMs, endExclusiveMs)
+        .map { CategoryExpense(tagName = it.tagName, cents = it.cents) }
 
     override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
         transactionDao.observeRecent(limit)

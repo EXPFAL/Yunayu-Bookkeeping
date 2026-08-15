@@ -2,10 +2,12 @@ package com.expfal.yunayu.data.di
 
 import com.expfal.yunayu.data.repository.MonthlyBudgetRepositoryImpl
 import com.expfal.yunayu.data.repository.NlApiConfigRepositoryImpl
+import com.expfal.yunayu.data.repository.ReportRepositoryImpl
 import com.expfal.yunayu.data.repository.TagRepositoryImpl
 import com.expfal.yunayu.data.repository.TransactionRepositoryImpl
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.NlApiConfigRepository
+import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import dagger.Binds
@@ -34,4 +36,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindNlApiConfigRepository(impl: NlApiConfigRepositoryImpl): NlApiConfigRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindReportRepository(impl: ReportRepositoryImpl): ReportRepository
 }

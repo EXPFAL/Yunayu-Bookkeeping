@@ -75,7 +75,7 @@ class ApiNlParserTest {
     }
 
     private fun resolve(saved: NlApiConfig): NlApiConfig =
-        ApiNlParser.resolveConfig(
+        CompletionRequester.resolveConfig(
             saved = saved,
             defaultBaseUrl = defaultBaseUrl,
             defaultModel = defaultModel,

@@ -99,6 +99,40 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate3To4_createsReportsTableAndUniqueIndex() {
+        helper.createDatabase(TEST_DB, 3).apply {
+            execSQL(
+                "INSERT INTO tags (name, parent_id, sort_order, icon, created_at, updated_at) " +
+                    "VALUES ('学习', NULL, 0, '📚', 1, 1)",
+            )
+            execSQL(
+                "INSERT INTO transactions (amount_cents, type, note, tag_id, occurred_at, created_at) " +
+                    "VALUES (100, 'EXPENSE', NULL, 1, 1, 1)",
+            )
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 4, true, YunayuDatabase.MIGRATION_3_4)
+
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'reports'")
+            .use { cursor -> assertTrue(cursor.moveToFirst()) }
+        db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' " +
+                "AND name = 'index_reports_report_type_period_key'",
+        ).use { cursor -> assertTrue(cursor.moveToFirst()) }
+
+        db.query("SELECT amount_cents FROM transactions WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(100L, cursor.getLong(0))
+        }
+        db.query("SELECT name FROM tags WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("学习", cursor.getString(0))
+        }
+    }
+
     private companion object {
         const val TEST_DB = "migration-test.db"
     }

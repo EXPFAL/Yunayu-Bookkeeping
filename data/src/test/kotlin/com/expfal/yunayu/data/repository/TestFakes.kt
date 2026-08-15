@@ -65,6 +65,10 @@ class FakeTransactionDao : TransactionDao {
     var expenseSumFlow: Flow<Long> = flowOf(0L)
     val expenseSumCalls = mutableListOf<Pair<Long, Long>>()
     var heldCentsFlow: Flow<Long> = flowOf(0L)
+    var windowTotalsResult: TransactionDao.WindowTotalsRow = TransactionDao.WindowTotalsRow(0L, 0L)
+    val windowTotalsCalls = mutableListOf<Pair<Long, Long>>()
+    var categoryExpenseRows: List<TransactionDao.CategoryExpenseRow> = emptyList()
+    val categoryExpenseCalls = mutableListOf<Pair<Long, Long>>()
     var recentRowsFlow: Flow<List<TransactionDao.RecentTransactionRow>> = flowOf(emptyList())
     val recentCalls = mutableListOf<Int>()
     var countByTagIdsResult: Int = 0
@@ -98,6 +102,22 @@ class FakeTransactionDao : TransactionDao {
     }
 
     override fun observeHeldCents(): Flow<Long> = heldCentsFlow
+
+    override suspend fun getWindowTotals(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): TransactionDao.WindowTotalsRow {
+        windowTotalsCalls += startInclusiveMs to endExclusiveMs
+        return windowTotalsResult
+    }
+
+    override suspend fun getExpenseByCategory(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): List<TransactionDao.CategoryExpenseRow> {
+        categoryExpenseCalls += startInclusiveMs to endExclusiveMs
+        return categoryExpenseRows
+    }
 
     override fun observeRecent(limit: Int): Flow<List<TransactionDao.RecentTransactionRow>> {
         recentCalls += limit

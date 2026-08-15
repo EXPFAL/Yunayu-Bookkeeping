@@ -4,13 +4,15 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.expfal.yunayu.data.local.dao.ReportDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
+import com.expfal.yunayu.data.local.entity.ReportEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 
 /**
- * Yunayu 数据库。包含 tags / transactions 两张表（月度预算经 DataStore 存储，不落库）。
+ * Yunayu 数据库。包含 tags / transactions / reports 三张表（月度预算经 DataStore 存储，不落库）。
  *
  * Schema 变更策略：version 递增 + 显式 Migration，禁止 fallbackToDestructiveMigration
  * （用户数据不可丢失）；schema 经 exportSchema 输出至 data/schemas。
@@ -19,8 +21,9 @@ import com.expfal.yunayu.data.local.entity.TransactionEntity
     entities = [
         TagEntity::class,
         TransactionEntity::class,
+        ReportEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class YunayuDatabase : RoomDatabase() {
@@ -28,6 +31,8 @@ abstract class YunayuDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
 
     abstract fun transactionDao(): TransactionDao
+
+    abstract fun reportDao(): ReportDao
 
     companion object {
         const val NAME = "yunayu.db"
@@ -156,6 +161,45 @@ abstract class YunayuDatabase : RoomDatabase() {
                 try {
                     db.execSQL("DROP TABLE `date_ranges`")
                     db.execSQL("DROP TABLE `semesters`")
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /**
+         * Schema v3 → v4 迁移：新增 reports 报告表 + 唯一索引 (report_type, period_key)。
+         *
+         * SQL 与 Room 由 [ReportEntity] 生成的 schema 严格一致（列名 / 类型 / 非空约束 / 列顺序），
+         * 整体包事务，防止半迁移状态。
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `reports` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`report_type` TEXT NOT NULL, " +
+                            "`period_key` TEXT NOT NULL, " +
+                            "`window_start_ms` INTEGER NOT NULL, " +
+                            "`window_end_ms` INTEGER NOT NULL, " +
+                            "`income_cents` INTEGER NOT NULL, " +
+                            "`expense_cents` INTEGER NOT NULL, " +
+                            "`top_categories` TEXT NOT NULL, " +
+                            "`prev_income_cents` INTEGER NOT NULL, " +
+                            "`prev_expense_cents` INTEGER NOT NULL, " +
+                            "`analysis_text` TEXT, " +
+                            "`status` TEXT NOT NULL, " +
+                            "`engine` TEXT NOT NULL, " +
+                            "`content_version` TEXT NOT NULL, " +
+                            "`generated_at` INTEGER NOT NULL)",
+                    )
+                    db.execSQL(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS `index_reports_report_type_period_key` " +
+                            "ON `reports` (`report_type`, `period_key`)",
+                    )
                     db.setTransactionSuccessful()
                 } finally {
                     db.endTransaction()

@@ -27,6 +27,18 @@ interface TransactionDao {
         @ColumnInfo(name = "tag_icon") val tagIcon: String?,
     )
 
+    /** 时间窗收支聚合行：单次查询的窗口收入 / 支出总额（分）。 */
+    data class WindowTotalsRow(
+        @ColumnInfo(name = "income_cents") val incomeCents: Long,
+        @ColumnInfo(name = "expense_cents") val expenseCents: Long,
+    )
+
+    /** 时间窗分类支出聚合行：标签名（未分类为 null）与支出总额（分）。 */
+    data class CategoryExpenseRow(
+        @ColumnInfo(name = "tag_name") val tagName: String?,
+        @ColumnInfo(name = "cents") val cents: Long,
+    )
+
     @Insert
     suspend fun insert(transaction: TransactionEntity): Long
 
@@ -68,6 +80,29 @@ interface TransactionDao {
             "FROM transactions",
     )
     fun observeHeldCents(): Flow<Long>
+
+    /** 单次查询时间窗内收入 / 支出总额（分），无匹配行时两项均为 0。 */
+    @Query(
+        "SELECT " +
+            "COALESCE(SUM(CASE WHEN type = 'INCOME' THEN amount_cents ELSE 0 END), 0) AS income_cents, " +
+            "COALESCE(SUM(CASE WHEN type = 'EXPENSE' THEN amount_cents ELSE 0 END), 0) AS expense_cents " +
+            "FROM transactions " +
+            "WHERE occurred_at >= :startInclusiveMs AND occurred_at < :endExclusiveMs",
+    )
+    suspend fun getWindowTotals(startInclusiveMs: Long, endExclusiveMs: Long): WindowTotalsRow
+
+    /** 单次查询时间窗内支出按标签分组（未分类归入 null），按金额降序。 */
+    @Query(
+        "SELECT tag.name AS tag_name, SUM(t.amount_cents) AS cents " +
+            "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "WHERE t.type = 'EXPENSE' " +
+            "AND t.occurred_at >= :startInclusiveMs AND t.occurred_at < :endExclusiveMs " +
+            "GROUP BY t.tag_id ORDER BY cents DESC",
+    )
+    suspend fun getExpenseByCategory(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): List<CategoryExpenseRow>
 
     /** 观察最近 [limit] 笔交易（含标签名与图标），按发生时间倒序。 */
     @Query(
