@@ -3,6 +3,7 @@ package com.expfal.yunayu.data.repository
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
+import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.TransactionType
@@ -25,7 +26,7 @@ class TagRepositoryImplTest {
                 ),
             )
         }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         val children = repository.getChildren(1L)
 
@@ -42,7 +43,7 @@ class TagRepositoryImplTest {
 
     @Test
     fun `getChildren returns empty list for missing parent`() = runTest {
-        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao())
+        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao(), FakeTagMergeExecutor())
 
         val children = repository.getChildren(999L)
 
@@ -63,7 +64,7 @@ class TagRepositoryImplTest {
                 ),
             )
         }
-        val repository = TagRepositoryImpl(FakeTagDao(), transactionDao)
+        val repository = TagRepositoryImpl(FakeTagDao(), transactionDao, FakeTagMergeExecutor())
 
         val tags = repository.getRecentUsedTags(sinceEpochMillis = 1000L, type = TransactionType.INCOME, limit = 4)
 
@@ -79,7 +80,7 @@ class TagRepositoryImplTest {
 
     @Test
     fun `getRecentUsedTags returns empty list when no rows`() = runTest {
-        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao())
+        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao(), FakeTagMergeExecutor())
 
         val tags = repository.getRecentUsedTags(sinceEpochMillis = 0L, type = TransactionType.EXPENSE, limit = 4)
 
@@ -93,7 +94,7 @@ class TagRepositoryImplTest {
             nextSortOrderByParent = mapOf(1L to 5)
             nextInsertId = 42L
         }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         val id = repository.addSubTag(parentId = 1L, name = "  教材  ", icon = "📖")
 
@@ -112,7 +113,7 @@ class TagRepositoryImplTest {
     @Test
     fun `addSubTag throws DuplicateTagNameException on duplicate name`() = runTest {
         val dao = FakeTagDao().apply { countByNameResult = 1 }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         val error = captureError { repository.addSubTag(1L, "教材") }
 
@@ -121,7 +122,7 @@ class TagRepositoryImplTest {
 
     @Test
     fun `addSubTag rejects blank name`() = runTest {
-        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao())
+        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao(), FakeTagMergeExecutor())
 
         val error = captureError { repository.addSubTag(1L, "   ") }
 
@@ -130,9 +131,60 @@ class TagRepositoryImplTest {
     }
 
     @Test
+    fun `addRootTag inserts income root with null parent and root count sort order`() = runTest {
+        val dao = FakeTagDao().apply {
+            allTags = listOf(tagEntity(1L, "学习"), tagEntity(2L, "社交"))
+            nextInsertId = 42L
+        }
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
+
+        val id = repository.addRootTag("  " + IncomeTags.INCOME_ROOT_NAME + "  ", "💰")
+
+        assertEquals(42L, id)
+        assertEquals(1, dao.insertedTags.size)
+        val inserted = dao.insertedTags.single()
+        assertEquals(IncomeTags.INCOME_ROOT_NAME, inserted.name)
+        assertEquals(null, inserted.parentId)
+        assertEquals(2, inserted.sortOrder)
+        assertEquals("💰", inserted.icon)
+        assertEquals(inserted.createdAt, inserted.updatedAt)
+        assertTrue(inserted.createdAt > 0L)
+    }
+
+    @Test
+    fun `addRootTag throws DuplicateTagNameException when root name exists`() = runTest {
+        val dao = FakeTagDao().apply { allTags = listOf(tagEntity(1L, IncomeTags.INCOME_ROOT_NAME)) }
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
+
+        val error = captureError { repository.addRootTag(IncomeTags.INCOME_ROOT_NAME, null) }
+
+        assertEquals(DuplicateTagNameException::class.java, error?.javaClass)
+    }
+
+    @Test
+    fun `addRootTag rejects blank name`() = runTest {
+        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao(), FakeTagMergeExecutor())
+
+        val error = captureError { repository.addRootTag("   ", null) }
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("标签名不可为空", error?.message)
+    }
+
+    @Test
+    fun `addRootTag rejects non-whitelisted name`() = runTest {
+        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao(), FakeTagMergeExecutor())
+
+        val error = captureError { repository.addRootTag("学习", null) }
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("仅支持预置根类", error?.message)
+    }
+
+    @Test
     fun `renameTag rejects root tag`() = runTest {
         val dao = FakeTagDao().apply { allTags = listOf(tagEntity(1L, "学习")) }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         val error = captureError { repository.renameTag(1L, "新名") }
 
@@ -148,7 +200,7 @@ class TagRepositoryImplTest {
                 tagEntity(3L, "考证", 1L),
             )
         }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         val error = captureError { repository.renameTag(3L, "教材") }
 
@@ -158,7 +210,7 @@ class TagRepositoryImplTest {
     @Test
     fun `renameTag renames non-root tag with trimmed name`() = runTest {
         val dao = FakeTagDao().apply { allTags = listOf(tagEntity(2L, "教材", 1L)) }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         repository.renameTag(2L, "  高数  ")
 
@@ -175,7 +227,7 @@ class TagRepositoryImplTest {
             allTags = listOf(tagEntity(2L, "教材", 1L))
             renameResult = 0
         }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         val error = captureError { repository.renameTag(2L, "高数") }
 
@@ -186,7 +238,7 @@ class TagRepositoryImplTest {
     @Test
     fun `deleteTag rejects root tag`() = runTest {
         val dao = FakeTagDao().apply { allTags = listOf(tagEntity(1L, "学习")) }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         val error = captureError { repository.deleteTag(1L) }
 
@@ -197,7 +249,7 @@ class TagRepositoryImplTest {
     @Test
     fun `deleteTag deletes non-root tag by id`() = runTest {
         val dao = FakeTagDao().apply { allTags = listOf(tagEntity(2L, "教材", 1L)) }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         repository.deleteTag(2L)
 
@@ -216,7 +268,7 @@ class TagRepositoryImplTest {
             )
         }
         val transactionDao = FakeTransactionDao().apply { countByTagIdsResult = 7 }
-        val repository = TagRepositoryImpl(dao, transactionDao)
+        val repository = TagRepositoryImpl(dao, transactionDao, FakeTagMergeExecutor())
 
         val impact = repository.getDeleteImpact(2L)
 
@@ -232,7 +284,7 @@ class TagRepositoryImplTest {
                 tagEntity(3L, "B", 2L),
             )
         }
-        val repository = TagRepositoryImpl(dao, FakeTransactionDao())
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
 
         val impact = repository.getDeleteImpact(2L)
 
@@ -242,12 +294,86 @@ class TagRepositoryImplTest {
 
     @Test
     fun `getDeleteImpact throws on missing tag`() = runTest {
-        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao())
+        val repository = TagRepositoryImpl(FakeTagDao(), FakeTransactionDao(), FakeTagMergeExecutor())
 
         val error = captureError { repository.getDeleteImpact(999L) }
 
         assertEquals(IllegalArgumentException::class.java, error?.javaClass)
         assertEquals("标签不存在：999", error?.message)
+    }
+
+    @Test
+    fun `mergeTags delegates to executor after validation`() = runTest {
+        val dao = FakeTagDao().apply {
+            allTags = listOf(
+                tagEntity(1L, "学习"),
+                tagEntity(2L, "教材", 1L),
+                tagEntity(3L, "考证", 1L),
+            )
+        }
+        val executor = FakeTagMergeExecutor()
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), executor)
+
+        repository.mergeTags(keepTagId = 2L, dropTagId = 3L)
+
+        assertEquals(listOf(2L to 3L), executor.mergeCalls)
+    }
+
+    @Test
+    fun `mergeTags rejects root tag`() = runTest {
+        val dao = FakeTagDao().apply {
+            allTags = listOf(tagEntity(1L, "学习"), tagEntity(2L, "教材", 1L))
+        }
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
+
+        val error = captureError { repository.mergeTags(keepTagId = 1L, dropTagId = 2L) }
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("根标签不可合并", error?.message)
+    }
+
+    @Test
+    fun `mergeTags rejects drop tag with children`() = runTest {
+        val dao = FakeTagDao().apply {
+            allTags = listOf(
+                tagEntity(1L, "学习"),
+                tagEntity(2L, "教材", 1L),
+                tagEntity(3L, "高数", 2L),
+                tagEntity(4L, "考证", 1L),
+            )
+        }
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
+
+        val error = captureError { repository.mergeTags(keepTagId = 4L, dropTagId = 2L) }
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("仅叶子标签可合并", error?.message)
+    }
+
+    @Test
+    fun `mergeTags rejects missing tag`() = runTest {
+        val dao = FakeTagDao().apply {
+            allTags = listOf(tagEntity(1L, "学习"), tagEntity(2L, "教材", 1L))
+        }
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
+
+        val error = captureError { repository.mergeTags(keepTagId = 2L, dropTagId = 999L) }
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("标签不存在：999", error?.message)
+    }
+
+    @Test
+    fun `mergeTags rejects merging into itself`() = runTest {
+        val dao = FakeTagDao().apply {
+            allTags = listOf(tagEntity(1L, "学习"), tagEntity(2L, "教材", 1L))
+        }
+        val repository = TagRepositoryImpl(dao, FakeTransactionDao(), FakeTagMergeExecutor())
+
+        val error = captureError { repository.mergeTags(keepTagId = 2L, dropTagId = 2L) }
+
+        assertEquals(IllegalArgumentException::class.java, error?.javaClass)
+        assertEquals("不可合并到自身", error?.message)
     }
 
     private fun tagEntity(id: Long, name: String, parentId: Long? = null, sortOrder: Int = 0) =

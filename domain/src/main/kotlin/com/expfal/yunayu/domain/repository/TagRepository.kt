@@ -33,6 +33,14 @@ interface TagRepository {
     suspend fun addSubTag(parentId: Long, name: String, icon: String? = null): Long
 
     /**
+     * 新增根标签（仅限预置白名单根名），返回新根标签 id。
+     *
+     * 白名单外根名抛 [IllegalArgumentException]；根级重名（`parentId == null` 且同名）抛
+     * [DuplicateTagNameException]（根级唯一索引 `(parent_id, name)` 对 NULL parent 不生效，须内存判重）。
+     */
+    suspend fun addRootTag(name: String, icon: String?): Long
+
+    /**
      * 重命名标签；根标签拒绝（抛 [IllegalArgumentException]），同父重名抛
      * [DuplicateTagNameException]，空名拒绝。
      */
@@ -43,4 +51,13 @@ interface TagRepository {
 
     /** 删除标签；根标签拒绝（抛 [IllegalArgumentException]），子树级联删除与交易置空由 DB 外键执行。 */
     suspend fun deleteTag(tagId: Long)
+
+    /**
+     * 把 [dropTagId] 合并进 [keepTagId]（仅叶子标签可合并）。
+     *
+     * 合并语义：将 [dropTagId] 下的交易迁移到 [keepTagId]，随后删除 [dropTagId]。校验失败（两标签
+     * 不存在、任一为根、[dropTagId] 有子级或两标签相同）抛 [IllegalArgumentException]。仅叶子可合并
+     * 的原因是 tags 子树外键为 `ON DELETE CASCADE`，带子级删除会误删整棵子树。
+     */
+    suspend fun mergeTags(keepTagId: Long, dropTagId: Long)
 }

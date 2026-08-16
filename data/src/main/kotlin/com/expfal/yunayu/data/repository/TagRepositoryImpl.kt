@@ -6,6 +6,7 @@ import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
+import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.TransactionType
@@ -20,6 +21,7 @@ import javax.inject.Singleton
 class TagRepositoryImpl @Inject constructor(
     private val tagDao: TagDao,
     private val transactionDao: TransactionDao,
+    private val tagMergeExecutor: TagMergeExecutor,
 ) : TagRepository {
 
     override fun observeChildren(parentId: Long?): Flow<List<Tag>> =
@@ -67,6 +69,29 @@ class TagRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun addRootTag(name: String, icon: String?): Long {
+        val trimmed = name.trim()
+        require(trimmed.isNotEmpty()) { "标签名不可为空" }
+        require(trimmed == IncomeTags.INCOME_ROOT_NAME) { "仅支持预置根类" }
+        val all = tagDao.getAll()
+        if (all.any { it.parentId == null && it.name == trimmed }) {
+            throw DuplicateTagNameException("根标签「$trimmed」已存在")
+        }
+        val sortOrder = all.count { it.parentId == null }
+        val now = System.currentTimeMillis()
+        return tagDao.insert(
+            TagEntity(
+                id = 0L,
+                name = trimmed,
+                parentId = null,
+                sortOrder = sortOrder,
+                icon = icon,
+                createdAt = now,
+                updatedAt = now,
+            ),
+        )
+    }
+
     override suspend fun renameTag(tagId: Long, newName: String) {
         val trimmed = newName.trim()
         if (trimmed.isEmpty()) throw IllegalArgumentException("标签名不可为空")
@@ -108,6 +133,20 @@ class TagRepositoryImpl @Inject constructor(
             ?: throw IllegalArgumentException("标签不存在：$tagId")
         if (target.parentId == null) throw IllegalArgumentException("根标签不可删除")
         tagDao.deleteById(tagId)
+    }
+
+    override suspend fun mergeTags(keepTagId: Long, dropTagId: Long) {
+        if (keepTagId == dropTagId) throw IllegalArgumentException("不可合并到自身")
+        val all = tagDao.getAll()
+        val byId = all.associateBy { it.id }
+        val keep = byId[keepTagId] ?: throw IllegalArgumentException("标签不存在：$keepTagId")
+        val drop = byId[dropTagId] ?: throw IllegalArgumentException("标签不存在：$dropTagId")
+        if (keep.parentId == null || drop.parentId == null) {
+            throw IllegalArgumentException("根标签不可合并")
+        }
+        // drop 必须为叶子：tags 子树外键 ON DELETE CASCADE，带子级删除会误删整棵子树
+        if (all.any { it.parentId == dropTagId }) throw IllegalArgumentException("仅叶子标签可合并")
+        tagMergeExecutor.merge(keepTagId, dropTagId)
     }
 
     private fun TagEntity.toDomain(): Tag = Tag(

@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.usecase
 
+import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.repository.TagRepository
@@ -9,8 +10,9 @@ import kotlinx.coroutines.CancellationException
  * 预测用户最近常用的标签类别，支撑「3秒极速记账」首页快捷入口。
  *
  * 单一返回路径：先取过去 7 天内按交易频次降序的已用标签（最多 [DEFAULT_LIMIT] 个），
- * 再用根节点标签补足缺口（与已用标签按 `id` 去重），最终裁剪到 [DEFAULT_LIMIT] 个。
- * 根节点不足时按实际数量返回，保证入口始终可用。
+ * 再按 [type] 收支方向补足缺口（与已用标签按 `id` 去重），最终裁剪到 [DEFAULT_LIMIT] 个。
+ * 支出仅用四大根类补足（排除收入根），收入仅用收入根及其子标签补足；根节点不足时按实际
+ * 数量返回，保证入口始终可用。
  */
 class GetRecentCategoriesUseCase(
     private val tagRepository: TagRepository,
@@ -26,7 +28,20 @@ class GetRecentCategoriesUseCase(
         val roots = runCatching { tagRepository.getChildren(parentId = null) }
             .onFailure { if (it is CancellationException) throw it }
             .getOrDefault(emptyList())
-        return (recent + roots.filter { root -> recent.none { it.id == root.id } })
+        val fallback = when (type) {
+            TransactionType.EXPENSE -> roots.filter { it.name != IncomeTags.INCOME_ROOT_NAME }
+            TransactionType.INCOME -> {
+                val incomeRoot = roots.firstOrNull { it.name == IncomeTags.INCOME_ROOT_NAME }
+                if (incomeRoot == null) {
+                    emptyList()
+                } else {
+                    listOf(incomeRoot) + runCatching { tagRepository.getChildren(parentId = incomeRoot.id) }
+                        .onFailure { if (it is CancellationException) throw it }
+                        .getOrDefault(emptyList())
+                }
+            }
+        }
+        return (recent + fallback.filter { root -> recent.none { it.id == root.id } })
             .take(DEFAULT_LIMIT)
     }
 

@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.usecase
 
+import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.TransactionType
@@ -149,18 +150,34 @@ class GetRecentCategoriesUseCaseTest {
     }
 
     @Test
-    fun `falls back to root tags when income history empty`() = runTest {
-        val root = listOf(tag(1L, "学习"), tag(2L, "社交"))
+    fun `income fallback returns only income root and its children`() = runTest {
         val repository = FakeTagRepository().apply {
             this.recentTags = emptyList()
-            this.rootTags = root
+            this.rootTags = listOf(tag(1L, "学习"), tag(2L, IncomeTags.INCOME_ROOT_NAME), tag(3L, "社交"))
+            this.childrenByParent = mapOf(2L to listOf(tag(21L, "生活费", 2L), tag(22L, "兼职经营", 2L)))
         }
         val useCase = GetRecentCategoriesUseCase(repository)
 
         val result = useCase(TransactionType.INCOME, now)
 
-        assertEquals(root, result)
+        assertEquals(
+            listOf(tag(2L, IncomeTags.INCOME_ROOT_NAME), tag(21L, "生活费", 2L), tag(22L, "兼职经营", 2L)),
+            result,
+        )
         assertEquals(TransactionType.INCOME, repository.lastType)
+    }
+
+    @Test
+    fun `expense fallback excludes income root`() = runTest {
+        val repository = FakeTagRepository().apply {
+            this.recentTags = emptyList()
+            this.rootTags = listOf(tag(1L, "学习"), tag(2L, IncomeTags.INCOME_ROOT_NAME), tag(3L, "社交"))
+        }
+        val useCase = GetRecentCategoriesUseCase(repository)
+
+        val result = useCase(TransactionType.EXPENSE, now)
+
+        assertEquals(listOf(tag(1L, "学习"), tag(3L, "社交")), result)
     }
 
     private fun tag(id: Long, name: String, parentId: Long? = null) = Tag(
@@ -178,13 +195,15 @@ class GetRecentCategoriesUseCaseTest {
 
         var recentTags: List<Tag> = emptyList()
         var rootTags: List<Tag> = emptyList()
+        var childrenByParent: Map<Long, List<Tag>> = emptyMap()
         var lastSince: Long? = null
         var lastType: TransactionType? = null
         var lastLimit: Int? = null
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())
 
-        override suspend fun getChildren(parentId: Long?): List<Tag> = rootTags
+        override suspend fun getChildren(parentId: Long?): List<Tag> =
+            if (parentId == null) rootTags else childrenByParent[parentId] ?: emptyList()
 
         override suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag> {
             lastSince = sinceEpochMillis
@@ -197,10 +216,14 @@ class GetRecentCategoriesUseCaseTest {
 
         override suspend fun addSubTag(parentId: Long, name: String, icon: String?): Long = 0L
 
+        override suspend fun addRootTag(name: String, icon: String?): Long = 0L
+
         override suspend fun renameTag(tagId: Long, newName: String) = Unit
 
         override suspend fun getDeleteImpact(tagId: Long): TagDeleteImpact = TagDeleteImpact(0, 0, emptyList())
 
         override suspend fun deleteTag(tagId: Long) = Unit
+
+        override suspend fun mergeTags(keepTagId: Long, dropTagId: Long) = Unit
     }
 }
