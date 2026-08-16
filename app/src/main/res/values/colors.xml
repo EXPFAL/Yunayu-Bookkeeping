@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 启动器图标背景色：品牌浅粉 #FFF8F6，对齐 ui/theme Color.kt LIGHT_BACKGROUND -->
-    <color name="ic_launcher_background">#FFF8F6</color>
+    <!-- 启动器图标背景兜底色：原图粉色径向渐变中心色 #FFE2E3（边缘 #FED1D0）。
+         minSdk>=26 时 adaptive 图标优先使用 mipmap-*/ic_launcher_background.png 渐变背景，
+         此处色值仅作旧设备/异常兜底，不再作为 adaptive background 主引用。 -->
+    <color name="ic_launcher_background">#FFE2E3</color>
 </resources>
