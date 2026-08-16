@@ -3,6 +3,8 @@ package com.expfal.yunayu.data.di
 import com.expfal.yunayu.data.repository.MonthlyBudgetRepositoryImpl
 import com.expfal.yunayu.data.repository.NlApiConfigRepositoryImpl
 import com.expfal.yunayu.data.repository.ReportRepositoryImpl
+import com.expfal.yunayu.data.repository.RoomTagMergeExecutor
+import com.expfal.yunayu.data.repository.TagMergeExecutor
 import com.expfal.yunayu.data.repository.TagRepositoryImpl
 import com.expfal.yunayu.data.repository.TransactionRepositoryImpl
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
@@ -40,4 +42,8 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindReportRepository(impl: ReportRepositoryImpl): ReportRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindTagMergeExecutor(impl: RoomTagMergeExecutor): TagMergeExecutor
 }
