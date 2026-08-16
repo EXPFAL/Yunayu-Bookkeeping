@@ -31,6 +31,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.domain.model.Account
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.ui.component.TagTreeList
@@ -144,6 +145,13 @@ fun QuickAddSheet(
                 )
             }
 
+            AccountChipsRow(
+                accounts = uiState.accounts,
+                selectedAccountId = uiState.selectedAccountId,
+                onSelect = viewModel::onSelectAccount,
+                modifier = Modifier.padding(top = 12.dp),
+            )
+
             Spacer(modifier = Modifier.height(20.dp))
             if (uiState.nlMode) {
                 NlParseSection(
@@ -247,6 +255,39 @@ private fun TagPickerTitle(
             .fillMaxWidth()
             .padding(horizontal = 24.dp),
     )
+}
+
+/**
+ * 账户选择横向 chips：首位固定「未指定」+ 各账户，单选互斥；账户列表为空时整行不渲染。
+ * 数字与 NL 两模式共享，选中的 [selectedAccountId] 在落库时透传为交易账户外键。
+ */
+@Composable
+private fun AccountChipsRow(
+    accounts: List<Account>,
+    selectedAccountId: Long?,
+    onSelect: (Long?) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    if (accounts.isEmpty()) return
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = selectedAccountId == null,
+            onClick = { onSelect(null) },
+            label = { Text("未指定") },
+        )
+        accounts.forEach { account ->
+            FilterChip(
+                selected = selectedAccountId == account.id,
+                onClick = { onSelect(account.id) },
+                label = { Text(account.name) },
+            )
+        }
+    }
 }
 
 /** 数字模式收/支方向切换控件：仅数字模式展示，样式与 [NlModeToggle] 一致。 */

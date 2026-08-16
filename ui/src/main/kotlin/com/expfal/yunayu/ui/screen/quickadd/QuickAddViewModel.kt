@@ -3,6 +3,7 @@ package com.expfal.yunayu.ui.screen.quickadd
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.expfal.yunayu.domain.model.Account
 import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TransactionType
@@ -10,6 +11,7 @@ import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.nl.model.NlParseResult
 import com.expfal.yunayu.domain.nl.model.NlTransactionDraft
+import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
@@ -24,6 +26,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
@@ -48,6 +51,10 @@ data class QuickAddUiState(
     val nlTagId: Long? = null,
     /** 数字模式的收/支方向，默认支出；NL 模式忽略，以解析草稿 [nlDraft] 的 type 为准。 */
     val transactionType: TransactionType = TransactionType.EXPENSE,
+    /** 弹层打开时加载的账户列表，供账户 chips 展示；为空表示暂无账户或加载失败。 */
+    val accounts: List<Account> = emptyList(),
+    /** 当前选中的账户 id；`null` 表示「未指定账户」。 */
+    val selectedAccountId: Long? = null,
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -71,6 +78,7 @@ sealed interface QuickAddEvent {
  */
 @HiltViewModel
 class QuickAddViewModel @Inject constructor(
+    private val accountRepository: AccountRepository,
     private val tagRepository: TagRepository,
     private val getRecentCategoriesUseCase: GetRecentCategoriesUseCase,
     private val addTransactionUseCase: AddTransactionUseCase,
@@ -110,7 +118,34 @@ class QuickAddViewModel @Inject constructor(
                 saveFailed = false,
                 nlTagId = null,
                 transactionType = TransactionType.EXPENSE,
+                accounts = emptyList(),
+                selectedAccountId = null,
             )
+        }
+        reloadAccounts()
+    }
+
+    /**
+     * 弹层打开时加载账户列表并依据上次使用账户 id 预选：记忆 id 必须存在于当前账户列表，
+     * 否则回退「未指定账户」（防止账户被删除后残留失效选中）。账户加载失败降级空列表、
+     * 记忆读取失败降级未预选，均记日志且 [kotlinx.coroutines.CancellationException] 直接重抛。
+     */
+    private fun reloadAccounts() {
+        viewModelScope.launch {
+            val accounts = runCatching { accountRepository.getAccounts() }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to load accounts", throwable)
+                }
+                .getOrDefault(emptyList())
+            val rememberedId = runCatching { accountRepository.observeLastUsedAccountId().first() }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to read last used account id", throwable)
+                }
+                .getOrNull()
+            val preselect = rememberedId?.takeIf { id -> accounts.any { it.id == id } }
+            _uiState.update { it.copy(accounts = accounts, selectedAccountId = preselect) }
         }
     }
 
@@ -235,6 +270,15 @@ class QuickAddViewModel @Inject constructor(
     }
 
     /**
+     * 切换账户选中态；saving 期间忽略（对齐 [onSelectTag] 守卫）。
+     * [accountId] 为 `null` 时表示切回「未指定账户」。
+     */
+    fun onSelectAccount(accountId: Long?) {
+        if (_uiState.value.saving) return
+        _uiState.update { it.copy(selectedAccountId = accountId) }
+    }
+
+    /**
      * 切换数字模式收/支方向；saving / nlParsing / confirmRequested 期间忽略（守卫同 [setNlMode]），
      * 方向不变时不刷新。切换后按新方向重新加载建议分类。
      */
@@ -282,6 +326,7 @@ class QuickAddViewModel @Inject constructor(
 
     private fun persist(amountCents: Long) {
         val type = _uiState.value.transactionType
+        val selectedAccountId = _uiState.value.selectedAccountId
         _uiState.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
             runCatching {
@@ -290,6 +335,7 @@ class QuickAddViewModel @Inject constructor(
                     tagId = _uiState.value.selectedTagId,
                     occurredAt = System.currentTimeMillis(),
                     type = type,
+                    accountId = selectedAccountId,
                 )
             }.onSuccess {
                 nlConfirmPending = false
@@ -303,6 +349,7 @@ class QuickAddViewModel @Inject constructor(
                         confirmRequested = false,
                     )
                 }
+                rememberLastUsedAccount(selectedAccountId)
             }.onFailure { throwable ->
                 if (throwable is CancellationException) throw throwable
                 Log.e(TAG, "Failed to save transaction", throwable)
@@ -444,7 +491,8 @@ class QuickAddViewModel @Inject constructor(
         nlConfirmPending = false
         val state = _uiState.value
         val draft = state.nlDraft ?: return
-        val finalDraft = draft.copy(tagId = state.nlTagId)
+        val selectedAccountId = state.selectedAccountId
+        val finalDraft = draft.copy(tagId = state.nlTagId, accountId = selectedAccountId)
         _uiState.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
             runCatching { addParsedTransactionUseCase(finalDraft) }
@@ -463,12 +511,27 @@ class QuickAddViewModel @Inject constructor(
                             nlTagId = null,
                         )
                     }
+                    rememberLastUsedAccount(selectedAccountId)
                 }
                 .onFailure { throwable ->
                     if (throwable is CancellationException) throw throwable
                     Log.e(TAG, "Failed to save NL transaction", throwable)
                     _events.tryEmit(QuickAddEvent.SaveFailed)
                     _uiState.update { it.copy(saving = false, saveFailed = true, confirmRequested = false) }
+                }
+        }
+    }
+
+    /**
+     * 落库成功后异步记忆本次使用的账户 id；fire-and-forget，失败仅记日志，
+     * [kotlinx.coroutines.CancellationException] 直接重抛，绝不触碰 saving/saveFailed 状态机。
+     */
+    private fun rememberLastUsedAccount(accountId: Long?) {
+        viewModelScope.launch {
+            runCatching { accountRepository.saveLastUsedAccountId(accountId) }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to save last used account id", throwable)
                 }
         }
     }
