@@ -3,8 +3,11 @@ package com.expfal.yunayu.ui.screen.transactionmanage
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.expfal.yunayu.domain.model.Account
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
+import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.DeleteTransactionUseCase
@@ -44,6 +47,8 @@ data class TransactionManageUiState(
     val timeRange: TimeFilter = TimeFilter.ALL,
     val selectedTagIds: Set<Long> = emptySet(),
     val keyword: String = "",
+    val accounts: List<Account> = emptyList(),
+    val accountFilter: AccountFilter = AccountFilter.All,
     val allTagsByRoot: Map<Tag, List<Tag>> = emptyMap(),
     val pendingDelete: RecentTransaction? = null,
     val busy: Boolean = false,
@@ -60,11 +65,12 @@ sealed interface TransactionManageEvent {
     data object Failed : TransactionManageEvent
 }
 
-/** 观察链组装结果：时间窗 + 标签集合 + 备注关键词。 */
+/** 观察链组装结果：时间窗 + 标签集合 + 备注关键词 + 账户筛选。 */
 private data class FilterParams(
     val timeRange: TimeFilter,
     val tagIds: Set<Long>,
     val keyword: String,
+    val accountFilter: AccountFilter,
 )
 
 /**
@@ -79,6 +85,7 @@ private data class FilterParams(
 @HiltViewModel
 class TransactionManageViewModel @Inject constructor(
     private val transactionRepository: TransactionRepository,
+    private val accountRepository: AccountRepository,
     private val tagRepository: TagRepository,
     private val deleteTransactionUseCase: DeleteTransactionUseCase,
 ) : ViewModel() {
@@ -89,6 +96,7 @@ class TransactionManageViewModel @Inject constructor(
     private val timeRangeFlow = MutableStateFlow(TimeFilter.ALL)
     private val selectedTagIdsFlow = MutableStateFlow<Set<Long>>(emptySet())
     private val keywordFlow = MutableStateFlow("")
+    private val accountFilterFlow = MutableStateFlow<AccountFilter>(AccountFilter.All)
 
     private val _events = MutableSharedFlow<TransactionManageEvent>(
         extraBufferCapacity = 1,
@@ -100,6 +108,7 @@ class TransactionManageViewModel @Inject constructor(
         observeTransactions()
         loadAllTags()
         observeUncategorizedCount()
+        observeAccounts()
     }
 
     /** 切换时间筛选维度，立即重查。 */
@@ -125,6 +134,12 @@ class TransactionManageViewModel @Inject constructor(
     fun onKeywordChange(keyword: String) {
         keywordFlow.value = keyword
         _uiState.update { it.copy(keyword = keyword) }
+    }
+
+    /** 切换账户筛选维度，立即重查。 */
+    fun selectAccountFilter(filter: AccountFilter) {
+        accountFilterFlow.value = filter
+        _uiState.update { it.copy(accountFilter = filter) }
     }
 
     /** 请求删除一笔交易，置入 [TransactionManageUiState.pendingDelete] 供 UI 二次确认。 */
@@ -172,7 +187,7 @@ class TransactionManageViewModel @Inject constructor(
         }
     }
 
-    /** 组装筛选观察链：组合时间窗 / 标签 / 关键词（空关键词直通、非空防抖），订阅仓储过滤流。 */
+    /** 组装筛选观察链：组合时间窗 / 标签 / 关键词 / 账户筛选（空关键词直通、非空防抖），订阅仓储过滤流。 */
     private fun observeTransactions() {
         viewModelScope.launch {
             combine(
@@ -181,8 +196,9 @@ class TransactionManageViewModel @Inject constructor(
                 keywordFlow.debounce { keyword ->
                     if (keyword.isEmpty()) 0L else KEYWORD_DEBOUNCE_MILLIS
                 },
-            ) { range, tagIds, keyword ->
-                FilterParams(range, tagIds, keyword)
+                accountFilterFlow,
+            ) { range, tagIds, keyword, accountFilter ->
+                FilterParams(range, tagIds, keyword, accountFilter)
             }
                 .flatMapLatest { params ->
                     val (start, end) = windowFor(params.timeRange)
@@ -191,6 +207,7 @@ class TransactionManageViewModel @Inject constructor(
                         endExclusiveMs = end,
                         tagIds = params.tagIds.toList(),
                         noteKeyword = params.keyword.ifBlank { null },
+                        accountFilter = params.accountFilter,
                     )
                 }
                 .catch { throwable ->
@@ -200,6 +217,31 @@ class TransactionManageViewModel @Inject constructor(
                 }
                 .collect { transactions ->
                     _uiState.update { it.copy(loading = false, transactions = transactions) }
+                }
+        }
+    }
+
+    /**
+     * 观察账户列表供账户筛选 chips 展示，账户增删改后实时刷新。
+     *
+     * 失效筛选自动回退：若当前筛选为 [AccountFilter.Specific] 且该账户已从列表消失（如被删除），
+     * 则将 [accountFilterFlow] 与 [TransactionManageUiState.accountFilter] 一并回退为
+     * [AccountFilter.All]，经 [combine] 触发重查，避免列表恒空死状态。
+     */
+    private fun observeAccounts() {
+        viewModelScope.launch {
+            accountRepository.observeAccounts()
+                .catch { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to observe accounts", throwable)
+                }
+                .collect { accounts ->
+                    _uiState.update { it.copy(accounts = accounts) }
+                    val current = accountFilterFlow.value
+                    if (current is AccountFilter.Specific && accounts.none { it.id == current.accountId }) {
+                        accountFilterFlow.value = AccountFilter.All
+                        _uiState.update { it.copy(accountFilter = AccountFilter.All) }
+                    }
                 }
         }
     }

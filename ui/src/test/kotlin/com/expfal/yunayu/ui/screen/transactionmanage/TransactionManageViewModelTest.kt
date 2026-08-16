@@ -1,5 +1,9 @@
 package com.expfal.yunayu.ui.screen.transactionmanage
 
+import com.expfal.yunayu.domain.model.Account
+import com.expfal.yunayu.domain.model.AccountBalance
+import com.expfal.yunayu.domain.model.AccountDeleteImpact
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
@@ -9,6 +13,7 @@ import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
+import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
@@ -52,7 +57,7 @@ class TransactionManageViewModelTest {
 
         assertEquals(TimeFilter.ALL, vm.uiState.value.timeRange)
         assertFalse(vm.uiState.value.loading)
-        assertEquals(listOf(FilterArgs(null, null, emptyList(), null)), txRepo.observeFilteredCalls)
+        assertEquals(listOf(FilterArgs(null, null, emptyList(), null, AccountFilter.All)), txRepo.observeFilteredCalls)
     }
 
     @Test
@@ -143,6 +148,124 @@ class TransactionManageViewModelTest {
     }
 
     @Test
+    fun `account filter defaults to all and loads accounts`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val accountRepo = FakeAccountRepository().apply {
+            accountsFlow.value = listOf(Account(id = 7L, name = "微信"), Account(id = 8L, name = "支付宝"))
+        }
+        val vm = viewModel(txRepo, accountRepo = accountRepo)
+        settle()
+
+        assertEquals(AccountFilter.All, vm.uiState.value.accountFilter)
+        assertEquals(
+            listOf(Account(id = 7L, name = "微信"), Account(id = 8L, name = "支付宝")),
+            vm.uiState.value.accounts,
+        )
+    }
+
+    @Test
+    fun `account list updates refresh state`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val accountRepo = FakeAccountRepository().apply {
+            accountsFlow.value = listOf(Account(id = 7L, name = "微信"))
+        }
+        val vm = viewModel(txRepo, accountRepo = accountRepo)
+        settle()
+
+        assertEquals(listOf(Account(id = 7L, name = "微信")), vm.uiState.value.accounts)
+
+        accountRepo.accountsFlow.value = listOf(
+            Account(id = 7L, name = "微信"),
+            Account(id = 8L, name = "支付宝"),
+        )
+        runCurrent()
+
+        assertEquals(
+            listOf(Account(id = 7L, name = "微信"), Account(id = 8L, name = "支付宝")),
+            vm.uiState.value.accounts,
+        )
+    }
+
+    @Test
+    fun `selecting deleted account falls back to all and requeries`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val accountRepo = FakeAccountRepository().apply {
+            accountsFlow.value = listOf(Account(id = 7L, name = "微信"), Account(id = 8L, name = "支付宝"))
+        }
+        val vm = viewModel(txRepo, accountRepo = accountRepo)
+        settle()
+
+        vm.selectAccountFilter(AccountFilter.Specific(7L))
+        runCurrent()
+        assertEquals(AccountFilter.Specific(7L), vm.uiState.value.accountFilter)
+
+        val callsBefore = txRepo.observeFilteredCalls.size
+        accountRepo.accountsFlow.value = listOf(Account(id = 8L, name = "支付宝"))
+        runCurrent()
+
+        assertEquals(AccountFilter.All, vm.uiState.value.accountFilter)
+        assertEquals(AccountFilter.All, txRepo.observeFilteredCalls.last().accountFilter)
+        assertEquals(callsBefore + 1, txRepo.observeFilteredCalls.size)
+    }
+
+    @Test
+    fun `selecting specific account passes filter through and updates state`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val vm = viewModel(txRepo)
+        settle()
+
+        vm.selectAccountFilter(AccountFilter.Specific(7L))
+        runCurrent()
+
+        assertEquals(AccountFilter.Specific(7L), txRepo.observeFilteredCalls.last().accountFilter)
+        assertEquals(AccountFilter.Specific(7L), vm.uiState.value.accountFilter)
+    }
+
+    @Test
+    fun `selecting unspecified account passes filter through`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val vm = viewModel(txRepo)
+        settle()
+
+        vm.selectAccountFilter(AccountFilter.Unspecified)
+        runCurrent()
+
+        assertEquals(AccountFilter.Unspecified, txRepo.observeFilteredCalls.last().accountFilter)
+        assertEquals(AccountFilter.Unspecified, vm.uiState.value.accountFilter)
+    }
+
+    @Test
+    fun `account filter combines with time and keyword in single query`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val vm = viewModel(txRepo)
+        settle()
+
+        vm.selectTimeRange(TimeFilter.LAST_7_DAYS)
+        vm.selectAccountFilter(AccountFilter.Specific(3L))
+        vm.onKeywordChange("书")
+        settle()
+
+        val call = txRepo.observeFilteredCalls.last()
+        assertEquals(TimeWindows.lastNDaysStartMillis(LocalDate.now(), 7), call.startInclusiveMs)
+        assertEquals(AccountFilter.Specific(3L), call.accountFilter)
+        assertEquals("书", call.noteKeyword)
+    }
+
+    @Test
+    fun `switching account filter triggers requery`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val vm = viewModel(txRepo)
+        settle()
+        val callsBefore = txRepo.observeFilteredCalls.size
+
+        vm.selectAccountFilter(AccountFilter.Unspecified)
+        runCurrent()
+
+        assertEquals(callsBefore + 1, txRepo.observeFilteredCalls.size)
+        assertEquals(AccountFilter.Unspecified, txRepo.observeFilteredCalls.last().accountFilter)
+    }
+
+    @Test
     fun `confirmDelete success emits Deleted and clears pending`() = runTest {
         val txRepo = FakeTransactionRepository()
         val reportRepo = FakeReportRepository()
@@ -218,8 +341,10 @@ class TransactionManageViewModelTest {
         txRepo: TransactionRepository,
         tagRepo: TagRepository = FakeTagRepository(),
         reportRepo: ReportRepository = FakeReportRepository(),
+        accountRepo: AccountRepository = FakeAccountRepository(),
     ) = TransactionManageViewModel(
         transactionRepository = txRepo,
+        accountRepository = accountRepo,
         tagRepository = tagRepo,
         deleteTransactionUseCase = DeleteTransactionUseCase(txRepo, reportRepo),
     )
@@ -277,8 +402,9 @@ class TransactionManageViewModelTest {
             endExclusiveMs: Long?,
             tagIds: List<Long>,
             noteKeyword: String?,
+            accountFilter: AccountFilter,
         ): Flow<List<RecentTransaction>> {
-            observeFilteredCalls += FilterArgs(startInclusiveMs, endExclusiveMs, tagIds, noteKeyword)
+            observeFilteredCalls += FilterArgs(startInclusiveMs, endExclusiveMs, tagIds, noteKeyword, accountFilter)
             filteredError?.let { error -> return flow { throw error } }
             return filteredFlow
         }
@@ -290,6 +416,34 @@ class TransactionManageViewModelTest {
         override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
+    }
+
+    /** [AccountRepository] 手写 fake：账户观察流由 [accountsFlow] 驱动，可注入加载异常。 */
+    private class FakeAccountRepository : AccountRepository {
+
+        val accountsFlow = MutableStateFlow<List<Account>>(emptyList())
+        var getAccountsError: Throwable? = null
+
+        override fun observeAccounts(): Flow<List<Account>> = accountsFlow
+
+        override suspend fun getAccounts(): List<Account> {
+            getAccountsError?.let { throw it }
+            return accountsFlow.value
+        }
+
+        override fun observeBalances(): Flow<List<AccountBalance>> = flowOf(emptyList())
+
+        override suspend fun addAccount(name: String): Long = 0L
+
+        override suspend fun renameAccount(id: Long, newName: String) = Unit
+
+        override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact = AccountDeleteImpact(0)
+
+        override suspend fun deleteAccount(id: Long) = Unit
+
+        override fun observeLastUsedAccountId(): Flow<Long?> = flowOf(null)
+
+        override suspend fun saveLastUsedAccountId(id: Long?) = Unit
     }
 
     /** [TagRepository] 手写 fake：返回预置根 / 子标签。 */
@@ -343,4 +497,5 @@ private data class FilterArgs(
     val endExclusiveMs: Long?,
     val tagIds: List<Long>,
     val noteKeyword: String?,
+    val accountFilter: AccountFilter,
 )

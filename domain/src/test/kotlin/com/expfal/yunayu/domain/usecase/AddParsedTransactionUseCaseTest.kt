@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.usecase
 
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
@@ -29,6 +30,7 @@ class AddParsedTransactionUseCaseTest {
                 note = "午饭",
                 occurredAtEpochMillis = 900L,
                 tagId = 11L,
+                accountId = 9L,
             ),
         )
 
@@ -37,6 +39,7 @@ class AddParsedTransactionUseCaseTest {
         assertEquals(TransactionType.EXPENSE, transaction.type)
         assertEquals("午饭", transaction.note)
         assertEquals(11L, transaction.tagId)
+        assertEquals(9L, transaction.accountId)
         assertEquals(900L, transaction.occurredAt)
     }
 
@@ -59,6 +62,7 @@ class AddParsedTransactionUseCaseTest {
         assertEquals(TransactionType.INCOME, transaction.type)
         assertEquals(null, transaction.note)
         assertEquals(null, transaction.tagId)
+        assertEquals(null, transaction.accountId)
     }
 
     @Test
@@ -114,6 +118,7 @@ class AddParsedTransactionUseCaseTest {
             endExclusiveMs: Long?,
             tagIds: List<Long>,
             noteKeyword: String?,
+            accountFilter: AccountFilter,
         ): Flow<List<RecentTransaction>> = flowOf(emptyList())
 
         override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)

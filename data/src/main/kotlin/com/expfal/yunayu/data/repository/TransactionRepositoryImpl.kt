@@ -3,6 +3,7 @@ package com.expfal.yunayu.data.repository
 import android.util.Log
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TransactionEntity
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
@@ -64,13 +65,15 @@ class TransactionRepositoryImpl @Inject constructor(
         endExclusiveMs: Long?,
         tagIds: List<Long>,
         noteKeyword: String?,
+        accountFilter: AccountFilter,
     ): Flow<List<RecentTransaction>> {
         val keyword = noteKeyword?.takeIf { it.isNotBlank() }?.let { escapeLikeKeyword(it) }
+        val (mode, id) = accountFilter.toModeAndId()
         val rows: Flow<List<TransactionDao.RecentTransactionRow>> =
             if (tagIds.isEmpty()) {
-                transactionDao.observeFiltered(startInclusiveMs, endExclusiveMs, keyword)
+                transactionDao.observeFiltered(startInclusiveMs, endExclusiveMs, keyword, mode, id)
             } else {
-                transactionDao.observeFilteredByTags(startInclusiveMs, endExclusiveMs, keyword, tagIds)
+                transactionDao.observeFilteredByTags(startInclusiveMs, endExclusiveMs, keyword, tagIds, mode, id)
             }
         return rows.map { list -> list.map { it.toRecentDomain() } }
             .distinctUntilChanged()
@@ -108,6 +111,7 @@ class TransactionRepositoryImpl @Inject constructor(
         type = type.name,
         note = note,
         tagId = tagId,
+        accountId = accountId,
         occurredAt = occurredAt,
         createdAt = System.currentTimeMillis(),
     )
@@ -120,6 +124,7 @@ class TransactionRepositoryImpl @Inject constructor(
             .getOrDefault(TransactionType.EXPENSE),
         note = note,
         tagId = tagId,
+        accountId = accountId,
         occurredAt = occurredAt,
     )
 
@@ -135,4 +140,11 @@ class TransactionRepositoryImpl @Inject constructor(
         fun escapeLikeKeyword(keyword: String): String =
             keyword.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     }
+}
+
+/** 把账户筛选三态映射为 DAO 的 `(accountMode, accountId)` 入参。 */
+private fun AccountFilter.toModeAndId(): Pair<Int, Long?> = when (this) {
+    AccountFilter.All -> TransactionDao.ACCOUNT_MODE_ALL to null
+    AccountFilter.Unspecified -> TransactionDao.ACCOUNT_MODE_UNSPECIFIED to null
+    is AccountFilter.Specific -> TransactionDao.ACCOUNT_MODE_SPECIFIC to accountId
 }

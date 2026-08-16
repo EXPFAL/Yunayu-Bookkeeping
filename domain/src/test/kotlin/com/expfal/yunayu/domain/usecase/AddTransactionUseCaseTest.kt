@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.usecase
 
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
@@ -36,17 +37,28 @@ class AddTransactionUseCaseTest {
     }
 
     @Test
-    fun `passes amountCents tagId and occurredAt through`() = runTest {
+    fun `passes amountCents tagId accountId and occurredAt through`() = runTest {
+        val repository = FakeTransactionRepository()
+        val useCase = AddTransactionUseCase(repository)
+
+        useCase(amountCents = 2500L, tagId = 3L, accountId = 9L, occurredAt = 900L)
+
+        val transaction = repository.added.single()
+        assertEquals(2500L, transaction.amountCents)
+        assertEquals(3L, transaction.tagId)
+        assertEquals(9L, transaction.accountId)
+        assertEquals(900L, transaction.occurredAt)
+        assertEquals(null, transaction.note)
+    }
+
+    @Test
+    fun `accountId defaults to null when omitted`() = runTest {
         val repository = FakeTransactionRepository()
         val useCase = AddTransactionUseCase(repository)
 
         useCase(amountCents = 2500L, tagId = 3L, occurredAt = 900L)
 
-        val transaction = repository.added.single()
-        assertEquals(2500L, transaction.amountCents)
-        assertEquals(3L, transaction.tagId)
-        assertEquals(900L, transaction.occurredAt)
-        assertEquals(null, transaction.note)
+        assertEquals(null, repository.added.single().accountId)
     }
 
     @Test
@@ -102,6 +114,7 @@ class AddTransactionUseCaseTest {
             endExclusiveMs: Long?,
             tagIds: List<Long>,
             noteKeyword: String?,
+            accountFilter: AccountFilter,
         ): Flow<List<RecentTransaction>> = flowOf(emptyList())
 
         override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)

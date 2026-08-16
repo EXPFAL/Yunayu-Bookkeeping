@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.report
 
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
@@ -180,6 +181,7 @@ class GenerateReportUseCaseTest {
             endExclusiveMs: Long?,
             tagIds: List<Long>,
             noteKeyword: String?,
+            accountFilter: AccountFilter,
         ): Flow<List<RecentTransaction>> = flowOf(emptyList())
 
         override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)

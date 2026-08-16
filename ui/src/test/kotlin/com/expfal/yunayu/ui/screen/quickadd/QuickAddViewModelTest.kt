@@ -1,5 +1,9 @@
 package com.expfal.yunayu.ui.screen.quickadd
 
+import com.expfal.yunayu.domain.model.Account
+import com.expfal.yunayu.domain.model.AccountBalance
+import com.expfal.yunayu.domain.model.AccountDeleteImpact
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.IncomeTags
@@ -12,6 +16,7 @@ import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
+import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
@@ -820,12 +825,170 @@ class QuickAddViewModelTest {
         assertNull(viewModel.uiState.value.selectedTagId)
     }
 
+    @Test
+    fun `resetForOpen preselects remembered account`() = runTest {
+        val accountRepo = FakeAccountRepository().apply {
+            accounts = listOf(account(1L, "微信"), account(2L, "支付宝"))
+            lastUsedAccountId = 2L
+        }
+        val viewModel = viewModel(accountRepo = accountRepo)
+
+        viewModel.resetForOpen()
+        runCurrent()
+
+        assertEquals(listOf(account(1L, "微信"), account(2L, "支付宝")), viewModel.uiState.value.accounts)
+        assertEquals(2L, viewModel.uiState.value.selectedAccountId)
+    }
+
+    @Test
+    fun `resetForOpen falls back to unassigned when remembered account is deleted`() = runTest {
+        val accountRepo = FakeAccountRepository().apply {
+            accounts = listOf(account(1L, "微信"))
+            lastUsedAccountId = 99L
+        }
+        val viewModel = viewModel(accountRepo = accountRepo)
+
+        viewModel.resetForOpen()
+        runCurrent()
+
+        assertEquals(listOf(account(1L, "微信")), viewModel.uiState.value.accounts)
+        assertNull(viewModel.uiState.value.selectedAccountId)
+    }
+
+    @Test
+    fun `onSelectAccount switches between account and unassigned`() = runTest {
+        val accountRepo = FakeAccountRepository().apply {
+            accounts = listOf(account(1L, "微信"), account(2L, "支付宝"))
+        }
+        val viewModel = viewModel(accountRepo = accountRepo)
+        viewModel.resetForOpen()
+        runCurrent()
+
+        viewModel.onSelectAccount(1L)
+        assertEquals(1L, viewModel.uiState.value.selectedAccountId)
+
+        viewModel.onSelectAccount(null)
+        assertNull(viewModel.uiState.value.selectedAccountId)
+    }
+
+    @Test
+    fun `digital save passes selected accountId through`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val accountRepo = FakeAccountRepository().apply {
+            accounts = listOf(account(1L, "微信"))
+        }
+        val viewModel = viewModel(txRepo = txRepo, accountRepo = accountRepo)
+        viewModel.resetForOpen()
+        runCurrent()
+        viewModel.onSelectAccount(1L)
+
+        viewModel.onDigit('5')
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals(1L, txRepo.added.single().accountId)
+    }
+
+    @Test
+    fun `NL save passes selected accountId through draft copy`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply { rootTags = listOf(tag(1L, "学习")) }
+        val accountRepo = FakeAccountRepository().apply {
+            accounts = listOf(account(2L, "支付宝"))
+        }
+        val nlParser = FakeNlParser().apply { generateResult = "{\"amount\":\"20\",\"tag\":\"学习\"}" }
+        val viewModel = viewModel(tagRepo, txRepo, nlParser, accountRepo)
+        viewModel.resetForOpen()
+        runCurrent()
+        viewModel.onSelectAccount(2L)
+
+        viewModel.setNlMode(true)
+        viewModel.onNlInputChange("午饭20")
+        viewModel.onParseNl()
+        runCurrent()
+        viewModel.onSaveNl()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals(2L, txRepo.added.single().accountId)
+    }
+
+    @Test
+    fun `save writes last used account id after success`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val accountRepo = FakeAccountRepository().apply {
+            accounts = listOf(account(1L, "微信"))
+        }
+        val viewModel = viewModel(txRepo = txRepo, accountRepo = accountRepo)
+        viewModel.resetForOpen()
+        runCurrent()
+        viewModel.onSelectAccount(1L)
+
+        viewModel.onDigit('5')
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(listOf(1L), accountRepo.savedLastUsedIds)
+    }
+
+    @Test
+    fun `save memory failure is silent and does not affect Saved event`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val accountRepo = FakeAccountRepository().apply {
+            accounts = listOf(account(1L, "微信"))
+            saveLastUsedError = RuntimeException("datastore down")
+        }
+        val viewModel = viewModel(txRepo = txRepo, accountRepo = accountRepo)
+        viewModel.resetForOpen()
+        runCurrent()
+        viewModel.onSelectAccount(1L)
+
+        val events = mutableListOf<QuickAddEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events.add(it) }
+        }
+
+        viewModel.onDigit('5')
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(listOf(QuickAddEvent.Saved), events)
+        assertFalse(viewModel.uiState.value.saving)
+        assertFalse(viewModel.uiState.value.saveFailed)
+    }
+
+    @Test
+    fun `onSelectAccount is ignored while saving`() = runTest {
+        val gate = CompletableDeferred<Long>()
+        val txRepo = FakeTransactionRepository().apply { addGate = gate }
+        val accountRepo = FakeAccountRepository().apply {
+            accounts = listOf(account(1L, "微信"), account(2L, "支付宝"))
+        }
+        val viewModel = viewModel(txRepo = txRepo, accountRepo = accountRepo)
+        viewModel.resetForOpen()
+        runCurrent()
+
+        viewModel.onDigit('1')
+        viewModel.onSave()
+        assertTrue(viewModel.uiState.value.saving)
+
+        viewModel.onSelectAccount(2L)
+        assertNull(viewModel.uiState.value.selectedAccountId)
+
+        gate.complete(7L)
+        runCurrent()
+        assertFalse(viewModel.uiState.value.saving)
+    }
+
     private fun viewModel(
-        tagRepo: TagRepository,
-        txRepo: TransactionRepository,
+        tagRepo: TagRepository = FakeTagRepository(),
+        txRepo: TransactionRepository = FakeTransactionRepository(),
         nlParser: NLTransactionParser = FakeNlParser(),
+        accountRepo: AccountRepository = FakeAccountRepository(),
     ): QuickAddViewModel {
         val vm = QuickAddViewModel(
+            accountRepository = accountRepo,
             tagRepository = tagRepo,
             getRecentCategoriesUseCase = GetRecentCategoriesUseCase(tagRepo),
             addTransactionUseCase = AddTransactionUseCase(txRepo),
@@ -837,6 +1000,8 @@ class QuickAddViewModelTest {
     }
 
     private fun tag(id: Long, name: String, parentId: Long? = null) = Tag(id = id, name = name, parentId = parentId)
+
+    private fun account(id: Long, name: String) = Account(id = id, name = name)
 
     /** [TagRepository] 手写 fake：返回预置的最近/根标签，可配置异常模拟加载失败。 */
     private class FakeTagRepository : TagRepository {
@@ -878,6 +1043,44 @@ class QuickAddViewModelTest {
         override suspend fun deleteTag(tagId: Long) = Unit
 
         override suspend fun mergeTags(keepTagId: Long, dropTagId: Long) = Unit
+    }
+
+    /** [AccountRepository] 手写 fake：可控账户列表与记忆，记录 saveLastUsed 调用与异常注入。 */
+    private class FakeAccountRepository : AccountRepository {
+
+        var accounts: List<Account> = emptyList()
+        var lastUsedAccountId: Long? = null
+        var accountsError: Throwable? = null
+        var lastUsedError: Throwable? = null
+        var saveLastUsedError: Throwable? = null
+        val savedLastUsedIds = mutableListOf<Long?>()
+
+        override fun observeAccounts(): Flow<List<Account>> = flowOf(accounts)
+
+        override suspend fun getAccounts(): List<Account> {
+            accountsError?.let { throw it }
+            return accounts
+        }
+
+        override fun observeBalances(): Flow<List<AccountBalance>> = flowOf(emptyList())
+
+        override suspend fun addAccount(name: String): Long = 0L
+
+        override suspend fun renameAccount(id: Long, newName: String) = Unit
+
+        override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact = AccountDeleteImpact(0)
+
+        override suspend fun deleteAccount(id: Long) = Unit
+
+        override fun observeLastUsedAccountId(): Flow<Long?> {
+            lastUsedError?.let { throw it }
+            return flowOf(lastUsedAccountId)
+        }
+
+        override suspend fun saveLastUsedAccountId(id: Long?) {
+            saveLastUsedError?.let { throw it }
+            savedLastUsedIds += id
+        }
     }
 
     /** [TransactionRepository] 手写 fake：记录 add 入参，可选经 [addGate] 挂起模拟慢写或抛错。 */
@@ -922,6 +1125,7 @@ class QuickAddViewModelTest {
             endExclusiveMs: Long?,
             tagIds: List<Long>,
             noteKeyword: String?,
+            accountFilter: AccountFilter,
         ): Flow<List<RecentTransaction>> = flowOf(emptyList())
 
         override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)

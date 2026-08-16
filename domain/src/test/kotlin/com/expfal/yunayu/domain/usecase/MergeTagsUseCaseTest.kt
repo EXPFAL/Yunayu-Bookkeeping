@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.usecase
 
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
@@ -141,6 +142,7 @@ class MergeTagsUseCaseTest {
             endExclusiveMs: Long?,
             tagIds: List<Long>,
             noteKeyword: String?,
+            accountFilter: AccountFilter,
         ): Flow<List<RecentTransaction>> = flowOf(emptyList())
 
         override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)

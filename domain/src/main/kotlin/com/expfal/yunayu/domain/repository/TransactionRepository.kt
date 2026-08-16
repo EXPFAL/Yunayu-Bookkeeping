@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.repository
 
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
@@ -52,16 +53,18 @@ interface TransactionRepository {
     ): List<CategoryExpense>
 
     /**
-     * 观察按时间窗、标签集合与备注关键字过滤的交易摘要（含标签名），按发生时间倒序。
+     * 观察按时间窗、账户、标签集合与备注关键字过滤的交易摘要（含标签名），按发生时间倒序。
      *
-     * `tagIds` 为空表示不按标签过滤；`startInclusiveMs` / `endExclusiveMs` 为 null 表示不设对应边界；
-     * `noteKeyword` 为 null 或空白表示不按备注过滤。备注关键字的通配符（`%`/`_`/`\`）转义由实现层负责。
+     * `accountFilter` 控制账户维度过滤（全部 / 仅未指定 / 指定账户）；`tagIds` 为空表示不按标签过滤；
+     * `startInclusiveMs` / `endExclusiveMs` 为 null 表示不设对应边界；`noteKeyword` 为 null 或空白表示不按
+     * 备注过滤。备注关键字的通配符（`%`/`_`/`\`）转义由实现层负责。
      */
     fun observeFiltered(
         startInclusiveMs: Long?,
         endExclusiveMs: Long?,
         tagIds: List<Long>,
         noteKeyword: String?,
+        accountFilter: AccountFilter,
     ): Flow<List<RecentTransaction>>
 
     /** 观察未分类交易数（未挂任何标签），供整理功能入口展示。 */

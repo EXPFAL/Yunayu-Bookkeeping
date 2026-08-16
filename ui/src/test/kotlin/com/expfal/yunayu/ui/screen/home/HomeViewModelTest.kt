@@ -1,10 +1,15 @@
 package com.expfal.yunayu.ui.screen.home
 
+import com.expfal.yunayu.domain.model.Account
+import com.expfal.yunayu.domain.model.AccountBalance
+import com.expfal.yunayu.domain.model.AccountDeleteImpact
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.WindowTotals
+import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -15,6 +20,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.extension.RegisterExtension
@@ -32,7 +38,7 @@ class HomeViewModelTest {
         val repo = FakeTransactionRepository().apply {
             recentFlow.value = listOf(recent(id = 1L, tagName = "学习", amountCents = 1_500L))
         }
-        val viewModel = HomeViewModel(repo)
+        val viewModel = createViewModel(transactionRepository = repo)
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
@@ -46,7 +52,7 @@ class HomeViewModelTest {
         val repo = FakeTransactionRepository().apply {
             recentFlow.value = listOf(recent(id = 1L, tagName = "学习", note = "买书"))
         }
-        val viewModel = HomeViewModel(repo)
+        val viewModel = createViewModel(transactionRepository = repo)
 
         val state = viewModel.uiState.value
         assertEquals(1, state.recent.size)
@@ -55,7 +61,7 @@ class HomeViewModelTest {
 
     @Test
     fun `empty recent list yields empty state`() = runTest {
-        val viewModel = HomeViewModel(FakeTransactionRepository())
+        val viewModel = createViewModel()
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
@@ -65,7 +71,7 @@ class HomeViewModelTest {
     @Test
     fun `new transaction re-emits updated list`() = runTest {
         val repo = FakeTransactionRepository()
-        val viewModel = HomeViewModel(repo)
+        val viewModel = createViewModel(transactionRepository = repo)
 
         assertTrue(viewModel.uiState.value.recent.isEmpty())
 
@@ -81,7 +87,7 @@ class HomeViewModelTest {
     @Test
     fun `combines held cents into state`() = runTest {
         val repo = FakeTransactionRepository().apply { heldCentsFlow.value = 7_500L }
-        val viewModel = HomeViewModel(repo)
+        val viewModel = createViewModel(transactionRepository = repo)
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
@@ -94,12 +100,54 @@ class HomeViewModelTest {
             recentFlow.value = listOf(recent(id = 1L, tagName = "学习"))
             heldCentsOverride = flow { error("held down") }
         }
-        val viewModel = HomeViewModel(repo)
+        val viewModel = createViewModel(transactionRepository = repo)
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
         assertEquals(1, state.recent.size)
         assertEquals(0L, state.heldCents)
+    }
+
+    @Test
+    fun `balances by account populate heldByAccount`() = runTest {
+        val accountRepo = FakeAccountRepository().apply {
+            balancesFlow.value = listOf(
+                AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 5_000L),
+                AccountBalance(accountId = null, accountName = null, balanceCents = 1_000L),
+            )
+        }
+        val viewModel = createViewModel(accountRepository = accountRepo)
+
+        val state = viewModel.uiState.value
+        assertEquals(2, state.heldByAccount.size)
+        assertEquals("微信", state.heldByAccount.first().accountName)
+        assertEquals(5_000L, state.heldByAccount.first().balanceCents)
+    }
+
+    @Test
+    fun `balances failure degrades to empty without clearing heldCents`() = runTest {
+        val transactionRepo = FakeTransactionRepository().apply { heldCentsFlow.value = 7_500L }
+        val accountRepo = FakeAccountRepository().apply {
+            balancesOverride = flow { error("balances down") }
+        }
+        val viewModel = createViewModel(transactionRepository = transactionRepo, accountRepository = accountRepo)
+
+        val state = viewModel.uiState.value
+        assertTrue(state.heldByAccount.isEmpty())
+        assertEquals(7_500L, state.heldCents)
+    }
+
+    @Test
+    fun `unspecified-only balances keep state correct`() = runTest {
+        val accountRepo = FakeAccountRepository().apply {
+            balancesFlow.value = listOf(AccountBalance(accountId = null, accountName = null, balanceCents = -500L))
+        }
+        val viewModel = createViewModel(accountRepository = accountRepo)
+
+        val state = viewModel.uiState.value
+        assertEquals(1, state.heldByAccount.size)
+        assertNull(state.heldByAccount.single().accountId)
+        assertEquals(-500L, state.heldByAccount.single().balanceCents)
     }
 
     private fun recent(
@@ -152,6 +200,7 @@ class HomeViewModelTest {
             endExclusiveMs: Long?,
             tagIds: List<Long>,
             noteKeyword: String?,
+            accountFilter: AccountFilter,
         ): Flow<List<RecentTransaction>> = flowOf(emptyList())
 
         override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)
@@ -162,4 +211,34 @@ class HomeViewModelTest {
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
     }
+
+    /** [AccountRepository] 手写 fake：以 MutableStateFlow 驱动按账户分组余额。 */
+    private class FakeAccountRepository : AccountRepository {
+
+        val balancesFlow = MutableStateFlow<List<AccountBalance>>(emptyList())
+        var balancesOverride: Flow<List<AccountBalance>>? = null
+
+        override fun observeAccounts(): Flow<List<Account>> = flowOf(emptyList())
+
+        override suspend fun getAccounts(): List<Account> = emptyList()
+
+        override fun observeBalances(): Flow<List<AccountBalance>> = balancesOverride ?: balancesFlow
+
+        override suspend fun addAccount(name: String): Long = 0L
+
+        override suspend fun renameAccount(id: Long, newName: String) = Unit
+
+        override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact = AccountDeleteImpact(0)
+
+        override suspend fun deleteAccount(id: Long) = Unit
+
+        override fun observeLastUsedAccountId(): Flow<Long?> = flowOf(null)
+
+        override suspend fun saveLastUsedAccountId(id: Long?) = Unit
+    }
+
+    private fun createViewModel(
+        transactionRepository: TransactionRepository = FakeTransactionRepository(),
+        accountRepository: AccountRepository = FakeAccountRepository(),
+    ): HomeViewModel = HomeViewModel(transactionRepository, accountRepository)
 }

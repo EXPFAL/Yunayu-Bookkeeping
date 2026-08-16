@@ -43,6 +43,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.domain.model.Account
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.ui.component.TagTreeList
@@ -50,7 +52,7 @@ import com.expfal.yunayu.ui.component.TransactionRow
 import com.expfal.yunayu.ui.screen.organize.OrganizeScreen
 
 /**
- * 「收支管理」全屏：顶部时间 / 标签 / 备注三组筛选，下方交易列表，行尾删除入口。
+ * 「收支管理」全屏：顶部时间 / 账户 / 标签 / 备注四组筛选，下方交易列表，行尾删除入口。
  *
  * 列表复用 [TransactionRow]，删除经二次确认弹窗后由 ViewModel 执行并发出事件驱动 Snackbar；
  * 标签筛选经 [ModalBottomSheet] 内嵌 [TagTreeList] 多选，点选不关闭弹层、底部「完成」关闭。
@@ -111,7 +113,10 @@ fun TransactionManageScreen(
                 timeRange = uiState.timeRange,
                 selectedTagIds = uiState.selectedTagIds,
                 keyword = uiState.keyword,
+                accounts = uiState.accounts,
+                accountFilter = uiState.accountFilter,
                 onTimeRangeSelect = viewModel::selectTimeRange,
+                onAccountFilterSelect = viewModel::selectAccountFilter,
                 onOpenTagSheet = { showTagSheet = true },
                 onKeywordChange = viewModel::onKeywordChange,
             )
@@ -156,13 +161,16 @@ private fun OrganizeAction(
     }
 }
 
-/** 时间 / 标签 / 备注三组筛选区。 */
+/** 时间 / 账户 / 标签 / 备注四组筛选区。 */
 @Composable
 private fun FilterSection(
     timeRange: TimeFilter,
     selectedTagIds: Set<Long>,
     keyword: String,
+    accounts: List<Account>,
+    accountFilter: AccountFilter,
     onTimeRangeSelect: (TimeFilter) -> Unit,
+    onAccountFilterSelect: (AccountFilter) -> Unit,
     onOpenTagSheet: () -> Unit,
     onKeywordChange: (String) -> Unit,
 ) {
@@ -182,6 +190,12 @@ private fun FilterSection(
             }
         }
         Spacer(Modifier.height(8.dp))
+        AccountFilterRow(
+            accounts = accounts,
+            selected = accountFilter,
+            onSelect = onAccountFilterSelect,
+        )
+        Spacer(Modifier.height(8.dp))
         FilterChip(
             selected = selectedTagIds.isNotEmpty(),
             onClick = onOpenTagSheet,
@@ -194,6 +208,39 @@ private fun FilterSection(
             placeholder = { Text("搜索备注关键词") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
+        )
+    }
+}
+
+/** 账户单选 chips 行：全部 / 各账户名 / 未指定，横向滚动。 */
+@Composable
+private fun AccountFilterRow(
+    accounts: List<Account>,
+    selected: AccountFilter,
+    onSelect: (AccountFilter) -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState()),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        FilterChip(
+            selected = selected == AccountFilter.All,
+            onClick = { onSelect(AccountFilter.All) },
+            label = { Text("全部账户") },
+        )
+        accounts.forEach { account ->
+            FilterChip(
+                selected = selected == AccountFilter.Specific(account.id),
+                onClick = { onSelect(AccountFilter.Specific(account.id)) },
+                label = { Text(account.name) },
+            )
+        }
+        FilterChip(
+            selected = selected == AccountFilter.Unspecified,
+            onClick = { onSelect(AccountFilter.Unspecified) },
+            label = { Text("未指定") },
         )
     }
 }
@@ -322,7 +369,10 @@ private fun EmptyState(hasActiveFilter: Boolean) {
 
 /** 是否存在生效中的筛选条件。 */
 private fun hasActiveFilter(uiState: TransactionManageUiState): Boolean =
-    uiState.timeRange != TimeFilter.ALL || uiState.selectedTagIds.isNotEmpty() || uiState.keyword.isNotBlank()
+    uiState.timeRange != TimeFilter.ALL ||
+        uiState.selectedTagIds.isNotEmpty() ||
+        uiState.keyword.isNotBlank() ||
+        uiState.accountFilter != AccountFilter.All
 
 /** 时间筛选维度展示文案。 */
 private fun TimeFilter.label(): String = when (this) {

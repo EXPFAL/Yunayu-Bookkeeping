@@ -2,6 +2,7 @@ package com.expfal.yunayu.data.repository
 
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TransactionEntity
+import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import kotlinx.coroutines.flow.first
@@ -27,6 +28,7 @@ class TransactionRepositoryImplTest {
                 type = TransactionType.EXPENSE,
                 note = null,
                 tagId = 3L,
+                accountId = 9L,
                 occurredAt = 900L,
             ),
         )
@@ -38,6 +40,7 @@ class TransactionRepositoryImplTest {
         assertEquals(2500L, entity.amountCents)
         assertEquals(null, entity.note)
         assertEquals(3L, entity.tagId)
+        assertEquals(9L, entity.accountId)
         assertEquals(900L, entity.occurredAt)
     }
 
@@ -61,6 +64,7 @@ class TransactionRepositoryImplTest {
         assertEquals("INCOME", entity.type)
         assertEquals("奖学金", entity.note)
         assertEquals(null, entity.tagId)
+        assertEquals(null, entity.accountId)
     }
 
     @Test
@@ -135,10 +139,13 @@ class TransactionRepositoryImplTest {
         val dao = FakeTransactionDao()
         val repository = TransactionRepositoryImpl(dao)
 
-        repository.observeFiltered(100L, 200L, emptyList(), "关键词").first()
+        repository.observeFiltered(100L, 200L, emptyList(), "关键词", AccountFilter.All).first()
 
         assertEquals(1, dao.filteredCalls.size)
-        assertEquals(Triple(100L, 200L, "关键词"), dao.filteredCalls.single())
+        assertEquals(
+            FilterCall(100L, 200L, "关键词", TransactionDao.ACCOUNT_MODE_ALL, null),
+            dao.filteredCalls.single(),
+        )
         assertTrue(dao.filteredByTagsCalls.isEmpty())
     }
 
@@ -147,14 +154,33 @@ class TransactionRepositoryImplTest {
         val dao = FakeTransactionDao()
         val repository = TransactionRepositoryImpl(dao)
 
-        repository.observeFiltered(null, null, listOf(1L, 2L), null).first()
+        repository.observeFiltered(null, null, listOf(1L, 2L), null, AccountFilter.All).first()
 
         assertEquals(1, dao.filteredByTagsCalls.size)
         assertEquals(
-            Triple<Long?, Long?, String?>(null, null, null) to listOf(1L, 2L),
+            FilterByTagsCall(null, null, null, listOf(1L, 2L), TransactionDao.ACCOUNT_MODE_ALL, null),
             dao.filteredByTagsCalls.single(),
         )
         assertTrue(dao.filteredCalls.isEmpty())
+    }
+
+    @Test
+    fun `observeFiltered maps account filter to dao mode and id`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+
+        repository.observeFiltered(null, null, emptyList(), null, AccountFilter.All).first()
+        repository.observeFiltered(null, null, emptyList(), null, AccountFilter.Unspecified).first()
+        repository.observeFiltered(null, null, emptyList(), null, AccountFilter.Specific(7L)).first()
+
+        assertEquals(
+            listOf(
+                FilterCall(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null),
+                FilterCall(null, null, null, TransactionDao.ACCOUNT_MODE_UNSPECIFIED, null),
+                FilterCall(null, null, null, TransactionDao.ACCOUNT_MODE_SPECIFIC, 7L),
+            ),
+            dao.filteredCalls,
+        )
     }
 
     @Test
@@ -162,9 +188,9 @@ class TransactionRepositoryImplTest {
         val dao = FakeTransactionDao()
         val repository = TransactionRepositoryImpl(dao)
 
-        repository.observeFiltered(null, null, emptyList(), "100%_a\\b").first()
+        repository.observeFiltered(null, null, emptyList(), "100%_a\\b", AccountFilter.All).first()
 
-        assertEquals("""100\%\_a\\b""", dao.filteredCalls.single().third)
+        assertEquals("""100\%\_a\\b""", dao.filteredCalls.single().noteKeyword)
     }
 
     @Test
@@ -172,9 +198,9 @@ class TransactionRepositoryImplTest {
         val dao = FakeTransactionDao()
         val repository = TransactionRepositoryImpl(dao)
 
-        repository.observeFiltered(null, null, emptyList(), "   ").first()
+        repository.observeFiltered(null, null, emptyList(), "   ", AccountFilter.All).first()
 
-        assertEquals(null, dao.filteredCalls.single().third)
+        assertEquals(null, dao.filteredCalls.single().noteKeyword)
     }
 
     @Test
