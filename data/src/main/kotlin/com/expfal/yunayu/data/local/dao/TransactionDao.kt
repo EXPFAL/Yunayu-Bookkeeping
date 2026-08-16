@@ -6,6 +6,7 @@ import androidx.room.Delete
 import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import kotlinx.coroutines.flow.Flow
@@ -159,4 +160,41 @@ interface TransactionDao {
     /** 统计挂在一组标签下的交易数（删除影响面提示）。 */
     @Query("SELECT COUNT(*) FROM transactions WHERE tag_id IN (:tagIds)")
     suspend fun countByTagIds(tagIds: List<Long>): Int
+
+    /** 观察未分类交易数（未挂任何标签），供整理功能入口角标展示。 */
+    @Query("SELECT COUNT(*) FROM transactions WHERE tag_id IS NULL")
+    fun observeUncategorizedCount(): Flow<Int>
+
+    /** 一次性获取未分类交易快照（含标签名与图标，未分类恒为 null），按发生时间倒序。 */
+    @Query(
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
+            "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "WHERE t.tag_id IS NULL " +
+            "ORDER BY t.occurred_at DESC, t.id DESC",
+    )
+    suspend fun getUncategorizedSnapshot(): List<RecentTransactionRow>
+
+    /** 把一组交易批量挂到指定标签。 */
+    @Query("UPDATE transactions SET tag_id = :tagId WHERE id IN (:ids)")
+    suspend fun updateTagIds(ids: List<Long>, tagId: Long)
+
+    /**
+     * 单事务批量应用标签赋值：key = tagId、value = 该标签下待挂载的交易 id 列表。
+     *
+     * 逐组调用 [updateTagIds]，空列表跳过；整体在一个数据库事务内生效，任一组失败整体回滚。
+     */
+    @Transaction
+    suspend fun applyTagAssignments(assignments: Map<Long, List<Long>>) {
+        assignments.forEach { (tagId, ids) ->
+            if (ids.isNotEmpty()) updateTagIds(ids, tagId)
+        }
+    }
+
+    /** 把一组源标签下的交易批量迁移到目标标签（参数绑定），返回受影响行数。 */
+    @Query("UPDATE transactions SET tag_id = :targetTagId WHERE tag_id IN (:sourceTagIds)")
+    suspend fun updateTagIdByTagIds(sourceTagIds: List<Long>, targetTagId: Long): Int
+
+    /** 一次性获取挂在一组标签下的交易的 `occurred_at` 列表（供合并前报告标脏）。 */
+    @Query("SELECT occurred_at FROM transactions WHERE tag_id IN (:tagIds)")
+    suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long>
 }

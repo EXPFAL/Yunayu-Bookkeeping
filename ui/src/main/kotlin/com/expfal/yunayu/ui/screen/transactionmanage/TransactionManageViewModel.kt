@@ -47,6 +47,7 @@ data class TransactionManageUiState(
     val allTagsByRoot: Map<Tag, List<Tag>> = emptyMap(),
     val pendingDelete: RecentTransaction? = null,
     val busy: Boolean = false,
+    val uncategorizedCount: Int = 0,
 )
 
 /** 收支管理屏对外暴露的一次性事件。 */
@@ -98,6 +99,7 @@ class TransactionManageViewModel @Inject constructor(
     init {
         observeTransactions()
         loadAllTags()
+        observeUncategorizedCount()
     }
 
     /** 切换时间筛选维度，立即重查。 */
@@ -153,6 +155,21 @@ class TransactionManageViewModel @Inject constructor(
     /** 取消删除确认，清空 [TransactionManageUiState.pendingDelete]。 */
     fun cancelDelete() {
         _uiState.update { it.copy(pendingDelete = null) }
+    }
+
+    /** 观察未分类交易数供「整理」入口展示；失败降级为 0，取消异常直接重抛。 */
+    private fun observeUncategorizedCount() {
+        viewModelScope.launch {
+            transactionRepository.observeUncategorizedCount()
+                .catch { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.e(TAG, "Failed to observe uncategorized count", throwable)
+                    _uiState.update { it.copy(uncategorizedCount = 0) }
+                }
+                .collect { count ->
+                    _uiState.update { it.copy(uncategorizedCount = count) }
+                }
+        }
     }
 
     /** 组装筛选观察链：组合时间窗 / 标签 / 关键词（空关键词直通、非空防抖），订阅仓储过滤流。 */

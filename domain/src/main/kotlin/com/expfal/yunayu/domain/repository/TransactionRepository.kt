@@ -63,4 +63,23 @@ interface TransactionRepository {
         tagIds: List<Long>,
         noteKeyword: String?,
     ): Flow<List<RecentTransaction>>
+
+    /** 观察未分类交易数（未挂任何标签），供整理功能入口展示。 */
+    fun observeUncategorizedCount(): Flow<Int>
+
+    /** 一次性获取未分类交易摘要（含标签名），按发生时间倒序。 */
+    suspend fun getUncategorized(): List<RecentTransaction>
+
+    /**
+     * 批量把交易挂到标签：key = tagId、value = 该标签下的交易 id 列表，单事务应用。
+     * 空映射为无操作，不做 DAO 调用。
+     */
+    suspend fun assignTags(assignments: Map<Long, List<Long>>)
+
+    /**
+     * 一次性获取挂在一组标签下的交易的 `occurredAt` 列表（供标签合并前的报告标脏）。
+     *
+     * 仅返回发生时刻，不携带交易其它字段；[tagIds] 为空返回空列表。
+     */
+    suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long>
 }

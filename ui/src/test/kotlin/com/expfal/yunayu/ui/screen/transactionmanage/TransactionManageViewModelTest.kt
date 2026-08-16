@@ -282,6 +282,14 @@ class TransactionManageViewModelTest {
             filteredError?.let { error -> return flow { throw error } }
             return filteredFlow
         }
+
+        override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)
+
+        override suspend fun getUncategorized(): List<RecentTransaction> = emptyList()
+
+        override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
+
+        override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
     }
 
     /** [TagRepository] 手写 fake：返回预置根 / 子标签。 */
@@ -301,11 +309,15 @@ class TransactionManageViewModelTest {
 
         override suspend fun addSubTag(parentId: Long, name: String, icon: String?): Long = 0L
 
+        override suspend fun addRootTag(name: String, icon: String?): Long = 0L
+
         override suspend fun renameTag(tagId: Long, newName: String) = Unit
 
         override suspend fun getDeleteImpact(tagId: Long): TagDeleteImpact = TagDeleteImpact(0, 0, emptyList())
 
         override suspend fun deleteTag(tagId: Long) = Unit
+
+        override suspend fun mergeTags(keepTagId: Long, dropTagId: Long) = Unit
     }
 
     /** [ReportRepository] 手写 fake：记录标脏调用，供删除用例断言窗口覆盖。 */

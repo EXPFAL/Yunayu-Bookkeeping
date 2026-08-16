@@ -47,6 +47,7 @@ import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.ui.component.TagTreeList
 import com.expfal.yunayu.ui.component.TransactionRow
+import com.expfal.yunayu.ui.screen.organize.OrganizeScreen
 
 /**
  * 「收支管理」全屏：顶部时间 / 标签 / 备注三组筛选，下方交易列表，行尾删除入口。
@@ -63,6 +64,12 @@ fun TransactionManageScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var showTagSheet by remember { mutableStateOf(false) }
+    var showOrganize by remember { mutableStateOf(false) }
+
+    if (showOrganize) {
+        OrganizeScreen(onBack = { showOrganize = false })
+        return
+    }
 
     BackHandler(onBack = onBack)
 
@@ -83,6 +90,12 @@ fun TransactionManageScreen(
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
                     }
+                },
+                actions = {
+                    OrganizeAction(
+                        count = uiState.uncategorizedCount,
+                        onClick = { showOrganize = true },
+                    )
                 },
             )
         },
@@ -129,6 +142,17 @@ fun TransactionManageScreen(
             onConfirm = viewModel::confirmDelete,
             onDismiss = viewModel::cancelDelete,
         )
+    }
+}
+
+/** 「整理」入口按钮：文案「整理 N」，无未分类时禁用并隐藏计数。 */
+@Composable
+private fun OrganizeAction(
+    count: Int,
+    onClick: () -> Unit,
+) {
+    TextButton(onClick = onClick, enabled = count > 0) {
+        Text(if (count > 0) "整理 $count" else "整理")
     }
 }
 

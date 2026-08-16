@@ -198,11 +198,15 @@ class ParseNaturalLanguageTransactionUseCaseTest {
 
         override suspend fun addSubTag(parentId: Long, name: String, icon: String?): Long = 0L
 
+        override suspend fun addRootTag(name: String, icon: String?): Long = 0L
+
         override suspend fun renameTag(tagId: Long, newName: String) = Unit
 
         override suspend fun getDeleteImpact(tagId: Long): TagDeleteImpact =
             TagDeleteImpact(0, 0, emptyList())
 
         override suspend fun deleteTag(tagId: Long) = Unit
+
+        override suspend fun mergeTags(keepTagId: Long, dropTagId: Long) = Unit
     }
 }

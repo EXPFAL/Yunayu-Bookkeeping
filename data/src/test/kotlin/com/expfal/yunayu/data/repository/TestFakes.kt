@@ -157,4 +157,49 @@ class FakeTransactionDao : TransactionDao {
         countByTagIdsCalls += tagIds
         return countByTagIdsResult
     }
+
+    var uncategorizedCountFlow: Flow<Int> = flowOf(0)
+    var uncategorizedRows: List<TransactionDao.RecentTransactionRow> = emptyList()
+    val updateTagIdsCalls = mutableListOf<Pair<List<Long>, Long>>()
+    val applyTagAssignmentsCalls = mutableListOf<Map<Long, List<Long>>>()
+
+    override fun observeUncategorizedCount(): Flow<Int> = uncategorizedCountFlow
+
+    override suspend fun getUncategorizedSnapshot(): List<TransactionDao.RecentTransactionRow> =
+        uncategorizedRows
+
+    override suspend fun updateTagIds(ids: List<Long>, tagId: Long) {
+        updateTagIdsCalls += ids to tagId
+    }
+
+    override suspend fun applyTagAssignments(assignments: Map<Long, List<Long>>) {
+        applyTagAssignmentsCalls += assignments
+    }
+
+    val updateTagIdByTagIdsCalls = mutableListOf<Pair<List<Long>, Long>>()
+    var updateTagIdByTagIdsResult: Int = 0
+    val occurredAtsByTagIdsCalls = mutableListOf<List<Long>>()
+    var occurredAtsByTagIdsResult: List<Long> = emptyList()
+
+    override suspend fun updateTagIdByTagIds(sourceTagIds: List<Long>, targetTagId: Long): Int {
+        updateTagIdByTagIdsCalls += sourceTagIds to targetTagId
+        return updateTagIdByTagIdsResult
+    }
+
+    override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> {
+        occurredAtsByTagIdsCalls += tagIds
+        return occurredAtsByTagIdsResult
+    }
+}
+
+/** [TagMergeExecutor] 手写 fake：记录 merge 调用，可配置异常。 */
+class FakeTagMergeExecutor : TagMergeExecutor {
+
+    val mergeCalls = mutableListOf<Pair<Long, Long>>()
+    var mergeError: Throwable? = null
+
+    override suspend fun merge(keepTagId: Long, dropTagId: Long) {
+        mergeError?.let { throw it }
+        mergeCalls += keepTagId to dropTagId
+    }
 }

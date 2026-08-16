@@ -176,4 +176,86 @@ class TransactionRepositoryImplTest {
 
         assertEquals(null, dao.filteredCalls.single().third)
     }
+
+    @Test
+    fun `observeUncategorizedCount delegates to dao`() = runTest {
+        val dao = FakeTransactionDao().apply { uncategorizedCountFlow = flowOf(7) }
+        val repository = TransactionRepositoryImpl(dao)
+
+        val count = repository.observeUncategorizedCount().first()
+
+        assertEquals(7, count)
+    }
+
+    @Test
+    fun `getUncategorized maps rows including note`() = runTest {
+        val dao = FakeTransactionDao().apply {
+            uncategorizedRows = listOf(
+                TransactionDao.RecentTransactionRow(
+                    transaction = TransactionEntity(
+                        id = 9L,
+                        amountCents = 1_200L,
+                        type = "EXPENSE",
+                        note = "未分类买书",
+                        tagId = null,
+                        occurredAt = 800L,
+                        createdAt = 1L,
+                    ),
+                    tagName = null,
+                    tagIcon = null,
+                ),
+            )
+        }
+        val repository = TransactionRepositoryImpl(dao)
+
+        val rows = repository.getUncategorized()
+
+        assertEquals(1, rows.size)
+        assertEquals(9L, rows.single().id)
+        assertEquals("未分类买书", rows.single().note)
+        assertNull(rows.single().tagName)
+    }
+
+    @Test
+    fun `assignTags delegates to dao applyTagAssignments`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+        val assignments = mapOf(1L to listOf(10L, 11L), 2L to listOf(20L))
+
+        repository.assignTags(assignments)
+
+        assertEquals(listOf(assignments), dao.applyTagAssignmentsCalls)
+    }
+
+    @Test
+    fun `assignTags with empty map skips dao`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+
+        repository.assignTags(emptyMap())
+
+        assertTrue(dao.applyTagAssignmentsCalls.isEmpty())
+    }
+
+    @Test
+    fun `getOccurredAtsByTagIds delegates to dao`() = runTest {
+        val dao = FakeTransactionDao().apply { occurredAtsByTagIdsResult = listOf(100L, 200L) }
+        val repository = TransactionRepositoryImpl(dao)
+
+        val occurred = repository.getOccurredAtsByTagIds(listOf(1L, 2L))
+
+        assertEquals(listOf(100L, 200L), occurred)
+        assertEquals(listOf(listOf(1L, 2L)), dao.occurredAtsByTagIdsCalls)
+    }
+
+    @Test
+    fun `getOccurredAtsByTagIds with empty ids skips dao`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao)
+
+        val occurred = repository.getOccurredAtsByTagIds(emptyList())
+
+        assertEquals(emptyList<Long>(), occurred)
+        assertTrue(dao.occurredAtsByTagIdsCalls.isEmpty())
+    }
 }

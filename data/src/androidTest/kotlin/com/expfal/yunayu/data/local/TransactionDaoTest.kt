@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -183,6 +184,95 @@ class TransactionDaoTest {
             .first { rows -> rows.none { it.transaction.id == keepId } }
         assertEquals(1, recentAfter.size)
         assertEquals(2_000L, recentAfter.single().transaction.occurredAt)
+    }
+
+    @Test
+    fun observeUncategorizedCount_countsNullTagTransactions() = runBlocking {
+        val tagDao = database.tagDao()
+        val tagId = tagDao.insert(tag("学习"))
+        dao.insert(transaction(amountCents = 10L, type = "EXPENSE", tagId = null, occurredAt = 1_000L))
+        dao.insert(transaction(amountCents = 20L, type = "EXPENSE", tagId = null, occurredAt = 2_000L))
+        dao.insert(transaction(amountCents = 30L, type = "EXPENSE", tagId = tagId, occurredAt = 3_000L))
+
+        assertEquals(2, dao.observeUncategorizedCount().first())
+    }
+
+    @Test
+    fun getUncategorizedSnapshot_returnsUntaggedDescWithNullTagName() = runBlocking {
+        val tagDao = database.tagDao()
+        val tagId = tagDao.insert(tag("学习"))
+        dao.insert(transaction(amountCents = 10L, type = "EXPENSE", note = "未分类早", tagId = null, occurredAt = 1_000L))
+        dao.insert(transaction(amountCents = 20L, type = "EXPENSE", note = "已分类", tagId = tagId, occurredAt = 2_000L))
+        dao.insert(transaction(amountCents = 30L, type = "EXPENSE", note = "未分类晚", tagId = null, occurredAt = 3_000L))
+
+        val rows = dao.getUncategorizedSnapshot()
+
+        assertEquals(listOf(3_000L, 1_000L), rows.map { it.transaction.occurredAt })
+        assertTrue(rows.all { it.tagName == null })
+        assertEquals(listOf("未分类晚", "未分类早"), rows.map { it.transaction.note })
+    }
+
+    @Test
+    fun updateTagIds_batchAssignsTagToTransactions() = runBlocking {
+        val tagDao = database.tagDao()
+        val tagId = tagDao.insert(tag("学习"))
+        val id1 = dao.insert(transaction(amountCents = 10L, type = "EXPENSE", tagId = null, occurredAt = 1_000L))
+        val id2 = dao.insert(transaction(amountCents = 20L, type = "EXPENSE", tagId = null, occurredAt = 2_000L))
+
+        dao.updateTagIds(listOf(id1, id2), tagId)
+
+        val rows = dao.observeFiltered(null, null, null).first()
+        assertEquals(setOf(tagId), rows.map { it.transaction.tagId }.toSet())
+    }
+
+    @Test
+    fun applyTagAssignments_multiGroupAppliesInSingleTransaction() = runBlocking {
+        val tagDao = database.tagDao()
+        val foodId = tagDao.insert(tag("餐饮"))
+        val bookId = tagDao.insert(tag("书本"))
+        val id1 = dao.insert(transaction(amountCents = 10L, type = "EXPENSE", tagId = null, occurredAt = 1_000L))
+        val id2 = dao.insert(transaction(amountCents = 20L, type = "EXPENSE", tagId = null, occurredAt = 2_000L))
+        val id3 = dao.insert(transaction(amountCents = 30L, type = "EXPENSE", tagId = null, occurredAt = 3_000L))
+
+        dao.applyTagAssignments(mapOf(foodId to listOf(id1, id2), bookId to listOf(id3)))
+
+        val tagIdByTransactionId = dao.observeFiltered(null, null, null).first()
+            .associate { it.transaction.id to it.transaction.tagId }
+        assertEquals(foodId, tagIdByTransactionId[id1])
+        assertEquals(foodId, tagIdByTransactionId[id2])
+        assertEquals(bookId, tagIdByTransactionId[id3])
+    }
+
+    @Test
+    fun updateTagIdByTagIds_migratesTransactionsAndReturnsCount() = runBlocking {
+        val tagDao = database.tagDao()
+        val foodId = tagDao.insert(tag("餐饮"))
+        val eatId = tagDao.insert(tag("吃饭"))
+        dao.insert(transaction(amountCents = 10L, type = "EXPENSE", tagId = foodId, occurredAt = 1_000L))
+        dao.insert(transaction(amountCents = 20L, type = "EXPENSE", tagId = foodId, occurredAt = 2_000L))
+        dao.insert(transaction(amountCents = 30L, type = "EXPENSE", tagId = eatId, occurredAt = 3_000L))
+        dao.insert(transaction(amountCents = 40L, type = "EXPENSE", tagId = null, occurredAt = 4_000L))
+
+        val migrated = dao.updateTagIdByTagIds(listOf(eatId), foodId)
+
+        // 仅迁移 1 笔；吃饭标签下已无交易，餐饮标签下汇聚 3 笔
+        assertEquals(1, migrated)
+        assertTrue(dao.getOccurredAtsByTagIds(listOf(eatId)).isEmpty())
+        assertEquals(3, dao.getOccurredAtsByTagIds(listOf(foodId)).size)
+    }
+
+    @Test
+    fun getOccurredAtsByTagIds_returnsOccurredAtForGivenTags() = runBlocking {
+        val tagDao = database.tagDao()
+        val foodId = tagDao.insert(tag("餐饮"))
+        val bookId = tagDao.insert(tag("书本"))
+        dao.insert(transaction(amountCents = 10L, type = "EXPENSE", tagId = foodId, occurredAt = 1_000L))
+        dao.insert(transaction(amountCents = 20L, type = "EXPENSE", tagId = foodId, occurredAt = 2_000L))
+        dao.insert(transaction(amountCents = 30L, type = "EXPENSE", tagId = bookId, occurredAt = 3_000L))
+        dao.insert(transaction(amountCents = 40L, type = "EXPENSE", tagId = null, occurredAt = 4_000L))
+
+        assertEquals(setOf(1_000L, 2_000L), dao.getOccurredAtsByTagIds(listOf(foodId)).toSet())
+        assertEquals(setOf(1_000L, 2_000L, 3_000L), dao.getOccurredAtsByTagIds(listOf(foodId, bookId)).toSet())
     }
 
     private fun transaction(

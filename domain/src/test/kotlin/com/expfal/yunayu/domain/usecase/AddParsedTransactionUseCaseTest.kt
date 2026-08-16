@@ -115,5 +115,13 @@ class AddParsedTransactionUseCaseTest {
             tagIds: List<Long>,
             noteKeyword: String?,
         ): Flow<List<RecentTransaction>> = flowOf(emptyList())
+
+        override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)
+
+        override suspend fun getUncategorized(): List<RecentTransaction> = emptyList()
+
+        override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
+
+        override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
     }
 }

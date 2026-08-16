@@ -3,15 +3,13 @@ package com.expfal.yunayu.ui.screen.quickadd
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.expfal.yunayu.domain.model.DuplicateTagNameException
+import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
-import com.expfal.yunayu.domain.nl.SuggestNewTagUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.nl.model.NlParseResult
 import com.expfal.yunayu.domain.nl.model.NlTransactionDraft
-import com.expfal.yunayu.domain.nl.model.TagSuggestion
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
@@ -48,20 +46,6 @@ data class QuickAddUiState(
     val nlFailure: NlParseFailure? = null,
     /** NL 模式下最终落库的标签 id，独立于两模式共享的 [selectedTagId]，避免残留预选污染 NL 交易。 */
     val nlTagId: Long? = null,
-    /** 弹层新建标签表单的输入名。 */
-    val newTagName: String = "",
-    /** 新建标签表单当前选中的根类 id；未选时为 `null`。 */
-    val newTagRootId: Long? = null,
-    /** 新建标签落库进行中。 */
-    val newTagBusy: Boolean = false,
-    /** 新建标签失败提示（同名/创建失败/AI 推荐不可用）。 */
-    val newTagError: String? = null,
-    /** AI 正在为 NL 草稿生成「新建标签」建议。 */
-    val newTagSuggesting: Boolean = false,
-    /** AI 正在为新建标签表单推荐所属根类；独立于 [newTagSuggesting]，避免两链路并发时互相回写 loading。 */
-    val rootSuggesting: Boolean = false,
-    /** NL 未匹配时 AI 给出的「新建标签」建议；用户确认/拒绝后清空。 */
-    val nlTagSuggestion: TagSuggestion? = null,
     /** 数字模式的收/支方向，默认支出；NL 模式忽略，以解析草稿 [nlDraft] 的 type 为准。 */
     val transactionType: TransactionType = TransactionType.EXPENSE,
 )
@@ -92,7 +76,6 @@ class QuickAddViewModel @Inject constructor(
     private val addTransactionUseCase: AddTransactionUseCase,
     private val parseNaturalLanguageTransactionUseCase: ParseNaturalLanguageTransactionUseCase,
     private val addParsedTransactionUseCase: AddParsedTransactionUseCase,
-    private val suggestNewTagUseCase: SuggestNewTagUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(QuickAddUiState())
@@ -103,12 +86,6 @@ class QuickAddViewModel @Inject constructor(
 
     /** 建议分类刷新任务句柄；连续刷新时先取消旧任务，避免陈旧结果回写覆盖新方向的结果。 */
     private var suggestedTagsJob: Job? = null
-
-    /** NL 新建建议任务句柄；重新解析/切换模式/重置时取消，避免陈旧建议覆盖新草稿。 */
-    private var nlTagSuggestionJob: Job? = null
-
-    /** 新建标签表单根类推荐任务句柄；重复推荐时先取消旧任务，避免陈旧结果回写。 */
-    private var rootSuggestionJob: Job? = null
 
     private val _events = MutableSharedFlow<QuickAddEvent>(
         extraBufferCapacity = 1,
@@ -122,8 +99,6 @@ class QuickAddViewModel @Inject constructor(
      */
     fun resetForOpen() {
         nlConfirmPending = false
-        nlTagSuggestionJob?.cancel()
-        rootSuggestionJob?.cancel()
         _uiState.update {
             it.copy(
                 amountText = "",
@@ -134,13 +109,6 @@ class QuickAddViewModel @Inject constructor(
                 confirmRequested = false,
                 saveFailed = false,
                 nlTagId = null,
-                newTagName = "",
-                newTagRootId = null,
-                newTagBusy = false,
-                newTagError = null,
-                newTagSuggesting = false,
-                rootSuggesting = false,
-                nlTagSuggestion = null,
                 transactionType = TransactionType.EXPENSE,
             )
         }
@@ -190,12 +158,13 @@ class QuickAddViewModel @Inject constructor(
     /**
      * 加载全部标签并按根分组，供「更多分类」选择层展示（根标签自身也在分组内）。
      *
-     * 根列表经 `getChildren(null)` 获取，再逐根 `getChildren(rootId)` 拉子标签；任一失败
-     * 降级为空列表并记日志，[kotlinx.coroutines.CancellationException] 直接重抛，绝不阻塞记账。
+     * 按 [type] 收支方向过滤根列表：收入仅保留收入根、支出排除收入根。根列表经
+     * `getChildren(null)` 获取，再逐根 `getChildren(rootId)` 拉子标签；任一失败降级为空列表
+     * 并记日志，[kotlinx.coroutines.CancellationException] 直接重抛，绝不阻塞记账。
      */
-    fun loadAllTags() {
+    fun loadAllTags(type: TransactionType) {
         viewModelScope.launch {
-            val mapping = runCatching { loadAllTagsByRoot() }
+            val mapping = runCatching { loadAllTagsByRoot(type) }
                 .onFailure { throwable ->
                     if (throwable is CancellationException) throw throwable
                     Log.w(TAG, "Failed to load all tags", throwable)
@@ -205,9 +174,13 @@ class QuickAddViewModel @Inject constructor(
         }
     }
 
-    private suspend fun loadAllTagsByRoot(): Map<Tag, List<Tag>> {
+    private suspend fun loadAllTagsByRoot(type: TransactionType): Map<Tag, List<Tag>> {
         val roots = tagRepository.getChildren(parentId = null)
-        return roots.associateWith { root ->
+        val filteredRoots = when (type) {
+            TransactionType.INCOME -> roots.filter { it.name == IncomeTags.INCOME_ROOT_NAME }
+            TransactionType.EXPENSE -> roots.filter { it.name != IncomeTags.INCOME_ROOT_NAME }
+        }
+        return filteredRoots.associateWith { root ->
             runCatching { tagRepository.getChildren(parentId = root.id) }
                 .onFailure { throwable ->
                     if (throwable is CancellationException) throw throwable
@@ -217,16 +190,20 @@ class QuickAddViewModel @Inject constructor(
         }
     }
 
-    /** 加载建议分类；useCase 失败时回退根标签，仍失败则保持空列表。 */
+    /** 加载建议分类；useCase 失败时回退根标签（按当前收支方向过滤），仍失败则保持空列表。 */
     private suspend fun loadSuggestedTags(): List<Tag> {
         return try {
             getRecentCategoriesUseCase(type = _uiState.value.transactionType)
         } catch (throwable: Throwable) {
             if (throwable is CancellationException) throw throwable
             Log.w(TAG, "Failed to load recent categories, fallback to root tags", throwable)
-            runCatching { tagRepository.getChildren(parentId = null) }
+            val roots = runCatching { tagRepository.getChildren(parentId = null) }
                 .onFailure { Log.w(TAG, "Failed to load root tags", it) }
                 .getOrDefault(emptyList())
+            when (_uiState.value.transactionType) {
+                TransactionType.INCOME -> roots.filter { it.name == IncomeTags.INCOME_ROOT_NAME }
+                TransactionType.EXPENSE -> roots.filter { it.name != IncomeTags.INCOME_ROOT_NAME }
+            }
         }
     }
 
@@ -267,6 +244,7 @@ class QuickAddViewModel @Inject constructor(
         if (state.transactionType == type) return
         _uiState.update { it.copy(transactionType = type) }
         refreshSuggestedTags()
+        loadAllTags(type)
     }
 
     /**
@@ -342,8 +320,6 @@ class QuickAddViewModel @Inject constructor(
     fun setNlMode(enabled: Boolean) {
         if (_uiState.value.saving || _uiState.value.nlParsing) return
         nlConfirmPending = false
-        nlTagSuggestionJob?.cancel()
-        rootSuggestionJob?.cancel()
         _uiState.update {
             it.copy(
                 nlMode = enabled,
@@ -352,160 +328,47 @@ class QuickAddViewModel @Inject constructor(
                 nlFailure = null,
                 confirmRequested = false,
                 nlTagId = null,
-                newTagName = "",
-                newTagRootId = null,
-                newTagBusy = false,
-                newTagError = null,
-                newTagSuggesting = false,
-                rootSuggesting = false,
-                nlTagSuggestion = null,
                 transactionType = TransactionType.EXPENSE,
             )
         }
     }
 
-    /** 更新新建标签表单的输入名，并清空上次失败提示。 */
-    fun onNewTagName(text: String) {
-        _uiState.update { it.copy(newTagName = text, newTagError = null) }
-    }
-
-    /** 选择新建标签的所属根类，并清空上次失败提示。 */
-    fun onNewTagRootSelect(rootId: Long) {
-        _uiState.update { it.copy(newTagRootId = rootId, newTagError = null) }
-    }
-
-    /** 清空新建标签失败提示（供关闭表单等场景复用）。 */
-    fun clearNewTagError() {
-        _uiState.update { it.copy(newTagError = null) }
-    }
-
     /**
-     * 在指定根类下新建子标签并选中：saving / nlParsing / newTagBusy 期间忽略；成功时 NL 模式
-     * 同步写 [QuickAddUiState.nlTagId] 与 [QuickAddUiState.selectedTagId]、数字模式仅写
+     * 在指定根类下新建子标签并选中：saving / nlParsing 期间忽略；成功时 NL 模式同步写
+     * [QuickAddUiState.nlTagId] 与 [QuickAddUiState.selectedTagId]、数字模式仅写
      * [QuickAddUiState.selectedTagId]（对齐 [onSelectTag] 语义），随后刷新全量标签与建议分类；
-     * [onCreated] 在选中态（含 [QuickAddUiState.nlTagId]）写入后回调新标签 id，供确认建议路径
-     * 自动串联落库；[DuplicateTagNameException] 提示「同名标签已存在」，其余异常提示「创建失败，请重试」，
-     * [kotlinx.coroutines.CancellationException] 直接重抛。
+     * [onCreated] 在选中态写入后回调新标签 id。此为底层新建能力，供后续整理等链路复用；
+     * 失败仅记日志，[kotlinx.coroutines.CancellationException] 直接重抛。
      */
     fun createSubTag(rootId: Long, name: String, onCreated: ((Long) -> Unit)? = null) {
         val state = _uiState.value
-        if (state.saving || state.nlParsing || state.newTagBusy) return
-        _uiState.update { it.copy(newTagBusy = true, newTagError = null) }
+        if (state.saving || state.nlParsing) return
         viewModelScope.launch {
             runCatching { tagRepository.addSubTag(parentId = rootId, name = name, icon = null) }
                 .onSuccess { newId ->
                     _uiState.update { current ->
-                        val selected = if (current.nlMode) {
+                        if (current.nlMode) {
                             current.copy(selectedTagId = newId, nlTagId = newId)
                         } else {
                             current.copy(selectedTagId = newId)
                         }
-                        selected.copy(
-                            newTagName = "",
-                            newTagRootId = null,
-                            newTagBusy = false,
-                            newTagError = null,
-                            nlTagSuggestion = null,
-                        )
                     }
-                    loadAllTags()
+                    val currentState = _uiState.value
+                    loadAllTags(
+                        type = if (currentState.nlMode) {
+                            currentState.nlDraft?.type ?: TransactionType.EXPENSE
+                        } else {
+                            currentState.transactionType
+                        },
+                    )
                     refreshSuggestedTags(preselectTagId = newId)
                     onCreated?.invoke(newId)
                 }
                 .onFailure { throwable ->
                     if (throwable is CancellationException) throw throwable
-                    val message = if (throwable is DuplicateTagNameException) {
-                        "同名标签已存在"
-                    } else {
-                        "创建失败，请重试"
-                    }
                     Log.w(TAG, "Failed to create sub tag", throwable)
-                    _uiState.update { it.copy(newTagBusy = false, newTagError = message) }
                 }
         }
-    }
-
-    /**
-     * NL 未匹配标签短语时，异步生成「新建标签」建议；失败/超时静默降级为 `null`。
-     * 候选根类为空时直接返回（不置 loading、不发网络请求）；重复调用先取消旧任务，
-     * 避免陈旧建议覆盖新草稿。
-     */
-    private fun suggestTagForDraft(phrase: String) {
-        val roots = candidateRoots()
-        if (roots.isEmpty()) return
-        nlTagSuggestionJob?.cancel()
-        nlTagSuggestionJob = viewModelScope.launch {
-            _uiState.update { it.copy(newTagSuggesting = true) }
-            val suggestion = withTimeoutOrNull(TAG_SUGGESTION_TIMEOUT_MILLIS) {
-                suggestNewTagUseCase(phrase, roots)
-            }
-            _uiState.update { it.copy(newTagSuggesting = false, nlTagSuggestion = suggestion) }
-        }
-    }
-
-    /**
-     * 确认 NL 建议：据 rootName 匹配根类 id 后落库新标签；匹配不到则清空建议降级。
-     * 创建成功后经 [onCreated] 回调自动串联 [onSaveNl] 落库（含大额确认路由），无需用户再点保存。
-     */
-    fun confirmNlTagSuggestion() {
-        val state = _uiState.value
-        if (state.saving || state.nlParsing || state.newTagBusy) return
-        val suggestion = state.nlTagSuggestion ?: return
-        val rootId = resolveRootId(suggestion.rootName)
-        if (rootId == null) {
-            _uiState.update { it.copy(nlTagSuggestion = null) }
-            return
-        }
-        createSubTag(rootId, suggestion.tagName) { onSaveNl() }
-    }
-
-    /** 拒绝 NL 建议：仅清空建议，保持 nlTagId 现状（未分类或用户已手动选）。 */
-    fun dismissNlTagSuggestion() {
-        _uiState.update { it.copy(nlTagSuggestion = null) }
-    }
-
-    /**
-     * 数字模式：为新建标签表单推荐所属根类。输入名空白、已在推荐中或表单落库中不响应；
-     * 成功且根类名可匹配时仅预填 [QuickAddUiState.newTagRootId]（可改），失败提示不可用。
-     */
-    fun suggestRootForNewTag() {
-        val state = _uiState.value
-        val name = state.newTagName
-        if (name.isBlank() || state.rootSuggesting || state.newTagBusy) return
-        val roots = candidateRoots()
-        if (roots.isEmpty()) {
-            _uiState.update { it.copy(newTagError = "AI 推荐不可用，请手动选择") }
-            return
-        }
-        rootSuggestionJob?.cancel()
-        rootSuggestionJob = viewModelScope.launch {
-            _uiState.update { it.copy(rootSuggesting = true) }
-            val suggestion = withTimeoutOrNull(TAG_SUGGESTION_TIMEOUT_MILLIS) {
-                suggestNewTagUseCase(name, roots)
-            }
-            val rootId = suggestion?.let { resolveRootId(it.rootName) }
-            _uiState.update { current ->
-                if (rootId != null) {
-                    current.copy(rootSuggesting = false, newTagRootId = rootId)
-                } else {
-                    current.copy(rootSuggesting = false, newTagError = "AI 推荐不可用，请手动选择")
-                }
-            }
-        }
-    }
-
-    /** 组装候选根类列表：优先全量分组，缺失时回退根名映射（现有缓存，不额外请求）。 */
-    private fun candidateRoots(): List<Tag> {
-        val state = _uiState.value
-        if (state.allTagsByRoot.isNotEmpty()) return state.allTagsByRoot.keys.toList()
-        return state.rootNameById.map { (id, name) -> Tag(id = id, name = name) }
-    }
-
-    /** 据根类名解析根类 id：优先全量分组，缺失时回退根名映射。 */
-    private fun resolveRootId(rootName: String): Long? {
-        val state = _uiState.value
-        return state.allTagsByRoot.keys.firstOrNull { it.name == rootName }?.id
-            ?: state.rootNameById.entries.firstOrNull { it.value == rootName }?.key
     }
 
     /** 更新自然语言输入文本。 */
@@ -522,10 +385,8 @@ class QuickAddViewModel @Inject constructor(
     fun onParseNl() {
         val state = _uiState.value
         if (state.nlParsing || state.saving) return
-        // 重新解析前取消在飞的 NL 建议，避免陈旧建议覆盖新草稿的 nlTagSuggestion。
-        nlTagSuggestionJob?.cancel()
         val text = state.nlInputText
-        _uiState.update { it.copy(nlParsing = true, nlDraft = null, nlFailure = null, newTagSuggesting = false) }
+        _uiState.update { it.copy(nlParsing = true, nlDraft = null, nlFailure = null) }
         viewModelScope.launch {
             val outcome = runCatching {
                 withTimeoutOrNull(NL_PARSE_TIMEOUT_MILLIS) { parseNaturalLanguageTransactionUseCase(text) }
@@ -540,11 +401,6 @@ class QuickAddViewModel @Inject constructor(
                 }
                 return@launch
             }
-            val unmatchedPhrase = (result as? NlParseResult.Success)
-                ?.draft
-                ?.takeIf { it.tagId == null }
-                ?.tagPhrase
-                ?.takeIf { it.isNotBlank() }
             _uiState.update { current ->
                 when (result) {
                     is NlParseResult.Success -> {
@@ -555,19 +411,14 @@ class QuickAddViewModel @Inject constructor(
                             nlFailure = null,
                             nlTagId = tagId,
                             selectedTagId = tagId ?: current.selectedTagId,
-                            nlTagSuggestion = null,
                         )
                     }
                     is NlParseResult.Failure -> current.copy(
                         nlParsing = false,
                         nlDraft = null,
                         nlFailure = result.reason,
-                        nlTagSuggestion = null,
                     )
                 }
-            }
-            if (unmatchedPhrase != null) {
-                suggestTagForDraft(unmatchedPhrase)
             }
         }
     }
@@ -652,9 +503,6 @@ class QuickAddViewModel @Inject constructor(
 
         /** NL 解析最坏耗时上限，超时按引擎不可用降级处理。 */
         private const val NL_PARSE_TIMEOUT_MILLIS = 20_000L
-
-        /** 新标签 AI 建议最坏耗时上限，超时静默降级。 */
-        private const val TAG_SUGGESTION_TIMEOUT_MILLIS = 20_000L
 
         /**
          * 将金额文本解析为「分」。仅接受数字与至多一个小数点，小数位 ≤2；

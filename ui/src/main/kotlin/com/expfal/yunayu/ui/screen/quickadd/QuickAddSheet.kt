@@ -24,7 +24,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -133,7 +132,12 @@ fun QuickAddSheet(
                 }
                 AssistChip(
                     onClick = {
-                        viewModel.loadAllTags()
+                        val type = if (uiState.nlMode) {
+                            uiState.nlDraft?.type ?: TransactionType.EXPENSE
+                        } else {
+                            uiState.transactionType
+                        }
+                        viewModel.loadAllTags(type)
                         showTagPicker = true
                     },
                     label = { Text("更多") },
@@ -152,13 +156,9 @@ fun QuickAddSheet(
                     suggestedTags = uiState.suggestedTags,
                     rootNameById = uiState.rootNameById,
                     allTagsByRoot = uiState.allTagsByRoot,
-                    nlTagSuggestion = uiState.nlTagSuggestion,
-                    newTagSuggesting = uiState.newTagSuggesting,
                     onInputChange = viewModel::onNlInputChange,
                     onParse = viewModel::onParseNl,
                     onSave = viewModel::onSaveNl,
-                    onConfirmSuggestion = viewModel::confirmNlTagSuggestion,
-                    onDismissSuggestion = viewModel::dismissNlTagSuggestion,
                 )
             } else {
                 NumberPad(
@@ -195,116 +195,58 @@ fun QuickAddSheet(
         TagPickerSheet(
             allTagsByRoot = uiState.allTagsByRoot,
             selectedTagId = uiState.selectedTagId,
-            newTagName = uiState.newTagName,
-            newTagRootId = uiState.newTagRootId,
-            newTagBusy = uiState.newTagBusy,
-            newTagError = uiState.newTagError,
-            rootSuggesting = uiState.rootSuggesting,
             onSelect = { tagId ->
                 viewModel.onSelectTag(tagId)
                 showTagPicker = false
-            },
-            onNewTagNameChange = viewModel::onNewTagName,
-            onNewTagRootSelect = viewModel::onNewTagRootSelect,
-            onSuggestRoot = viewModel::suggestRootForNewTag,
-            onCreateTag = {
-                val rootId = uiState.newTagRootId
-                if (rootId != null) viewModel.createSubTag(rootId, uiState.newTagName)
             },
             onDismiss = { showTagPicker = false },
         )
     }
 }
 
-/** 「更多分类」选择层：按根分组折叠展示子标签（根标签自身也可选），点选即选中并关闭；支持弹层内新建标签。 */
+/** 「更多分类」选择层：按根分组折叠展示子标签（根标签自身也可选），点选即选中并关闭。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TagPickerSheet(
     allTagsByRoot: Map<Tag, List<Tag>>,
     selectedTagId: Long?,
-    newTagName: String,
-    newTagRootId: Long?,
-    newTagBusy: Boolean,
-    newTagError: String?,
-    rootSuggesting: Boolean,
     onSelect: (Long) -> Unit,
-    onNewTagNameChange: (String) -> Unit,
-    onNewTagRootSelect: (Long) -> Unit,
-    onSuggestRoot: () -> Unit,
-    onCreateTag: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    var showNewTagForm by remember { mutableStateOf(false) }
-    var wasNewTagBusy by remember { mutableStateOf(false) }
-
-    // 新建成功后关闭表单并回到选择层（标签已自动选中，同时关闭整个弹层）。
-    LaunchedEffect(newTagBusy) {
-        if (wasNewTagBusy && !newTagBusy && newTagError == null) {
-            showNewTagForm = false
-            onDismiss()
-        }
-        wasNewTagBusy = newTagBusy
-    }
-
     ModalBottomSheet(onDismissRequest = onDismiss) {
-        if (showNewTagForm) {
-            TagPickerTitle(title = "新建标签", action = "返回") { showNewTagForm = false }
-            Spacer(modifier = Modifier.height(8.dp))
-            QuickAddNewTag(
-                newTagName = newTagName,
-                newTagRootId = newTagRootId,
-                newTagBusy = newTagBusy,
-                newTagError = newTagError,
-                rootSuggesting = rootSuggesting,
-                rootTags = allTagsByRoot.keys.toList(),
-                onNameChange = onNewTagNameChange,
-                onRootSelect = onNewTagRootSelect,
-                onSuggestRoot = onSuggestRoot,
-                onCreate = onCreateTag,
+        TagPickerTitle(title = "选择标签")
+        Spacer(modifier = Modifier.height(8.dp))
+        if (allTagsByRoot.isEmpty()) {
+            Text(
+                text = "暂无可用标签",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
             )
         } else {
-            TagPickerTitle(title = "选择标签", action = "新建标签") { showNewTagForm = true }
-            Spacer(modifier = Modifier.height(8.dp))
-            if (allTagsByRoot.isEmpty()) {
-                Text(
-                    text = "暂无可用标签",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp),
-                )
-            } else {
-                TagTreeList(
-                    allTagsByRoot = allTagsByRoot,
-                    selectedIds = setOfNotNull(selectedTagId),
-                    onToggleSelect = onSelect,
-                    modifier = Modifier.padding(bottom = 28.dp),
-                )
-            }
+            TagTreeList(
+                allTagsByRoot = allTagsByRoot,
+                selectedIds = setOfNotNull(selectedTagId),
+                onToggleSelect = onSelect,
+                modifier = Modifier.padding(bottom = 28.dp),
+            )
         }
     }
 }
 
-/** 选择层标题行：左侧标题 + 右侧操作按钮（新建/返回）。 */
+/** 选择层标题行。 */
 @Composable
 private fun TagPickerTitle(
     title: String,
-    action: String,
-    onAction: () -> Unit,
 ) {
-    Row(
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = title,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
-        )
-        TextButton(onClick = onAction) { Text(action) }
-    }
+    )
 }
 
 /** 数字模式收/支方向切换控件：仅数字模式展示，样式与 [NlModeToggle] 一致。 */

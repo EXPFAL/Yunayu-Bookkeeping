@@ -88,6 +88,20 @@ class TransactionRepositoryImpl @Inject constructor(
             note = transaction.note,
         )
 
+    override fun observeUncategorizedCount(): Flow<Int> =
+        transactionDao.observeUncategorizedCount()
+
+    override suspend fun getUncategorized(): List<RecentTransaction> =
+        transactionDao.getUncategorizedSnapshot().map { it.toRecentDomain() }
+
+    override suspend fun assignTags(assignments: Map<Long, List<Long>>) {
+        if (assignments.isEmpty()) return
+        transactionDao.applyTagAssignments(assignments)
+    }
+
+    override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> =
+        if (tagIds.isEmpty()) emptyList() else transactionDao.getOccurredAtsByTagIds(tagIds)
+
     private fun Transaction.toEntity(): TransactionEntity = TransactionEntity(
         id = id,
         amountCents = amountCents,
