@@ -828,3 +828,44 @@ interface SemesterBudgetEngine {
 
 - 视觉走查留待真机：浅 / 深两套主题的对比度自查为静态测算，真机走查（含 HeldFundsCard 渐变观感）留待设备验证。
 
+---
+
+## 22. 标签收敛与发布工程迭代交付记录
+
+> 触发时机：P1「标签父类选项收敛」行为变更 + P2「App 图标」+ 版本号 + gitignore 工程卫生落地。零 schema 变更（不改 tags / transactions 表，仅行为与资源层调整）。
+
+### 22.1 叶子语义推荐契约
+
+- `GetRecentCategoriesUseCase` 推荐结果收敛为「仅叶子」：`recent` 先过滤「拥有子标签」的父类，仅保留叶子（`recentLeaves`）。
+- 叶子判定基于「拥有子标签」而非 `parentId`：先 `getChildren(null)` 取根，再逐根 `getChildren(root.id)` 取子，构建「拥有子级的父类 id 集合」（`childrenByRootId.filterValues { it.isNotEmpty() }.keys`）；推荐结果的 `parentId` 可能缺失，故不用 `parentId` 判叶。
+- 补足规则（`DEFAULT_LIMIT = 4`，按 `id` 去重）：
+  - 支出：各支出根类子标签平铺（`name != 收入` 的根，有子则平铺子、无子则视该根为叶子），排除收入根子树；
+  - 收入：仅收入根的子标签（收入根自身不参与补足）；收入根无子则视收入根为叶子。
+- 降级路径：`getChildren(null)` 或任一 `getChildren(root.id)` 失败 → `recent.take(DEFAULT_LIMIT)` 原样返回、补足为空，不崩溃；`CancellationException` 照常重抛。
+- 测试：`GetRecentCategoriesUseCaseTest` 全量重写 11 用例（非叶子过滤 / 支出平铺 / 去重 / 满额不补 / 收入仅子 / 支出排收入子树 / 无子根按叶 / 根查询失败降级 / 子查询失败降级 / 时间窗透传 / type 透传）。
+
+### 22.2 TagTreeList 三宿主收敛
+
+- 行为变更：`TagTreeList` 移除根自身可点选 self 行，父类仅作分组头（折叠/展开，`clickable(enabled = hasChildren)`），不可被选为标签；只渲染子类行供点选。
+- 三宿主同组件、同时生效：
+  - 快速记账选择层（`QuickAddSheet`「更多分类」，单选，点选即关闭）；
+  - 收支管理筛选层（`TransactionManageScreen` 标签多选弹层，点选不关闭、底部「完成」关闭）；
+  - 整理选择弹层（`OrganizeScreen` 修改目标选择，单选，点选即回填并关闭）。
+- 历史数据保留：已挂父类标签的交易照常显示（`tagId` 指向父类的交易不受影响），仅不再提供新选择入口，零数据迁移。
+
+### 22.3 图标资源结构与 adaptive 方案
+
+- 启动器图标替换为用户提供的卡通图（粉色圆脸表情，与 §21 品牌主题同源）。
+- 资源结构：mipmap 全密度（hdpi/mdpi/xhdpi/xxhdpi/xxxhdpi）`ic_launcher.png` / `ic_launcher_round.png` + `ic_launcher_foreground.png`；`mipmap-anydpi-v26/ic_launcher.xml` 与 `ic_launcher_round.xml` 为 adaptive icon——`background = @color/ic_launcher_background`（品牌浅粉 #FFF8F6，对齐 ui/theme Color.kt LIGHT_BACKGROUND）、`foreground = @mipmap/ic_launcher_foreground`（提取的表情线条层）。
+- 取舍原因：源图脸体与背景同色（同为浅粉），无法完整抠出脸体，故采用「线条前景 + 浅粉底色」方案——background 用品牌浅粉铺底，foreground 仅承载表情线条层，避免脸体与底色粘连成一团。
+- `AndroidManifest` 新增 `android:icon="@mipmap/ic_launcher"` / `android:roundIcon="@mipmap/ic_launcher_round"`；minSdk=26，真机（Redmi K80 Ultra）恒走 adaptive 路径。
+
+### 22.4 版本记录
+
+- `versionName` 0.1.0 → 3.25，`versionCode` 保持 1，aapt 验证生效。
+
+### 22.5 已知限制
+
+- 源图无透明背景，无法完整抠出脸体，图标以「线条前景 + 浅粉底色」呈现，非完整脸体形象。
+- 历史已挂父类标签的交易数据保留（仅不再提供新选择入口），如需后续清理须经整理 / 标签合并链路处理。
+

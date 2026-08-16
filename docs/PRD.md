@@ -96,6 +96,20 @@
    - 口径：仅主题层改动，零业务逻辑；error 保留语义红；onSecondary / onTertiary 未覆写（当前全仓零调用）
    - 验收要点：浅 / 深两套主题均可用；金额数字等宽对齐；无业务逻辑 / 测试断言改动
 
+### 标签收敛与发布工程迭代（已随本次迭代交付）
+22. 标签父类选项收敛（已随本次迭代交付）
+   - 背景：用户原话「不喜欢笼统标签」——父类粒度太粗，点选后记账归类仍不精确，期望只落到具体子标签
+   - 方案：TagTreeList 移除根自身可点选 self 行，父类仅作分组头（折叠/展开），不可被选为标签；三宿主（快速记账选择层 / 收支管理筛选层 / 整理选择弹层）同时生效；历史已挂父类标签的交易照常显示，仅不再提供新选择入口
+   - 推荐契约：GetRecentCategoriesUseCase 推荐仅叶子——recent 过滤非叶子、支出补足 = 各支出根子标签平铺（排除收入根子树）、收入补足 = 仅收入子标签（不含收入根）、无子根按叶子处理、getChildren 失败降级（recent 原样保留 + 补足为空不崩）；叶子判定基于「拥有子标签」而非 parentId 字段
+   - 验收要点：父类仅可折叠/展开、不可选中；三宿主同时生效；历史父类标签交易照常展示；快捷推荐仅返回叶子
+   - 测试：GetRecentCategoriesUseCaseTest 全量重写 11 用例
+23. 版本号（已随本次迭代交付）
+   - versionName 0.1.0 → 3.25，versionCode 保持 1，aapt 验证生效
+24. App 图标（已随本次迭代交付）
+   - 方案：以用户提供的卡通图（粉色圆脸表情，与品牌主题同源）替换启动器图标——mipmap 全密度 ic_launcher / ic_launcher_round + adaptive icon（background = 品牌浅粉 #FFF8F6 颜色资源、foreground = 提取的表情线条层，因源图脸体与背景同色采用「线条前景 + 浅粉底色」方案）；AndroidManifest 新增 icon / roundIcon 引用；minSdk=26 真机恒走 adaptive
+25. 工程卫生（已随本次迭代交付）
+   - .gitignore 追加 androidtest_assemble.log / gate_run.log（门禁/构建日志不入库）
+
 ## 二、明确砍掉的功能（scope 红线，实现任何一项即视为违规）
 - 多成员/共享记账（个人使用无需权限体系）
 - 商家/项目管理（无 B 端对账需求）
