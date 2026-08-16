@@ -739,3 +739,92 @@ interface SemesterBudgetEngine {
 - **种子化失败时收入选择层为空可落未分类**：`EnsureIncomeTagsUseCase` 异常上抛时收入体系缺失，收入记账选择层为空仍可落库为未分类，重启后种子化自愈。
 - **快照-合并窗口新增交易漏标脏**：`MergeTagsUseCase` 先快照 drop 标签交易 `occurredAt` 再合并，快照后新挂到 drop 标签的交易不会被本次合并标脏报告（窗口极窄，可接受）。
 
+---
+
+## 20. 账户体系迭代交付记录
+
+> 触发时机：P1「账户体系」独立迭代落地（schema v4→v5），按账户分开展示持有资金、记账账户选择、收支管理账户筛选与账户管理页。
+
+### 20.1 Schema v5 与 MIGRATION_4_5
+
+- `accounts` 表：`id`(PK autoGenerate) / `name`(TEXT NOT NULL) / `created_at`，唯一索引 `index_accounts_name`。
+- `transactions` 表重建：新增 `account_id`（置于 `tag_id` 之后），可空外键 `REFERENCES accounts(id) ON DELETE SET NULL`，新增索引 `index_transactions_account_id`。
+- 迁移步骤（整体包事务，沿用 MIGRATION_1_2 / 2_3 / 3_4 先例）：① 建 accounts 表 + 唯一索引；② `INSERT OR IGNORE` 种子预置三账户（单一数据源 `AccountPresets.PRESET_NAMES`，created_at 取迁移时刻）；③ transactions 重建为 8 列（携带 tag_id / account_id 双外键，外键写最终表名 tags / accounts，RENAME 后引用保持有效），历史数据 `account_id` 恒 NULL（历史不导入账户归属）；④ 重建 4 索引（tag_id / occurred_at / occurred_at+type / account_id）。
+- 无需 MIGRATION_1_2 的备份表环节：本次 DROP 的是子表 transactions（非被其它表外键引用的父表），不会触发其它表对本表的 SET NULL。
+- 导出 schema `data/schemas/com.expfal.yunayu.data.local.YunayuDatabase/5.json`，identityHash `50d28dd9635842e5301e6f8dbafc478a`。
+- `MigrationTest` v4→v5 用例：accounts 种子 3 行且名称顺序对齐、唯一索引与 account_id 索引存在、历史交易 account_id 恒 NULL。
+
+### 20.2 预置账户双路径种子化
+
+- 单一数据源 `AccountPresets.PRESET_NAMES = [微信, 支付宝, 银行卡]`（列表顺序即迁移种子插入顺序），迁移内联与启动补齐统一引用，避免账户名多处硬编码漂移。
+- 双路径：迁移 `INSERT OR IGNORE`（存量库升级即补齐）+ `EnsureAccountsUseCase` 挂 `YunayuApplication.onCreate` 第四协程（仿 ensureReports / ensureIncomeTags），按名幂等补齐——已存在跳过、竞态命中 `DuplicateAccountNameException` 计入 skipped、其余异常上抛由调用方记日志兜底。
+- 复活语义：删除某预置账户后，下次启动按名补齐（与收入根种子化同语义）；已产生交易的 account_id 已 SET NULL，不因账户复活而重挂。
+
+### 20.3 总资金口径恒等式
+
+- 恒等式：各账户余额之和 + 未指定账户 = 全历史净结余（现有持有资金），不变更 §14.2 口径。
+- `TransactionDao.observeHeldCents` SQL 零改动；新增 `observeBalancesByAccount`：单条 `GROUP BY t.account_id`（LEFT JOIN accounts 取账户名），未指定账户（account_id IS NULL）也作为一组（accountId / accountName 均 null）。
+- `AccountRepository.observeBalances` 直接映射 `List<AccountBalance>`；空账户 GROUP BY 天然不显示、全未指定仅总计行。
+- `TransactionDaoTest` androidTest 恒等式守护：`observeHeldCents() == observeBalancesByAccount().sumOf { balanceCents }`。
+
+### 20.4 账户记忆 DataStore 契约
+
+- 实例名 `account_prefs`（`preferencesDataStore(name = "account_prefs")`，单例按名去重）；键 `longPreferencesKey("last_used_account_id")`。
+- null 语义：从未选择 = 键不存在（读为 null）；`saveLastUsedAccountId(null)` 删除键（等价于未选择）。
+- 写入时机：记账落库成功后 fire-and-forget（`viewModelScope.launch` + `runCatching`），失败仅记日志、`CancellationException` 重抛、绝不触碰 saving / saveFailed 状态机。
+- 预选校验：`QuickAddViewModel.reloadAccounts` 读 lastUsedAccountId 后 `takeIf { id -> accounts.any { it.id == id } }` 校验 id ∈ 账户列表，否则回退 null（未指定）。
+
+### 20.5 AccountFilter 语义与 accountMode 参数化
+
+- `AccountFilter` sealed interface：`All`（不设账户过滤）/ `Unspecified`（account_id IS NULL）/ `Specific(accountId)`。
+- DAO `accountMode` 参数化：`ACCOUNT_MODE_ALL = 0` / `ACCOUNT_MODE_UNSPECIFIED = 1` / `ACCOUNT_MODE_SPECIFIC = 2`；`observeFiltered` / `observeFilteredByTags` 双查询重载均新增 `(accountMode, accountId)`，SQL 以 `:accountMode = 0 OR (:accountMode = 1 AND account_id IS NULL) OR (:accountMode = 2 AND account_id = :accountId)` 与时间 / 备注 / 标签自由组合。
+- `TransactionRepositoryImpl.observeFiltered` 加 `accountFilter` 参，经 `AccountFilter.toModeAndId()` 映射为 DAO `(mode, id)`。
+
+### 20.6 记账账户选择与账户管理页
+
+- 记账选择：`QuickAddSheet` 数字与 NL 两模式共享 `AccountChipsRow`（首位「未指定」+ 各账户单选互斥，账户列表空则整行不渲染）；`selectedAccountId` 落库透传为 `Transaction.accountId`。
+- 账户管理页：`HomeScreen` 新增「管理账户」入口（`FullScreen.ACCOUNT_MANAGE` 六态之一）；增 / 改名经弹窗 OutlinedTextField + 内联错误（重名 `DuplicateAccountNameException` →「同名账户已存在」），删除「先算影响面再二次确认」两段式（文案「删除后 N 条记录将变为未指定」），FK `ON DELETE SET NULL` 由 DB 执行、不级联删除交易。
+- 报告口径与账户无关：增 / 改名 / 删除账户不触碰报告失效逻辑（无标脏联动）。
+
+### 20.7 接口扩展 fake 同步纪律
+
+- 接口扩展（`TransactionRepository.observeFiltered` 加 `accountFilter` 参；`AccountRepository` 新增 observeAccounts / getAccounts / observeBalances / addAccount / renameAccount / getDeleteImpact / deleteAccount / observeLastUsedAccountId / saveLastUsedAccountId 九方法）不设默认实现，须同步全部手写 fake。
+- `observeFiltered` 加参原子同步 14 处 `FakeTransactionRepository`：EnsureReportsUseCaseTest / GenerateReportUseCaseTest / AddParsedTransactionUseCaseTest / AddTransactionUseCaseTest / DeleteTransactionUseCaseTest / MonthlyBudgetEngineImplTest / MergeTagsUseCaseTest / ApplyOrganizeUseCaseTest（:domain）+ HomeViewModelTest / QuickAddViewModelTest / ReportViewModelTest / TransactionManageViewModelTest / TagManageViewModelTest / OrganizeViewModelTest（:ui）。
+- `data/.../TestFakes.kt`：`FakeTransactionDao.observeFiltered` / `observeFilteredByTags` 同步 `(accountMode, accountId)` 入参，并新增 `FakeAccountDao`；`FakeAccountRepository` 由各测试类内私有 fake 承载（HomeViewModelTest / QuickAddViewModelTest / TransactionManageViewModelTest / AccountManageViewModelTest / EnsureAccountsUseCaseTest），不在 TestFakes.kt 中承载。
+- 本次新增测试（`EnsureAccountsUseCaseTest`、`AccountRepositoryImplTest`）自带 fake 不计入同步清单；后续再扩接口先更新上述 fake 再编译。
+
+### 20.8 已知限制
+
+- 报告口径与账户无关：报告聚合不区分账户，无账户维度的报告标脏联动（属既定口径，非缺陷）。
+- 账户管理页「交易数」取最小实现：逐账户 `getDeleteImpact`（内部单条 COUNT）计数，账户数少、可接受；不做单条聚合 SQL。
+
+---
+
+## 21. 主题美化迭代交付记录
+
+> 触发时机：UI 美化迭代落地（卡通图主题参考），仅主题层改动、零业务逻辑；浅 / 深两套品牌色板整体替换 M3 默认配色。
+
+### 21.1 品牌色板决策
+
+- 来源：卡通图「主题 / 图标」仅作配色 / 风格灵感，非 UI 布局参考；整体气质樱粉 + 奶油暖调、扁平圆润、低饱和、温馨童趣。
+- 浅色：background #FFF8F6、primary 暖棕 #7A4F4F、secondary #E8879C（深化腮红粉保证可读）、tertiary #7FA37A（深化鼠尾草绿）、primaryContainer #FFE6E6、outline 暖灰系；error 沿用 M3 默认语义红（不混入粉色）。
+- 深色：background #2B2326、primary 提亮樱粉 #F2B8C6、onPrimary #4A2E33、primaryContainer #6B4450 等，整体替换 M3 默认深紫为深暖灰紫底 + 提亮樱粉；error 沿用 M3 深色默认语义红。
+- 前景 / 背景组合已做对比度自查（正文 ≥ 4.5:1）。
+
+### 21.2 Theme.kt 覆写策略
+
+- 以 M3 默认 lightColorScheme / darkColorScheme 为基底，仅覆写品牌 token（background / surface / surfaceVariant / primary / onPrimary / primaryContainer / onPrimaryContainer / secondary / secondaryContainer / tertiary / tertiaryContainer / onSurface / onSurfaceVariant / outline），覆盖全仓 91 处语义色调用、零回归。
+- onSecondary / onTertiary 未覆写：当前全仓零调用，保持 M3 默认基底派生，留待未来需要时再补。
+- `YUNAYU_SHAPES`：仅覆写 medium=16dp（卡片大圆角）、small=10dp（chips / 小控件协调），其余沿用默认。
+- `YUNAYU_TYPOGRAPHY`：仅覆写 headlineLarge / displayLarge / headlineMedium / titleLarge 四个金额专用 style——在默认 TextStyle 上仅加 fontWeight=Bold + fontFeatureSettings="tnum"（数字等宽），字号 / 行高 / 字族不动（防布局回归）；仅金额数字使用，勿扩展至通用文本。
+- ktlint 顶层 val SCREAMING_SNAKE_CASE 约束：命名 `YUNAYU_SHAPES` / `YUNAYU_TYPOGRAPHY`（ktlint property-naming 规则要求顶层 val 大写蛇形）。
+
+### 21.3 HeldFundsCard 视觉强化
+
+- 透明 Card（containerColor = Color.Transparent）+ 品牌渐变背景：浅色 primaryContainer→surface 两色，深色 primaryContainer→secondaryContainer→surface 三色，`isSystemInDarkTheme` 分支、静态无动画。
+- 签名 / 数据流零改动：`HeldFundsCard(heldCents, heldByAccount)` 入参与内部状态（超支 error 语义、按账户分组区、总计行）不变。
+
+### 21.4 已知限制
+
+- 视觉走查留待真机：浅 / 深两套主题的对比度自查为静态测算，真机走查（含 HeldFundsCard 渐变观感）留待设备验证。
+

@@ -84,6 +84,18 @@
    - 技术要点：预筛非根/叶子/countA+countB>3/同根优先/上限 30 对；LLM 每 15 对/请求三选判定；仅叶子可合并（tags 子树 CASCADE 语义约束）；TagMergeExecutor 单事务先迁移 transactions.tag_id 再删除冗余标签；合并后报告标脏
    - 验收要点：LLM 仅建议、合并必须用户确认
 
+### 账户体系与主题美化迭代（已随本次迭代交付）
+20. 账户体系（已随本次迭代交付）
+   - 方案：预置「微信 / 支付宝 / 银行卡」三账户；记账时「未指定 + 各账户」单选；首页「持有资金」按账户分组展示 + 总计；收支管理页新增账户筛选；首页新增「管理账户」全屏（增 / 改名 / 删除）
+   - 技术要点：schema v4→v5 新增 accounts 表（name 唯一索引）+ transactions.account_id 可空外键（ON DELETE SET NULL）+ 索引；预置账户双路径种子化（迁移 INSERT OR IGNORE + 启动 EnsureAccountsUseCase 幂等补齐）；DataStore account_prefs 记忆 lastUsedAccountId（预选校验 id ∈ 账户列表，否则回退未指定）
+   - 口径：总资金口径恒等——各账户余额之和 + 未指定账户 = 现有净结余（observeHeldCents SQL 零改动）；报告口径与账户无关（删除 / 改名不标脏报告）
+   - 验收要点：存量库升级补齐三账户；删除账户后交易归「未指定」（FK SET NULL）；重名 DuplicateAccountNameException 提示不崩；各账户余额求和等于总持有资金
+21. 视觉体系（已随本次迭代交付）
+   - 方案：以卡通图为主题参考（仅配色 / 风格，非布局），樱粉 + 奶油暖调品牌色，浅 / 深两套主题；卡片大圆角、金额数字加粗等宽
+   - 技术要点：Color.kt 浅 / 深品牌色板（浅色 background #FFF8F6、primary 暖棕 #7A4F4F、secondary #E8879C、tertiary #7FA37A；深色 background #2B2326、primary #F2B8C6，整体替换 M3 默认深紫）；Theme.kt 以 M3 默认基底覆品牌 token；HeldFundsCard 品牌渐变背景（浅两色 / 深三色随系统深浅分支）
+   - 口径：仅主题层改动，零业务逻辑；error 保留语义红；onSecondary / onTertiary 未覆写（当前全仓零调用）
+   - 验收要点：浅 / 深两套主题均可用；金额数字等宽对齐；无业务逻辑 / 测试断言改动
+
 ## 二、明确砍掉的功能（scope 红线，实现任何一项即视为违规）
 - 多成员/共享记账（个人使用无需权限体系）
 - 商家/项目管理（无 B 端对账需求）
