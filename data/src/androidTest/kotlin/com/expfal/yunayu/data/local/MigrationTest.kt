@@ -133,6 +133,47 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate4To5_createsAccountsAndRebuildsTransactionsWithAccountId() {
+        helper.createDatabase(TEST_DB, 4).apply {
+            execSQL(
+                "INSERT INTO tags (name, parent_id, sort_order, icon, created_at, updated_at) " +
+                    "VALUES ('学习', NULL, 0, '📚', 1, 1)",
+            )
+            execSQL(
+                "INSERT INTO transactions (amount_cents, type, note, tag_id, occurred_at, created_at) " +
+                    "VALUES (100, 'EXPENSE', '买书', 1, 1, 1)",
+            )
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 5, true, YunayuDatabase.MIGRATION_4_5)
+
+        // accounts 表存在且种子 3 行，名称与顺序对齐 AccountPresets.PRESET_NAMES
+        val names = mutableListOf<String>()
+        db.query("SELECT name FROM accounts ORDER BY id").use { cursor ->
+            while (cursor.moveToNext()) names += cursor.getString(0)
+        }
+        assertEquals(listOf("微信", "支付宝", "银行卡"), names)
+
+        // 唯一索引 index_accounts_name 与 transactions 的 index_transactions_account_id 均存在
+        db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_accounts_name'")
+            .use { cursor -> assertTrue(cursor.moveToFirst()) }
+        db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' " +
+                "AND name = 'index_transactions_account_id'",
+        ).use { cursor -> assertTrue(cursor.moveToFirst()) }
+
+        // transactions 数据完整，且历史交易 account_id 恒为 NULL
+        db.query("SELECT amount_cents, tag_id, account_id FROM transactions WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(100L, cursor.getLong(0))
+            assertEquals(1L, cursor.getLong(1))
+            assertTrue(cursor.isNull(2))
+        }
+    }
+
     private companion object {
         const val TEST_DB = "migration-test.db"
     }

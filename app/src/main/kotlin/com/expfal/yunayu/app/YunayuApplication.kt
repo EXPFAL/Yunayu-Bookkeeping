@@ -4,6 +4,7 @@ import android.app.Application
 import android.util.Log
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.repository.TagRepository
+import com.expfal.yunayu.domain.usecase.EnsureAccountsUseCase
 import com.expfal.yunayu.domain.usecase.EnsureIncomeTagsUseCase
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +27,9 @@ class YunayuApplication : Application() {
     @Inject
     lateinit var ensureIncomeTagsUseCase: EnsureIncomeTagsUseCase
 
+    @Inject
+    lateinit var ensureAccountsUseCase: EnsureAccountsUseCase
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onCreate() {
@@ -33,6 +37,7 @@ class YunayuApplication : Application() {
         verifyDatabase()
         ensureReports()
         ensureIncomeTags()
+        ensureAccounts()
     }
 
     /** 查询种子化根标签，经 Logcat（tag: YunayuDB）确认 Room 初始化成功。 */
@@ -63,9 +68,18 @@ class YunayuApplication : Application() {
         }
     }
 
+    /** 启动时补齐预置账户体系（独立协程，不阻塞建库校验，失败仅记日志）。 */
+    private fun ensureAccounts() {
+        applicationScope.launch {
+            runCatching { ensureAccountsUseCase() }
+                .onFailure { Log.e(ACCOUNTS_TAG, "预置账户补齐失败", it) }
+        }
+    }
+
     companion object {
         private const val TAG = "YunayuDB"
         private const val REPORT_TAG = "YunayuReport"
         private const val INCOME_TAGS_TAG = "YunayuIncomeTags"
+        private const val ACCOUNTS_TAG = "YunayuAccounts"
     }
 }

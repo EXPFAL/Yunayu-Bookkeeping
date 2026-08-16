@@ -23,6 +23,7 @@ class AddParsedTransactionUseCase(
                 type = draft.type,
                 note = draft.note,
                 tagId = draft.tagId,
+                accountId = draft.accountId,
                 occurredAt = draft.occurredAtEpochMillis,
             ),
         )

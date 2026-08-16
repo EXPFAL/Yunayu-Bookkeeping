@@ -8,7 +8,8 @@ import com.expfal.yunayu.domain.repository.TransactionRepository
  * 新增一笔交易，支撑「3秒极速记账」的快捷录入。
  *
  * 金额单位为「分」（Long）；[type] 指定收支方向，默认支出；[tagId] 为可空学业标签外键；
- * 发生时间默认取当前毫秒。返回新交易的主键。
+ * [accountId] 为可空账户外键（默认 null 表示「未指定账户」）；发生时间默认取当前毫秒。
+ * 返回新交易的主键。
  */
 class AddTransactionUseCase(
     private val transactionRepository: TransactionRepository,
@@ -20,12 +21,14 @@ class AddTransactionUseCase(
         tagId: Long?,
         occurredAt: Long = System.currentTimeMillis(),
         type: TransactionType = TransactionType.EXPENSE,
+        accountId: Long? = null,
     ): Long = transactionRepository.add(
         Transaction(
             amountCents = amountCents,
             type = type,
             note = null,
             tagId = tagId,
+            accountId = accountId,
             occurredAt = occurredAt,
         ),
     )

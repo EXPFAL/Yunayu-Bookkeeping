@@ -4,29 +4,35 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.ReportDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
+import com.expfal.yunayu.data.local.entity.AccountEntity
 import com.expfal.yunayu.data.local.entity.ReportEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
+import com.expfal.yunayu.domain.model.AccountPresets
 
 /**
- * Yunayu 数据库。包含 tags / transactions / reports 三张表（月度预算经 DataStore 存储，不落库）。
+ * Yunayu 数据库。包含 accounts / tags / transactions / reports 四张表（月度预算经 DataStore 存储，不落库）。
  *
  * Schema 变更策略：version 递增 + 显式 Migration，禁止 fallbackToDestructiveMigration
  * （用户数据不可丢失）；schema 经 exportSchema 输出至 data/schemas。
  */
 @Database(
     entities = [
+        AccountEntity::class,
         TagEntity::class,
         TransactionEntity::class,
         ReportEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class YunayuDatabase : RoomDatabase() {
+
+    abstract fun accountDao(): AccountDao
 
     abstract fun tagDao(): TagDao
 
@@ -199,6 +205,91 @@ abstract class YunayuDatabase : RoomDatabase() {
                     db.execSQL(
                         "CREATE UNIQUE INDEX IF NOT EXISTS `index_reports_report_type_period_key` " +
                             "ON `reports` (`report_type`, `period_key`)",
+                    )
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /**
+         * Schema v4 → v5 迁移：新增 accounts 账户表 + 种子预置账户，transactions 表重建以新增
+         * account_id 外键列。
+         *
+         * 1. 新建 accounts 表 + 唯一索引 (name)。
+         * 2. 种子预置账户（单一数据源 [AccountPresets.PRESET_NAMES]）。
+         * 3. transactions 表重建（8 列：原 7 列 + account_id 置于 tag_id 之后），历史数据
+         *    account_id 恒为 NULL（历史不导入账户归属）。
+         *
+         * SQL 与 Room 由 [AccountEntity] / [TransactionEntity] 生成的 schema 严格一致（列名 / 类型 /
+         * 非空约束 / 列顺序 / 外键 / 索引），整体包事务，防止半迁移状态。
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Room 2.6.1 不会自动为 migration 包事务：任何一条语句中断都会留下半迁移状态。
+                db.beginTransaction()
+                try {
+                    // 1) 新建 accounts 表 + 唯一索引 (name)
+                    db.execSQL(
+                        "CREATE TABLE `accounts` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`name` TEXT NOT NULL, " +
+                            "`created_at` INTEGER NOT NULL)",
+                    )
+                    db.execSQL(
+                        "CREATE UNIQUE INDEX IF NOT EXISTS `index_accounts_name` ON `accounts` (`name`)",
+                    )
+
+                    // 2) 种子预置账户（单一数据源 AccountPresets.PRESET_NAMES）
+                    val now = System.currentTimeMillis()
+                    val seedSql = buildString {
+                        append("INSERT OR IGNORE INTO accounts(name, created_at) VALUES ")
+                        append(AccountPresets.PRESET_NAMES.joinToString(", ") { "('$it', ?)" })
+                    }
+                    db.execSQL(seedSql, Array(AccountPresets.PRESET_NAMES.size) { now as Any? })
+
+                    // 3) transactions 表重建：新增 account_id 列（置于 tag_id 之后），
+                    // 外键写最终表名（tags / accounts），RENAME 后引用保持有效
+                    db.execSQL(
+                        "CREATE TABLE `transactions_new` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`amount_cents` INTEGER NOT NULL, " +
+                            "`type` TEXT NOT NULL, " +
+                            "`note` TEXT, " +
+                            "`tag_id` INTEGER, " +
+                            "`account_id` INTEGER, " +
+                            "`occurred_at` INTEGER NOT NULL, " +
+                            "`created_at` INTEGER NOT NULL, " +
+                            "FOREIGN KEY(`tag_id`) REFERENCES `tags`(`id`) " +
+                            "ON UPDATE NO ACTION ON DELETE SET NULL, " +
+                            "FOREIGN KEY(`account_id`) REFERENCES `accounts`(`id`) " +
+                            "ON UPDATE NO ACTION ON DELETE SET NULL )",
+                    )
+                    // 历史数据 account_id 恒 NULL（历史不导入账户归属），无需 1_2 的备份表环节：
+                    // 此处 DROP 的是子表 transactions（非被其它表外键引用的父表），不会触发其它表
+                    // 对本表的 SET NULL，故直接重建即可。
+                    db.execSQL(
+                        "INSERT INTO `transactions_new` " +
+                            "(`id`, `amount_cents`, `type`, `note`, `tag_id`, `account_id`, `occurred_at`, `created_at`) " +
+                            "SELECT `id`, `amount_cents`, `type`, `note`, `tag_id`, NULL, `occurred_at`, `created_at` " +
+                            "FROM `transactions`",
+                    )
+                    db.execSQL("DROP TABLE `transactions`")
+                    db.execSQL("ALTER TABLE `transactions_new` RENAME TO `transactions`")
+
+                    // 4) 重建索引（DROP transactions 会连带删除其上的索引）
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_transactions_tag_id` ON `transactions` (`tag_id`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_transactions_occurred_at` ON `transactions` (`occurred_at`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_transactions_occurred_at_type` ON `transactions` (`occurred_at`, `type`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_transactions_account_id` ON `transactions` (`account_id`)",
                     )
                     db.setTransactionSuccessful()
                 } finally {

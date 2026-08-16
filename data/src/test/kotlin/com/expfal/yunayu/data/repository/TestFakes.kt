@@ -1,11 +1,52 @@
 package com.expfal.yunayu.data.repository
 
+import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
+import com.expfal.yunayu.data.local.entity.AccountEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
+
+/** [AccountDao] 手写 fake：记录插入/重命名/删除调用，可注入唯一约束异常。 */
+class FakeAccountDao : AccountDao {
+
+    var allAccounts: List<AccountEntity> = emptyList()
+    var observeAllFlow: Flow<List<AccountEntity>> = flowOf(emptyList())
+    val insertedAccounts = mutableListOf<AccountEntity>()
+    var nextInsertId: Long = 1L
+    var insertError: Throwable? = null
+    var countByNameResult: Int = 0
+    val countByNameCalls = mutableListOf<String>()
+    val renameCalls = mutableListOf<Pair<Long, String>>()
+    var renameResult: Int = 1
+    val deleteCalls = mutableListOf<Long>()
+
+    override fun observeAll(): Flow<List<AccountEntity>> = observeAllFlow
+
+    override suspend fun getAll(): List<AccountEntity> = allAccounts
+
+    override suspend fun insert(account: AccountEntity): Long {
+        insertError?.let { throw it }
+        insertedAccounts += account
+        return nextInsertId
+    }
+
+    override suspend fun countByName(name: String): Int {
+        countByNameCalls += name
+        return countByNameResult
+    }
+
+    override suspend fun renameById(id: Long, name: String): Int {
+        renameCalls += id to name
+        return renameResult
+    }
+
+    override suspend fun deleteById(id: Long) {
+        deleteCalls += id
+    }
+}
 
 /** [TagDao] 手写 fake：按 parentId 返回预置子节点，记录新增/重命名/删除调用。 */
 class FakeTagDao : TagDao {
@@ -75,9 +116,9 @@ class FakeTransactionDao : TransactionDao {
     val countByTagIdsCalls = mutableListOf<List<Long>>()
     val deletedByIdCalls = mutableListOf<Long>()
     var filteredRowsFlow: Flow<List<TransactionDao.RecentTransactionRow>> = flowOf(emptyList())
-    val filteredCalls = mutableListOf<Triple<Long?, Long?, String?>>()
+    val filteredCalls = mutableListOf<FilterCall>()
     var filteredByTagsRowsFlow: Flow<List<TransactionDao.RecentTransactionRow>> = flowOf(emptyList())
-    val filteredByTagsCalls = mutableListOf<Pair<Triple<Long?, Long?, String?>, List<Long>>>()
+    val filteredByTagsCalls = mutableListOf<FilterByTagsCall>()
 
     override suspend fun insert(transaction: TransactionEntity): Long {
         inserted += transaction
@@ -138,8 +179,10 @@ class FakeTransactionDao : TransactionDao {
         startInclusiveMs: Long?,
         endExclusiveMs: Long?,
         noteKeyword: String?,
+        accountMode: Int,
+        accountId: Long?,
     ): Flow<List<TransactionDao.RecentTransactionRow>> {
-        filteredCalls += Triple(startInclusiveMs, endExclusiveMs, noteKeyword)
+        filteredCalls += FilterCall(startInclusiveMs, endExclusiveMs, noteKeyword, accountMode, accountId)
         return filteredRowsFlow
     }
 
@@ -148,8 +191,10 @@ class FakeTransactionDao : TransactionDao {
         endExclusiveMs: Long?,
         noteKeyword: String?,
         tagIds: List<Long>,
+        accountMode: Int,
+        accountId: Long?,
     ): Flow<List<TransactionDao.RecentTransactionRow>> {
-        filteredByTagsCalls += Triple(startInclusiveMs, endExclusiveMs, noteKeyword) to tagIds
+        filteredByTagsCalls += FilterByTagsCall(startInclusiveMs, endExclusiveMs, noteKeyword, tagIds, accountMode, accountId)
         return filteredByTagsRowsFlow
     }
 
@@ -190,6 +235,18 @@ class FakeTransactionDao : TransactionDao {
         occurredAtsByTagIdsCalls += tagIds
         return occurredAtsByTagIdsResult
     }
+
+    var balancesByAccountFlow: Flow<List<TransactionDao.HeldByAccountRow>> = flowOf(emptyList())
+    var countByAccountIdResult: Int = 0
+    val countByAccountIdCalls = mutableListOf<Long>()
+
+    override fun observeBalancesByAccount(): Flow<List<TransactionDao.HeldByAccountRow>> =
+        balancesByAccountFlow
+
+    override suspend fun countByAccountId(accountId: Long): Int {
+        countByAccountIdCalls += accountId
+        return countByAccountIdResult
+    }
 }
 
 /** [TagMergeExecutor] 手写 fake：记录 merge 调用，可配置异常。 */
@@ -203,3 +260,22 @@ class FakeTagMergeExecutor : TagMergeExecutor {
         mergeCalls += keepTagId to dropTagId
     }
 }
+
+/** 一次 [TransactionDao.observeFiltered]（无标签）调用的入参快照。 */
+data class FilterCall(
+    val startInclusiveMs: Long?,
+    val endExclusiveMs: Long?,
+    val noteKeyword: String?,
+    val accountMode: Int,
+    val accountId: Long?,
+)
+
+/** 一次 [TransactionDao.observeFilteredByTags] 调用的入参快照。 */
+data class FilterByTagsCall(
+    val startInclusiveMs: Long?,
+    val endExclusiveMs: Long?,
+    val noteKeyword: String?,
+    val tagIds: List<Long>,
+    val accountMode: Int,
+    val accountId: Long?,
+)

@@ -15,6 +15,18 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TransactionDao {
 
+    /** 账户筛选模式常量（见 [observeFiltered] / [observeFilteredByTags] 的 `accountMode` 参数）。 */
+    companion object {
+        /** 全部账户：不设账户过滤条件。 */
+        const val ACCOUNT_MODE_ALL = 0
+
+        /** 仅未指定账户：`account_id IS NULL`。 */
+        const val ACCOUNT_MODE_UNSPECIFIED = 1
+
+        /** 指定账户：`account_id = accountId`。 */
+        const val ACCOUNT_MODE_SPECIFIC = 2
+    }
+
     /** 最近常用标签聚合行：标签实体 + 使用次数。 */
     data class RecentTagRow(
         @Embedded val tag: TagEntity,
@@ -38,6 +50,13 @@ interface TransactionDao {
     data class CategoryExpenseRow(
         @ColumnInfo(name = "tag_name") val tagName: String?,
         @ColumnInfo(name = "cents") val cents: Long,
+    )
+
+    /** 按账户聚合的持有资金行：账户 id（null=未指定）、账户名（null=未指定）与净结余（分）。 */
+    data class HeldByAccountRow(
+        @ColumnInfo(name = "account_id") val accountId: Long?,
+        @ColumnInfo(name = "account_name") val accountName: String?,
+        @ColumnInfo(name = "balance_cents") val balanceCents: Long,
     )
 
     @Insert
@@ -120,8 +139,8 @@ interface TransactionDao {
     fun observeRecent(limit: Int): Flow<List<RecentTransactionRow>>
 
     /**
-     * 观察满足时间窗与备注关键字过滤的交易（含标签名与图标，不做标签过滤），按发生时间倒序。
-     * 时间参数为 null 表示不设对应边界；关键字为 null 表示不按备注过滤。
+     * 观察满足时间窗、账户、备注关键字过滤的交易（含标签名与图标，不做标签过滤），按发生时间倒序。
+     * 时间参数为 null 表示不设对应边界；关键字为 null 表示不按备注过滤；`accountMode` 语义见 companion。
      */
     @Query(
         "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
@@ -129,17 +148,21 @@ interface TransactionDao {
             "WHERE (:startInclusiveMs IS NULL OR t.occurred_at >= :startInclusiveMs) " +
             "AND (:endExclusiveMs IS NULL OR t.occurred_at < :endExclusiveMs) " +
             "AND (:noteKeyword IS NULL OR t.note LIKE '%' || :noteKeyword || '%' ESCAPE '\\') " +
+            "AND (:accountMode = 0 OR (:accountMode = 1 AND t.account_id IS NULL) " +
+            "OR (:accountMode = 2 AND t.account_id = :accountId)) " +
             "ORDER BY t.occurred_at DESC, t.id DESC",
     )
     fun observeFiltered(
         startInclusiveMs: Long?,
         endExclusiveMs: Long?,
         noteKeyword: String?,
+        accountMode: Int,
+        accountId: Long?,
     ): Flow<List<RecentTransactionRow>>
 
     /**
-     * 观察满足时间窗、备注关键字与标签集合过滤的交易（含标签名与图标），按发生时间倒序。
-     * 时间参数为 null 表示不设对应边界；关键字为 null 表示不按备注过滤。
+     * 观察满足时间窗、账户、备注关键字与标签集合过滤的交易（含标签名与图标），按发生时间倒序。
+     * 时间参数为 null 表示不设对应边界；关键字为 null 表示不按备注过滤；`accountMode` 语义见 companion。
      */
     @Query(
         "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
@@ -147,6 +170,8 @@ interface TransactionDao {
             "WHERE (:startInclusiveMs IS NULL OR t.occurred_at >= :startInclusiveMs) " +
             "AND (:endExclusiveMs IS NULL OR t.occurred_at < :endExclusiveMs) " +
             "AND (:noteKeyword IS NULL OR t.note LIKE '%' || :noteKeyword || '%' ESCAPE '\\') " +
+            "AND (:accountMode = 0 OR (:accountMode = 1 AND t.account_id IS NULL) " +
+            "OR (:accountMode = 2 AND t.account_id = :accountId)) " +
             "AND t.tag_id IN (:tagIds) " +
             "ORDER BY t.occurred_at DESC, t.id DESC",
     )
@@ -155,6 +180,8 @@ interface TransactionDao {
         endExclusiveMs: Long?,
         noteKeyword: String?,
         tagIds: List<Long>,
+        accountMode: Int,
+        accountId: Long?,
     ): Flow<List<RecentTransactionRow>>
 
     /** 统计挂在一组标签下的交易数（删除影响面提示）。 */
@@ -197,4 +224,21 @@ interface TransactionDao {
     /** 一次性获取挂在一组标签下的交易的 `occurred_at` 列表（供合并前报告标脏）。 */
     @Query("SELECT occurred_at FROM transactions WHERE tag_id IN (:tagIds)")
     suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long>
+
+    /**
+     * 观察按账户分组的持有资金（分）：`未指定账户（account_id 为 NULL）` 也作为一组。
+     * 各分组净结余求和等于 [observeHeldCents] 的全历史净结余。
+     */
+    @Query(
+        "SELECT t.account_id AS account_id, a.name AS account_name, " +
+            "COALESCE(SUM(CASE WHEN t.type = 'INCOME' THEN t.amount_cents ELSE -t.amount_cents END), 0) " +
+            "AS balance_cents " +
+            "FROM transactions t LEFT JOIN accounts a ON a.id = t.account_id " +
+            "GROUP BY t.account_id",
+    )
+    fun observeBalancesByAccount(): Flow<List<HeldByAccountRow>>
+
+    /** 统计挂在一个账户下的交易数（删除影响面提示）。 */
+    @Query("SELECT COUNT(*) FROM transactions WHERE account_id = :accountId")
+    suspend fun countByAccountId(accountId: Long): Int
 }
