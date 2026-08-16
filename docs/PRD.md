@@ -60,10 +60,29 @@
    - 技术要点：共享折叠树组件 TagTreeList（rememberSaveable 展开集合）；快速记账「更多分类」弹层改用之；数字与 NL 模式共用
    - 迭代增强（已随本次迭代交付）：父类分组头 titleSmall→titleMedium(16sp)、颜色 onSurface→onSurfaceVariant，与子类 bodyMedium(14sp)/onSurface 形成字号+颜色双重层级（选中态主色+Check、分隔线、子类 32dp 缩进不变）；上滑后展开/收起滚动位置跳变修复——显式 rememberLazyListState + toggle 前记录 firstVisibleItemIndex/offset + LaunchedEffect(expandedRootIds) scrollToItem 恢复 + heightIn(max=420.dp) 稳定 ModalBottomSheet 尺寸，QuickAdd 单选与收支管理多选两场景共用
 15. 无匹配标签应对（已随本次迭代交付）
+   > 已被本次迭代（PRD §17「NL 未命中直通未分类」）取代，相关组件已删除。
    - 方案：未分类兜底（tagId 可空落库现状固化 + 显式用例）+ 弹层新建标签（QuickAddSheet TagPickerSheet「新建标签」入口 → QuickAddNewTag 表单：命名+选根类+创建即选中落库）+ AI 辅助决策（NL 未匹配短语自动建议卡、数字模式新建表单「AI 推荐所属根类」仅预填）
    - 技术要点：新建走 TagRepository.addSubTag，重名 DuplicateTagNameException→「同名标签已存在」不崩；AI 复用 NLTransactionParser.generate 接缝，新增 domain 纯函数链 TagSuggestionPromptBuilder / TagSuggestionOutputParser + SuggestNewTagUseCase（任何失败返回 null 静默降级、20s 超时）；AI 仅建议、创建必须用户确认、绝不自动落库
    - 口径：NL 建议确认后「创建并使用」一次完成创建+选中+落库，拒绝降级未分类/手动；refreshSuggestedTags 增 preselectTagId 防新建后选中被异步覆盖
    - 验收要点：无匹配标签仍可正常记账（未分类）；重名新建不崩溃且提示清晰；AI 建议失败静默降级不阻塞记账
+
+### 标签体系与 AI 治理迭代（已随本次迭代交付）
+16. 独立收入标签体系（已随本次迭代交付）
+   - 方案：预置「收入」根类 + 6 精简子标签（生活费/还款/AA收款/理财收益/兼职经营/其他收入），收入与支出两套体系完全隔离；收入根在标签管理页自然展示且只读
+   - 技术要点：运行时幂等种子化（EnsureIncomeTagsUseCase 挂 Application.onCreate 第三协程，仿 ensureReports；不走 migration、不改 seedCallback——后者仅新建库生效）；addRootTag 白名单 + 内存判重（SQLite 唯一索引对 NULL parent 不生效的空洞）；收支隔离——分类推荐回退 type 感知、QuickAdd 选择层按 type 过滤（收入仅收入体系、支出四根类不变）、收支管理页筛选树保持全量
+   - 验收要点：首启与存量库均补齐收入根与种子子标签；收入记账仅见收入体系标签；收入根只读、不可改名/删除/拖拽
+17. NL 未命中直通未分类（已随本次迭代交付）
+   - 方案：NL 命中已有标签自动挂载保留不动；未命中直接 tagId=null 落库为「未分类」，零打断（替代上轮建议卡）；移除数字模式新建表单与单条 AI 建议链
+   - 技术要点：删除 8 文件（SuggestNewTagUseCase / TagSuggestionPromptBuilder / TagSuggestionOutputParser / TagSuggestion 模型 + 3 测试 + QuickAddNewTag UI）；保留瘦身版 createSubTag / addSubTag 链路与 NLTransactionParser.generate 接缝，供整理复用
+   - 验收要点：未命中仍可正常记账且无多余弹窗打断；命中自动挂载不回归
+18. 整理入口与批量分类（已随本次迭代交付）
+   - 方案：收支管理页顶部「整理 N」按钮；未分类记录分批送 LLM 分类，逐条接受/修改/拒绝，确认后单事务批量应用
+   - 技术要点：未分类聚合 tag_id IS NULL 走既有索引；分批 25 条串行（备注优先 + 金额/时间辅助，收入记录强制收入体系白名单）；新建标签走 addSubTag（重名复用改挂载）；批级超时 40s + 重试 1 次、Job 句柄 + 批边界取消 + 可重入续整理；applyTagAssignments 单事务；整理后覆盖窗口报告按去重 occurredAt 循环置 FAILED（ReportRepository 零接口改动）
+   - 验收要点：进度 x/y；部分成功不丢数据（失败条目保留未分类可重试）；无 API 明确提示不崩
+19. 标签整合机制（已随本次迭代交付）
+   - 方案：全标签库适用；FindMergeCandidatesUseCase 预筛 + LLM 批量判定重复对；入口 = 标签管理页「整合」+ 整理完成后 best-effort 检测提示；确认后合并
+   - 技术要点：预筛非根/叶子/countA+countB>3/同根优先/上限 30 对；LLM 每 15 对/请求三选判定；仅叶子可合并（tags 子树 CASCADE 语义约束）；TagMergeExecutor 单事务先迁移 transactions.tag_id 再删除冗余标签；合并后报告标脏
+   - 验收要点：LLM 仅建议、合并必须用户确认
 
 ## 二、明确砍掉的功能（scope 红线，实现任何一项即视为违规）
 - 多成员/共享记账（个人使用无需权限体系）

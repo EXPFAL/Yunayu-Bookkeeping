@@ -628,6 +628,8 @@ interface SemesterBudgetEngine {
 
 ## 18. 标签与分类四项迭代交付记录
 
+> 已被本次迭代（SCAFFOLD §19.3「NL 未命中直通未分类」）取代，相关组件已删除。
+
 > 触发时机：P1「收入分类推荐」、P2「无匹配标签应对（A+B+AI）」与 TagTreeList 层级视觉 / 滚动修复落地。零 schema 变更（复用既有 `(occurred_at, type)` 复合索引）。
 
 ### 18.1 type 感知推荐契约
@@ -672,5 +674,68 @@ interface SemesterBudgetEngine {
 
 - AI 建议为「未匹配标签」罕见路径的第二跳网络请求，最坏 20s 超时（`TAG_SUGGESTION_TIMEOUT_MILLIS`）；超时/失败均静默降级，不阻塞记账主流程。
 - 推荐 type 过滤复用既有 `(occurred_at, type)` 复合索引；更优的 `(type, occurred_at)` 前缀索引属未来 schema 项，当前单用户万笔量级无需。
-- 报告失效机制沿用 §17.3：新建/删除标签不触碰 reports 失效逻辑，仅删除交易触发置 FAILED。
+- 报告失效机制沿用 §17.3：新建/删除标签不触碰 reports 失效逻辑，仅删除交易触发置 FAILED（合并标签的标脏为 §19 新增语义）。
+
+---
+
+## 19. 标签体系与 AI 治理迭代交付记录
+
+> 触发时机：P1「独立收入标签体系 / NL 未命中直通未分类 / 整理入口 + 批量分类」与 P2「标签整合机制」落地。零 schema 变更（复用既有 `tags` 表、`(parent_id, name)` 唯一索引、`transactions.tag_id` 外键与 `(occurred_at, type)` 复合索引）。
+
+### 19.1 收入种子化机制与 SQLite NULL 唯一空洞对策
+
+- **运行时幂等种子化**：`EnsureIncomeTagsUseCase` 挂 `YunayuApplication.onCreate` 第三协程（`ensureIncomeTags()`，仿 `ensureReports()`），不走 migration、不改 `seedCallback`（后者仅新建库事务内生效）。启动时补齐「收入」根类与 6 种子子标签：根类仅经 `TagRepository.addRootTag` 白名单创建，子标签按名幂等补齐（已存在跳过、竞态命中 `DuplicateTagNameException` 计入 skipped、其余异常上抛）。
+- **IncomeTags 单一数据源**：`IncomeTags.INCOME_ROOT_NAME = "收入"`、`INCOME_ROOT_ICON = "💰"`、`INCOME_SEED_SUB_TAGS = [生活费, 还款, AA收款, 理财收益, 兼职经营, 其他收入]`（列表顺序即 sortOrder 递增）。种子化、收支过滤、LLM 白名单统一引用本处常量，避免根名/子标签/图标多处硬编码漂移。
+- **addRootTag 白名单 + 内存判重**：`TagRepositoryImpl.addRootTag` 仅接受 `IncomeTags.INCOME_ROOT_NAME`（白名单外抛 `IllegalArgumentException`）；因 SQLite 唯一索引 `(parent_id, name)` 对 `parent_id IS NULL` 不生效（NULL 互不相等，根节点重名不会被索引拦截，见 §7.2），根级重名须内存判重（`getAll().any { it.parentId == null && it.name == trimmed }` 命中抛 `DuplicateTagNameException`）。
+- **根只读闭环**：收入根自然纳入 `TagManageScreen` 展示，根只读规则沿用 §11.3（`renameTag` / `deleteTag` 对 `parentId == null` 抛异常，UI 不暴露入口 + 仓储层拒绝双重防护）。
+
+### 19.2 收支隔离契约
+
+- **推荐回退 type 感知**：`GetRecentCategoriesUseCase` 回退按 `type` 分支——支出仅用四大根类补足（排除收入根）、收入仅用收入根及其子标签补足；`getRecentUsedTags` 已按 type 独立统计（§18.1），收入与支出语境互不污染。
+- **选择层按 type 过滤**：`QuickAddViewModel.loadAllTagsByRoot(type)` 收入仅保留收入根、支出排除收入根，QuickAdd「更多分类」选择层收入仅见收入体系、支出四根类不变。
+- **管理页筛选树全量**：`TransactionManageViewModel.loadAllTagsByRoot` 不做 type 过滤，收支管理页标签筛选树保持全量（收入根 + 支出四根类），筛选语义不受收支方向影响。
+
+### 19.3 NL 未命中直通未分类（范围收窄）
+
+- **命中保留**：NL 解析命中已有标签自动挂载不动（`ParseNaturalLanguageTransactionUseCase.resolveTagId` 归一匹配候选集）。
+- **未命中直通**：未命中 `tagPhrase` → `draft.tagId = null` → 落库 `tag_id IS NULL`（未分类），零打断，替代上轮建议卡。
+- **移除数字模式新建表单与单条 AI 建议链**：删除 8 文件——`domain/nl/SuggestNewTagUseCase.kt`、`TagSuggestionPromptBuilder.kt`、`TagSuggestionOutputParser.kt`、`nl/model/TagSuggestion.kt` + 对应 3 个测试 + `ui/screen/quickadd/QuickAddNewTag.kt`。
+- **保留瘦身版能力**：`QuickAddViewModel.createSubTag`、`TagRepository.addSubTag` 链路、`NLTransactionParser.generate` 接缝保留，供整理功能复用。
+
+### 19.4 整理批量链路
+
+- **入口与未分类聚合**：收支管理页 `TopAppBar`「整理 N」按钮（N = `observeUncategorizedCount`，`tag_id IS NULL` 走既有索引），点击进入 `OrganizeScreen`。
+- **分批策略**：`BATCH_SIZE = 25` 条串行调 LLM（`OrganizeSuggestUseCase`）；提示词要求分类判断优先看备注、金额与时间仅作辅助；收入记录强制收入体系白名单（`OrganizePromptBuilder` incomeRule + `ApplyOrganizeUseCase.resolveCreate` 收入记录 `rootName` 非「收入」即拒绝）。
+- **逐条接受/修改/拒绝**：REVIEWING 阶段逐条决定；MODIFY 转 ATTACH 语义（仅可选已有标签，不允许新建）。
+- **事务边界 applyTagAssignments**：确认后 `ApplyOrganizeUseCase` 按 tagId 分组，`TransactionDao.applyTagAssignments`（`@Transaction`）单事务批量应用，任一组失败整体回滚；新建标签走 `addSubTag`（重名 `DuplicateTagNameException` 复用同名标签改挂载）。
+- **进度与取消**：进度 `doneBatches/totalBatches`（x/y）；批级超时 `BATCH_TIMEOUT_MILLIS = 40_000L` + 重试 1 次（`BATCH_RETRY_ATTEMPTS = 2`）；`organizeJob` 句柄 + 批边界 `ensureActive()` 取消 + `retryFailed` 对失败集可重入续整理。
+- **部分成功不丢数据**：失败条目经 `failedRecordIds` 透出并保留未分类可重试；无 API 前置检查（`parser.isAvailable()`）明确 `ERROR_NO_API` 提示不崩。
+- **报告标脏**：整理应用后对受影响记录去重 `occurredAt` 循环 `ReportRepository.invalidateWhereWindowContains`（标脏失败不阻断，仅 `CancellationException` 重抛）；ReportRepository 零接口改动（复用 §16/§17.3 既有方法）。
+
+### 19.5 TagMergeExecutor 接缝设计与叶子合并约束
+
+- **FindMergeCandidatesUseCase 预筛**：加载全量标签 → 排除根类与带子级者（仅保留叶子）→ 经 `getDeleteImpact` 取每叶子直接交易记录数 → 预筛 `countA + countB > 3` → 同根优先、按合计降序取上限 `MAX_PAIRS = 30` 对 → 每 `BATCH_SIZE = 15` 对为一批调 LLM → 解析并过滤 `KEEP_BOTH` 返回合并候选。
+- **LLM 批量判定**：`MergeCandidatePromptBuilder` 三选（`A_INTO_B` 丢弃 A 保留 B / `B_INTO_A` 丢弃 B 保留 A / `KEEP_BOTH` 两者保留），把握不足一律 KEEP_BOTH；LLM 仅建议、合并必须用户确认（`TagManageViewModel.confirmMerge`）。
+- **入口**：标签管理页「整合」按钮 + 整理完成后 best-effort 检测提示（`triggerMergeHint`，失败静默不计、不阻塞 DONE 态）。
+- **TagMergeExecutor 接缝**：`TagRepository.mergeTags`（domain）完成业务校验（两标签存在、均非根、drop 为叶子、不可合并自身），委托 `TagMergeExecutor`（data，`RoomTagMergeExecutor`）经 `database.withTransaction` 先迁移 `transactions.tag_id` 再删除冗余标签（同事务原子）。顺序敏感：先迁移后删除，否则外键 `ON DELETE SET_NULL` 先把迁移目标交易置空，合并语义被破坏。
+- **仅叶子可合并**：tags 子树外键 `ON DELETE CASCADE`，带子级删除会误删整棵子树，故 `mergeTags` 对 `all.any { it.parentId == dropTagId }` 抛 `IllegalArgumentException`。
+- **合并后报告标脏**：`MergeTagsUseCase` 合并前先 `getOccurredAtsByTagIds` 快照 drop 标签直接挂载交易的 `occurredAt`，合并后逐个 `invalidateWhereWindowContains`（标脏失败不阻断）。
+
+### 19.6 接口扩展 fake 同步纪律
+
+- 接口扩展（`TagRepository` 新增 `addRootTag` / `mergeTags`；`TransactionRepository` 新增 `observeUncategorizedCount` / `getUncategorized` / `assignTags` 三方法 + `getOccurredAtsByTagIds` 一方法）不设默认实现，须同步更新全部手写 fake：
+  - `FakeTagRepository` 10 处（addRootTag + mergeTags）：`GetRecentCategoriesUseCaseTest`、`FindMergeCandidatesUseCaseTest`、`EnsureIncomeTagsUseCaseTest`、`ApplyOrganizeUseCaseTest`、`MergeTagsUseCaseTest`、`ParseNaturalLanguageTransactionUseCaseTest`、`QuickAddViewModelTest`、`TransactionManageViewModelTest`、`TagManageViewModelTest`、`OrganizeViewModelTest`。
+  - `FakeTransactionRepository` 14 处（observeUncategorizedCount / getUncategorized / assignTags / getOccurredAtsByTagIds）：`EnsureReportsUseCaseTest`、`GenerateReportUseCaseTest`、`AddParsedTransactionUseCaseTest`、`AddTransactionUseCaseTest`、`DeleteTransactionUseCaseTest`、`MonthlyBudgetEngineImplTest`、`HomeViewModelTest`、`QuickAddViewModelTest`、`ReportViewModelTest`、`TransactionManageViewModelTest`、`TagManageViewModelTest`、`MergeTagsUseCaseTest`、`OrganizeViewModelTest`、`ApplyOrganizeUseCaseTest`。
+  - `data/.../TestFakes.kt`：`FakeTransactionDao` 同步 4 个 DAO 方法（`observeUncategorizedCount` / `getUncategorizedSnapshot` / `applyTagAssignments` / `getOccurredAtsByTagIds`），并新增 `FakeTagMergeExecutor`。
+- 本次新增测试（`EnsureIncomeTagsUseCaseTest` / `FindMergeCandidatesUseCaseTest` / `ApplyOrganizeUseCaseTest` / `MergeTagsUseCaseTest` / `OrganizeViewModelTest` 等）自带 fake，其中既有文件仍需同步；后续再扩接口，先更新上述 fake 再编译。
+
+### 19.7 已知限制
+
+- **AI 批量时延串行最坏分钟级**：25 条/批 × 40s 超时 × 2 次尝试，未分类量大时整理耗时为批数 × 最坏 80s，无并发批次。
+- **withTimeoutOrNull 无法打断阻塞读**：`CompletionRequester` 的阻塞 HTTP read 超时依赖底层 readTimeout，协程 `withTimeoutOrNull` 仅作外层兜底，不能真正中断已阻塞的 IO 调用。
+- **并发整理窗口**：整理期间新增的未分类记录不在本次快照内，需退出重进整理页重新快照。
+- **标签整合仅叶子**：带子级的标签不可合并（CASCADE 语义约束），需先处理其子树。
+- **OrganizePromptBuilder note JSON 转义已补齐**：本迭代起备注经 `escapeJsonString` 转义（反斜杠 / 双引号 / 换行等），不再破坏提示词 JSON 结构。
+- **种子化失败时收入选择层为空可落未分类**：`EnsureIncomeTagsUseCase` 异常上抛时收入体系缺失，收入记账选择层为空仍可落库为未分类，重启后种子化自愈。
+- **快照-合并窗口新增交易漏标脏**：`MergeTagsUseCase` 先快照 drop 标签交易 `occurredAt` 再合并，快照后新挂到 drop 标签的交易不会被本次合并标脏报告（窗口极窄，可接受）。
 
