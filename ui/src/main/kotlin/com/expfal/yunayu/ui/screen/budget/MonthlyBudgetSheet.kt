@@ -20,6 +20,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -67,9 +68,11 @@ fun MonthlyBudgetSheet(
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 28.dp),
         ) {
+            // 主题 typography 已覆写 titleLarge 为加粗 + tnum（对齐金额展示），
+            // 标题为非金额文本，局部回退字重 Normal 保持字号层级不变。
             Text(
                 "设置每月预算",
-                style = MaterialTheme.typography.titleLarge,
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Normal),
             )
             Spacer(Modifier.height(16.dp))
             OutlinedTextField(
