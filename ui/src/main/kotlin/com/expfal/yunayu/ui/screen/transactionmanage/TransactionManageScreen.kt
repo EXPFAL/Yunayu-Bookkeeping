@@ -277,6 +277,7 @@ private fun TagFilterSheet(
                     selectedIds = selectedIds,
                     onToggleSelect = onToggleSelect,
                     modifier = Modifier.padding(bottom = 8.dp),
+                    selectableRoots = true,
                 )
             }
             Row(

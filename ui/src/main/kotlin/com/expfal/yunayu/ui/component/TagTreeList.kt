@@ -33,17 +33,22 @@ import com.expfal.yunayu.domain.model.Tag
 /**
  * 标签树折叠列表：按根标签分组展示，子类默认折叠，点击分组头展开/收起。
  *
- * 每个根分组依次渲染「分组头 → 根自身可点选行 →（展开时）子类行」，分组之间以分隔线隔开；
- * 展开状态在弹层生命周期内记忆（[rememberSaveable]），关闭即随组合销毁而重置。
- * 展开/收起前会记录当前滚动位置（首个可见项下标与偏移），并在子项增删后恢复，避免滚动跳变；
- * 外层列表默认限制最大高度 420dp，以稳定各宿主弹层尺寸、防止重测量。
+ * 每个根分组依次渲染「分组头 →（可选）根自身行 →（展开时）子类行」，分组之间以分隔线隔开；
+ * 父类默认仅作分组头提供折叠/展开入口，不参与点选。两种例外会恢复根自身行：开启
+ * [selectableRoots] 时，有子标签的根会在分组头下渲染自身可选行；无子标签的根则按
+ * 「无子根按叶子」契约始终渲染一条兜底可选行（两者互斥，不会重复渲染）。展开状态在弹层生命
+ * 周期内记忆（[rememberSaveable]），关闭即随组合销毁而重置。展开/收起前会记录当前滚动位置
+ * （首个可见项下标与偏移），并在子项增删后恢复，避免滚动跳变；外层列表默认限制最大高度
+ * 420dp，以稳定各宿主弹层尺寸、防止重测量。
  *
  * 本组件只负责把点击转换为 [onToggleSelect]，不关心关闭弹层等上层逻辑，因此可同时服务
  * 「单选（点选后由调用方关闭弹层）」与「多选（点选后不关闭）」两种场景。
  *
- * @param allTagsByRoot 根标签到其子标签的映射，键为根标签自身（根自身也参与点选）。
- * @param selectedIds 当前选中标签 id 集合，用于高亮行。
- * @param onToggleSelect 点击任意标签（根或子）时回调该标签 id。
+ * @param allTagsByRoot 根标签到其子标签的映射，键为根标签自身（默认仅作分组头，不参与点选）。
+ * @param selectedIds 当前选中标签 id 集合，用于高亮可选行。
+ * @param onToggleSelect 点击标签（子标签或可选根）时回调该标签 id。
+ * @param selectableRoots 为 true 时恢复有子标签根自身的可点选行，供筛选类宿主选择根级标签；
+ * 默认 false 保持父类仅作分组头。
  * @param modifier 作用于外层 [LazyColumn] 的修饰符。
  */
 @Composable
@@ -52,6 +57,7 @@ fun TagTreeList(
     selectedIds: Set<Long>,
     onToggleSelect: (Long) -> Unit,
     modifier: Modifier = Modifier,
+    selectableRoots: Boolean = false,
 ) {
     var expandedRootIds by rememberSaveable { mutableStateOf(listOf<Long>()) }
     val listState = rememberLazyListState()
@@ -79,13 +85,17 @@ fun TagTreeList(
                     },
                 )
             }
-            item(key = "self-${root.id}") {
-                TagRow(
-                    tag = root,
-                    selected = root.id in selectedIds,
-                    onClick = { onToggleSelect(root.id) },
-                    style = MaterialTheme.typography.bodyLarge,
-                )
+            // 根自身可选行与无子根兜底行互斥：selectableRoots 行仅在「有子标签」时出现，
+            // 兜底行仅在「无子标签」时出现（无子根按叶子契约），不会对同一根重复渲染。
+            if ((selectableRoots && children.isNotEmpty()) || children.isEmpty()) {
+                item(key = "self-${root.id}") {
+                    TagRow(
+                        tag = root,
+                        selected = root.id in selectedIds,
+                        onClick = { onToggleSelect(root.id) },
+                        style = MaterialTheme.typography.bodyLarge,
+                    )
+                }
             }
             if (root.id in expandedRootIds) {
                 items(children, key = { it.id }) { child ->

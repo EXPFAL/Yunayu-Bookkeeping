@@ -191,7 +191,7 @@ class QuickAddViewModel @Inject constructor(
             .associate { it.id to it.name }
 
     /**
-     * 加载全部标签并按根分组，供「更多分类」选择层展示（根标签自身也在分组内）。
+     * 加载全部标签并按根分组，供「更多分类」选择层展示（仅子类可选，父类仅作分组头；筛选宿主除外）。
      *
      * 按 [type] 收支方向过滤根列表：收入仅保留收入根、支出排除收入根。根列表经
      * `getChildren(null)` 获取，再逐根 `getChildren(rootId)` 拉子标签；任一失败降级为空列表

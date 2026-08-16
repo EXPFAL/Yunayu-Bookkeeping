@@ -212,7 +212,7 @@ fun QuickAddSheet(
     }
 }
 
-/** 「更多分类」选择层：按根分组折叠展示子标签（根标签自身也可选），点选即选中并关闭。 */
+/** 「更多分类」选择层：按根分组折叠展示子标签（仅子类可选，父类仅作分组头；筛选宿主除外），点选即选中并关闭。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TagPickerSheet(
