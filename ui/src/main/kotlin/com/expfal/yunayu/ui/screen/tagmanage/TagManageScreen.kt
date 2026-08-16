@@ -80,6 +80,7 @@ fun TagManageScreen(
 
     var addRoot by remember { mutableStateOf<Tag?>(null) }
     var addSubmitted by remember { mutableStateOf(false) }
+    var showMergeSheet by remember { mutableStateOf(false) }
 
     val handleBack = {
         viewModel.cancelDelete()
@@ -94,6 +95,10 @@ fun TagManageScreen(
             when (event) {
                 TagManageEvent.Deleted -> snackbarHostState.showSnackbar("已删除")
                 TagManageEvent.Failed -> snackbarHostState.showSnackbar("操作失败，请重试")
+                is TagManageEvent.Merged -> snackbarHostState.showSnackbar(
+                    "已合并：${event.affectedTransactionCount} 条记录并入「${event.keepTagName}」",
+                )
+                TagManageEvent.MergeFailed -> snackbarHostState.showSnackbar("合并失败，请重试")
             }
         }
     }
@@ -120,6 +125,16 @@ fun TagManageScreen(
                 navigationIcon = {
                     IconButton(onClick = handleBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    TextButton(
+                        onClick = {
+                            showMergeSheet = true
+                            viewModel.detectMergeCandidates()
+                        },
+                    ) {
+                        Text("整合")
                     }
                 },
             )
@@ -217,6 +232,16 @@ fun TagManageScreen(
             impact = impact,
             onConfirm = { viewModel.confirmDelete() },
             onDismiss = { viewModel.cancelDelete() },
+        )
+    }
+
+    if (showMergeSheet) {
+        TagMergeSheet(
+            uiState = uiState,
+            onChoiceSelected = viewModel::setMergeChoice,
+            onMerge = viewModel::confirmMerge,
+            onRetryDetect = viewModel::detectMergeCandidates,
+            onDismiss = { showMergeSheet = false },
         )
     }
 }

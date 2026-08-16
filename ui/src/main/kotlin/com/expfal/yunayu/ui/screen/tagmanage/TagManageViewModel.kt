@@ -4,12 +4,17 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
+import com.expfal.yunayu.domain.model.MergeCandidate
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.repository.TagRepository
+import com.expfal.yunayu.domain.usecase.FindMergeCandidatesUseCase
+import com.expfal.yunayu.domain.usecase.MergeTagsUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -26,6 +31,13 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/** 标签整合方向选择：决定候选对中的保留与丢弃方向。 */
+enum class MergeChoice {
+    A_INTO_B,
+    B_INTO_A,
+    KEEP_BOTH,
+}
+
 /** 标签管理屏 UI 状态快照。 */
 data class TagManageUiState(
     val loading: Boolean = true,
@@ -35,6 +47,12 @@ data class TagManageUiState(
     val errorMessage: String? = null,
     val pendingDelete: Pair<Tag, TagDeleteImpact>? = null,
     val renamingTag: Tag? = null,
+    val mergeDetecting: Boolean = false,
+    val mergeDetectFailed: Boolean = false,
+    val mergeCandidates: List<MergeCandidate> = emptyList(),
+    val mergeChoices: Map<String, MergeChoice> = emptyMap(),
+    val merging: Boolean = false,
+    val mergeFailed: Boolean = false,
 )
 
 /** 标签管理屏对外暴露的一次性事件。 */
@@ -45,6 +63,15 @@ sealed interface TagManageEvent {
 
     /** 删除或排序持久化失败，提示 UI 温和反馈。 */
     data object Failed : TagManageEvent
+
+    /** 标签合并成功（携带被迁移交易数与保留标签名），列表由观察链自动刷新。 */
+    data class Merged(
+        val affectedTransactionCount: Int,
+        val keepTagName: String,
+    ) : TagManageEvent
+
+    /** 标签合并失败，提示 UI 重试。 */
+    data object MergeFailed : TagManageEvent
 }
 
 /** 观察链组装结果：根标签与其各根下的子标签映射。 */
@@ -60,11 +87,15 @@ private data class TagTree(
  * 用 [combine] 组装为 `Map<Long, List<Tag>>`；任一子流异常由 `.catch` 兜底并置 loading=false。
  * 变更动作统一经 `busy` 防重入，失败映射为 [TagManageUiState.errorMessage] 或一次性
  * [TagManageEvent.Failed] 事件；删除采用「先算影响面、再二次确认」两段式。
+ * 整合采用「检测候选 → 三选 → 逐对确认」状态机，检测与合并各自独立 Job 且防重入。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class TagManageViewModel @Inject constructor(
     private val tagRepository: TagRepository,
+    private val findMergeCandidatesUseCase: FindMergeCandidatesUseCase,
+    private val mergeTagsUseCase: MergeTagsUseCase,
+    private val parser: NLTransactionParser,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TagManageUiState())
@@ -75,6 +106,9 @@ class TagManageViewModel @Inject constructor(
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
     )
     val events: Flow<TagManageEvent> = _events.asSharedFlow()
+
+    /** 候选检测任务句柄，[onCleared] 取消。 */
+    private var detectJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -196,6 +230,97 @@ class TagManageViewModel @Inject constructor(
         _uiState.update { it.copy(errorMessage = null) }
     }
 
+    /**
+     * 检测疑似重复标签对：mergeDetecting 守卫 + 可取消 [detectJob]；先前置检查引擎可用性
+     * （不可用置 [TagManageUiState.mergeDetectFailed]），再经 [FindMergeCandidatesUseCase] 写候选；
+     * 异常降级空列表并记录日志，[CancellationException] 直接重抛。
+     */
+    fun detectMergeCandidates() {
+        if (_uiState.value.mergeDetecting) return
+        detectJob?.cancel()
+        detectJob = viewModelScope.launch {
+            _uiState.update {
+                it.copy(
+                    mergeDetecting = true,
+                    mergeDetectFailed = false,
+                    mergeCandidates = emptyList(),
+                    mergeChoices = emptyMap(),
+                    mergeFailed = false,
+                )
+            }
+            val available = runCatching { parser.isAvailable() }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to check engine availability", throwable)
+                }
+                .getOrDefault(false)
+            if (!available) {
+                _uiState.update { it.copy(mergeDetecting = false, mergeDetectFailed = true) }
+                return@launch
+            }
+            val candidates = runCatching { findMergeCandidatesUseCase() }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.e(TAG, "Failed to detect merge candidates", throwable)
+                }
+                .getOrDefault(emptyList())
+            _uiState.update { it.copy(mergeDetecting = false, mergeCandidates = candidates) }
+        }
+    }
+
+    /** 记录某候选对的用户整合方向；未选择过按 [MergeChoice.KEEP_BOTH] 处理。 */
+    fun setMergeChoice(candidate: MergeCandidate, choice: MergeChoice) {
+        _uiState.update { state ->
+            state.copy(mergeChoices = state.mergeChoices + (candidateKey(candidate) to choice))
+        }
+    }
+
+    /**
+     * 按用户选择合并单个候选对：merging 防重入后依据 [MergeChoice] 决定保留/丢弃方向
+     * （A_INTO_B 保留 B 丢弃 A，与引擎 `A_INTO_B` 语义一致），成功发 [TagManageEvent.Merged]
+     * 并移除该对；校验或持久化失败发 [TagManageEvent.MergeFailed]，[CancellationException] 重抛。
+     */
+    fun confirmMerge(candidate: MergeCandidate) {
+        if (_uiState.value.merging) return
+        val choice = _uiState.value.mergeChoices[candidateKey(candidate)] ?: MergeChoice.KEEP_BOTH
+        val keep = when (choice) {
+            MergeChoice.A_INTO_B -> candidate.tagB
+            MergeChoice.B_INTO_A -> candidate.tagA
+            MergeChoice.KEEP_BOTH -> null
+        }
+        val drop = when (choice) {
+            MergeChoice.A_INTO_B -> candidate.tagA
+            MergeChoice.B_INTO_A -> candidate.tagB
+            MergeChoice.KEEP_BOTH -> null
+        }
+        if (keep == null || drop == null) return
+        _uiState.update { it.copy(merging = true, mergeFailed = false) }
+        viewModelScope.launch {
+            runCatching { mergeTagsUseCase(keep.id, drop.id) }
+                .onSuccess { result ->
+                    _events.tryEmit(TagManageEvent.Merged(result.affectedTransactionCount, keep.name))
+                    _uiState.update { state ->
+                        state.copy(
+                            merging = false,
+                            mergeCandidates = state.mergeCandidates.filterNot { it == candidate },
+                            mergeChoices = state.mergeChoices - candidateKey(candidate),
+                        )
+                    }
+                }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.e(TAG, "Failed to merge tags", throwable)
+                    _events.tryEmit(TagManageEvent.MergeFailed)
+                    _uiState.update { it.copy(merging = false, mergeFailed = true) }
+                }
+        }
+    }
+
+    override fun onCleared() {
+        detectJob?.cancel()
+        super.onCleared()
+    }
+
     /** 组装根标签与各根子标签的观察链；根为空时直接发射空映射。 */
     private fun observeTagTree(): Flow<TagTree> =
         tagRepository.observeChildren(null).flatMapLatest { roots ->
@@ -227,3 +352,7 @@ class TagManageViewModel @Inject constructor(
         const val TAG = "TagManageViewModel"
     }
 }
+
+/** 候选对的稳定键，按两标签 id 拼接，供 [TagManageUiState.mergeChoices] 索引。 */
+private fun candidateKey(candidate: MergeCandidate): String =
+    "${candidate.tagA.id}:${candidate.tagB.id}"
