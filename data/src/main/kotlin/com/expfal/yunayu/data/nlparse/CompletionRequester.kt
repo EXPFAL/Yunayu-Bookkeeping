@@ -1,5 +1,6 @@
 package com.expfal.yunayu.data.nlparse
 
+import android.util.Log
 import com.expfal.yunayu.domain.model.NlApiConfig
 import kotlinx.coroutines.CancellationException
 import org.json.JSONArray
@@ -13,26 +14,31 @@ import java.net.URL
  * 封装连接建立、请求体组装与响应 `choices[0].message.content` 抽取。任何网络、协议或配置异常
  * 均降级为 `null`，仅 [CancellationException] 向上重抛；连接超时由 [connectTimeoutMillis]、读取超时由
  * [readTimeoutMillis] 分别控制。
+ *
+ * 失败路径会通过 `android.util.Log.e` 输出诊断日志（TAG: `CompletionRequester`），区分
+ * 非 2xx HTTP 错误（含响应体摘要）与网络/解析异常，便于 logcat 定位根因。
  */
 internal class CompletionRequester(
     private val connectTimeoutMillis: Int,
     private val readTimeoutMillis: Int,
 ) {
 
-    /** 发起一次请求并抽取 `choices[0].message.content`；任何异常降级为 `null`。 */
+    /** 发起一次请求并抽取 `choices[0].message.content`；任何异常降级为 `null`。失败路径输出诊断日志。 */
     fun request(config: NlApiConfig, systemInstruction: String, userText: String): String? {
         val connection = try {
             openConnection(config, systemInstruction, userText)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Log.e(TAG, "${e.javaClass.simpleName}: ${e.message}")
             return null
         }
 
         return try {
             val status = connection.responseCode
             if (status !in 200..299) {
-                runCatching { connection.errorStream?.close() }
+                val errorBody = readErrorBody(connection)
+                Log.e(TAG, "HTTP $status: $errorBody")
                 null
             } else {
                 val body = connection.inputStream.bufferedReader().use { it.readText() }
@@ -41,6 +47,7 @@ internal class CompletionRequester(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
+            Log.e(TAG, "${e.javaClass.simpleName}: ${e.message}")
             null
         } finally {
             connection.disconnect()
@@ -92,6 +99,18 @@ internal class CompletionRequester(
             .toString()
     }
 
+    /** 读取 errorStream 摘要（最多 [ERROR_BODY_MAX_LENGTH] 字符），读取失败返回空串。 */
+    private fun readErrorBody(connection: HttpURLConnection): String {
+        val raw = runCatching {
+            connection.errorStream?.bufferedReader()?.use {
+                val buffer = CharArray(ERROR_BODY_MAX_LENGTH)
+                val read = it.read(buffer)
+                if (read > 0) String(buffer, 0, read) else ""
+            }
+        }.getOrNull() ?: ""
+        return raw.replace('\n', ' ').take(ERROR_BODY_MAX_LENGTH)
+    }
+
     /** 从响应体抽取 `choices[0].message.content`，空白返回 `null`。 */
     private fun extractContent(body: String): String? {
         val content = JSONObject(body)
@@ -103,6 +122,12 @@ internal class CompletionRequester(
     }
 
     companion object {
+        /** 诊断日志 TAG，供 `adb logcat -s CompletionRequester` 过滤。 */
+        private const val TAG = "CompletionRequester"
+
+        /** errorStream 读取上限（字符），防超大响应体。 */
+        private const val ERROR_BODY_MAX_LENGTH = 512
+
         /** chat/completions 相对路径。 */
         private const val CHAT_COMPLETIONS_PATH = "/chat/completions"
 
