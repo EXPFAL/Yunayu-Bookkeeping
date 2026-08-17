@@ -13,6 +13,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Yunayu">
 
+        <!-- windowSoftInputMode 保持缺省（adjustUnspecified）：
+             Compose edge-to-edge + WindowInsetsCompat 现代 insets 机制
+             已在内容层处理键盘弹出，adjustResize 会与之冲突导致双重偏移。 -->
         <activity
             android:name=".MainActivity"
             android:exported="true"

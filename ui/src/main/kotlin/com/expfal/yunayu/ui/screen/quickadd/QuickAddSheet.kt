@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
@@ -91,6 +92,10 @@ fun QuickAddSheet(
         onDismissRequest = {
             if (!uiState.saving && !uiState.nlParsing) onDismissRequest()
         },
+        // 禁用 sheet 默认底部 insets，消除与内容区 imePadding 的消费冲突；
+        // 内容区 imePadding 统一处理键盘 insets，sheet 不再叠加额外偏移。
+        // 注：sheet 会贴到屏幕最底部（导航栏区域），但 imePadding 已覆盖该场景。
+        windowInsets = WindowInsets(0),
     ) {
         QuickAddForm(
             uiState = uiState,
