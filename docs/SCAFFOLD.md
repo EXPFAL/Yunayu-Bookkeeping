@@ -928,4 +928,77 @@ interface SemesterBudgetEngine {
 - **NL 不支持转账**：自然语言记账仅收支两态，转账仅数字模式三段切换入口。
 - **INFO 级遗留**：`updateTransaction` 对已删行静默成功（`getById` 返回 null 时直接 return，不报错）；转账模式切换残留 from/to 选择（`setType` / `setNlMode` 退出转账时不清理 `fromAccountId` / `toAccountId`，下次进转账模式时若未重选可能残留），均属低风险可接受。
 
+---
 
+## 24. 九项优化迭代交付记录
+
+> 触发时机：用户实机反馈 9 项 UI/UX 优化落地（手动记备注栏、模式改名、自动滚动、侧栏导航、键盘适配、FAB 位置、周常报告+饼图、冷启动画面、标签管理优化）。零 schema 变更，仅 UI 层与报告层增强。
+
+### 24.1 周常报告技术决策
+
+- **ReportPeriodType.WEEKLY**：枚举扩展新增 WEEKLY 值，`ReportPeriodType.entries` 自动包含。
+- **周窗口定义**：本周一 00:00 至下周一 00:00 半开区间（与月/年窗口语义一致），`TimeWindows.weekWindow(anchorDate)` 计算。
+- **期键格式**：ISO weekBasedYear（`DateTimeFormatter.ofPattern("YYYY-'W'ww")`），跨年周正确性：2027-01-01→2026-W53、2029-12-31→2030-W01。
+- **byKey 反推锚点**：锚点从 1 月 1 日改为 1 月 4 日（ISO 周定义：1 月 4 日所在周为该年第一周），`LocalDate.of(year, 1, 4)` + `WeekFields.ISO.weekBasedYear()`。
+- **预生成策略**：`EnsureReportsUseCase` 预生成上周周报，置于月/年之后（不阻塞既有补生成逻辑）。
+- **标脏机制**：复用既有 `invalidateWhereWindowContains`，经 `window_start_ms/window_end_ms` 范围条件自动覆盖周报，零接口改动。
+- **存储**：`reports` 表 `period_type` 字符串存储 WEEKLY，零 schema 变更。
+
+### 24.2 饼状图技术决策
+
+- **Canvas 自绘**：不引入第三方图表库，`PieChart.kt` 位于 `ui/component`，纯 Compose Canvas 绘制。
+- **固定色板**：8 色预定义色板（红/橙/黄/绿/蓝/紫/粉/灰），标签映射经稳定哈希（`tag.hashCode() % palette.size`）确保颜色一致性。
+- **Top5 +「其他」桶**：按金额降序取 Top5，剩余归入「其他」，闭合 360°（`total - top5Sum` 确保无浮点误差缺口）。
+- **渲染条件**：`expenseCents > 0` 且 `topCategories` 非空时显示饼状图，否则隐藏。
+- **图例**：标签名 + 占比百分数，位于饼状图下方。
+
+### 24.3 侧栏导航技术决策
+
+- **ModalNavigationDrawer + TopAppBar**：`rememberDrawerState(DrawerValue.Closed)` + `rememberCoroutineScope()`。
+- **DrawerContent 私有 Composable**：5 个 `NavigationDrawerItem`（收支管理 / 管理标签 / API 管理 / 报告 / 管理账户），点击设置 `FullScreen` 枚举 + `drawerState.close()`。
+- **FullScreen 枚举分发不变**：`NONE / TAG_MANAGE / API_SETTINGS / REPORT / TRANSACTIONS / ACCOUNT_MANAGE`，`onFullScreenChange(FullScreen.NONE)` 回调传递。
+- **TopAppBar 汉堡菜单**：`Icons.Default.Menu`，contentDescription「菜单」。
+- **决策理由**：抽屉式侧栏（vs 底部导航）更适合低频配置入口，首页保持简洁。
+- **FAB 位置**：FAB 保持 `Alignment.CenterEnd` + `padding(end = 16.dp)`，抽屉从左侧滑出，FAB 在右侧居中，无遮挡冲突。
+
+### 24.4 自动滚动技术决策
+
+- **HomeViewModel 事件机制**：`sealed interface HomeEvent { data object Saved }` + `Channel(BUFFERED)` + `receiveAsFlow()`。
+- **HomeScreen 收集**：`LaunchedEffect` 收集 events，Saved → `listState.animateScrollToItem(0)`。
+- **触发时机**：仅新增记账触发（`homeViewModel.notifySaved()`），编辑弹层不触发。
+- **状态传递**：`listState` 从 HomeScreen 传递给 `RecentTransactionsCard`，保持 LazyColumn 状态一致性。
+
+### 24.5 冷启动技术决策
+
+- **core-splashscreen 1.0.1**：`libs.versions.toml` 新增 `core-splashscreen = "1.0.1"`，`:app` build.gradle.kts 新增 `implementation(libs.core.splashscreen)`。
+- **Theme.Yunayu.Splash**：`themes.xml` 新增 `Theme.Yunayu.Splash`，`windowSplashScreenBackground = #FED1D0`（浅粉，与图标边缘一致）。
+- **installSplashScreen 先于 super.onCreate**：`MainActivity.onCreate` 首行 `installSplashScreen()`，确保过渡画面在 Activity 内容绘制前显示。
+- **图标圆形遮罩风险**：部分设备（如 MIUI/HyperOS）可能裁剪图标边缘，需真机冒烟确认。
+
+### 24.6 评审修复留痕
+
+- **ISO 周年键**：周报告期键改用 `DateTimeFormatter.ofPattern("YYYY-'W'ww")`，修复跨年周（2027-01-01→2026-W53、2029-12-31→2030-W01）。
+- **jan4 锚点**：`TimeWindows.byKey(weekly, key)` 反推锚点从 1 月 1 日改为 1 月 4 日（ISO 周定义：1 月 4 日所在周为该年第一周）。
+- **饼图其他桶**：`total - top5Sum` 确保闭合 360°，避免浮点误差导致缺口。
+- **remember(tag)**：`TagTreeList` 记忆展开集合，避免重组丢失状态。
+- **ensureWeekly 顺序**：`EnsureReportsUseCase` 周报预生成置于月/年之后，不阻塞既有补生成逻辑。
+- **HomeMainContent 拆分**：`HomeScreen` 主内容区抽取为私有 `HomeMainContent` Composable，降圈复杂度。
+
+### 24.7 决策记录
+
+- **抽屉式侧栏（vs 底部导航）**：低频配置入口适合侧栏收纳，首页保持简洁；底部导航适合高频切换的顶级目的地。
+- **FAB 右侧居中（vs 底部上移）**：右侧居中避免遮挡最新记录金额，底部上移仍可能遮挡列表尾部。
+- **饼图 Canvas 自绘（vs 第三方库）**：零依赖、包体积最小、可控性强；第三方库（如 MPAndroidChart）引入额外依赖且可能过度设计。
+- **键盘适配仅自动记**：手动记模式使用数字键盘（系统自带），无需额外适配；自动记模式使用自定义输入框，需 WindowInsets 适配。
+
+### 24.8 已知限制（观感项不修）
+
+- **Drawer 五项同图标**：5 个 NavigationDrawerItem 均未设置 icon，使用默认无图标状态（观感项，不影响功能）。
+- **Drawer 关闭动画顺序**：点击 NavigationDrawerItem 后先触发 `drawerState.close()` 再设置 FullScreen，动画与页面切换存在短暂重叠（观感项，不影响功能）。
+- **Saved 事件缓冲重放**：`Channel(BUFFERED)` 确保 Saved 事件不丢失，但快速连续保存可能导致多次滚动（观感项，不影响功能）。
+
+### 24.9 接口扩展 fake 同步纪律
+
+- `ReportRepository` 新增 `observeWeekly` / `generateWeekly` 两方法，须同步 `FakeReportRepository`：`EnsureReportsUseCaseTest`、`GenerateReportUseCaseTest`、`ReportViewModelTest` 共 3 处。
+- `EnsureReportsUseCase` 新增 `ensureWeekly` 逻辑，`FakeReportRepository` 需同步支持 WEEKLY 类型测试。
+- 本次新增 `PieChartTest` 自带 fake，不计入同步清单；后续再扩接口先更新上述 fake 再编译。

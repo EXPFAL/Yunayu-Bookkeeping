@@ -159,3 +159,72 @@
 - feat(ai): online OpenAI-compatible API for natural language transaction parsing
 - feat(report): weekly consumption review with anomaly detection
 - refactor(data): category schema for student-specific tags
+
+## 六、九项优化迭代（已随本次迭代交付）
+
+### 29. 模式切换改名「手动记/自动记」
+- 痛点：用户误将「数字键盘/自然语言」理解为纯模式切换，实为 UI 命名问题
+- 方案：数字键盘模式 → 「手动记」、自然语言模式 → 「自动记」，TypeToggle 文案同步更新
+- 技术要点：QuickAddViewModel 无逻辑变更，仅 UI 层文案调整
+- 验收要点：切换模式文案即时更新，功能行为不变
+
+### 30. 手动记可选备注
+- 痛点：手动记账时无法输入备注信息，记录缺乏上下文
+- 方案：手动记模式新增备注输入框（位于金额键盘下方），可选填写
+- 技术要点：AddTransactionUseCase 新增 note 参数（默认 null），QuickAddSheet NumberInputSection 新增 OutlinedTextField 备注输入，落库时透传 note 字段
+- 口径：备注为可选字段，空值落库为 null；自动记模式备注由 LLM 保障（§15 NL 备注兜底）
+- 验收要点：手动记可输入备注并正确保存；不输入备注时落库 null；自动记模式不受影响
+
+### 31. 记一笔保存后自动滚动到最新记录
+- 痛点：保存后视口未同步，用户需手动滑动查看新记录
+- 方案：HomeViewModel 新增 Saved 事件，HomeScreen 收集后自动滚动到列表顶部
+- 技术要点：sealed interface HomeEvent + Channel(BUFFERED) 事件机制；LaunchedEffect 收集 listState.animateScrollToItem(0)；仅新增记账触发，编辑弹层不触发
+- 验收要点：新增记账后自动滚动到最新记录；编辑保存不触发滚动；列表无记录时不崩溃
+
+### 32. 首页入口收纳至侧栏（汉堡菜单）
+- 痛点：首页入口过多，视觉分散
+- 方案：引入 ModalNavigationDrawer + TopAppBar 汉堡菜单，收纳 5 个全屏入口：收支管理 / 管理标签 / API 管理 / 报告 / 管理账户
+- 技术要点：rememberDrawerState + rememberCoroutineScope；DrawerContent 私有 Composable；NavigationDrawerItem 点击设置 FullScreen 枚举 + drawerState.close()；TopAppBar 汉堡图标
+- 决策理由：抽屉式侧栏（vs 底部导航）更适合低频配置入口，首页保持简洁
+- 验收要点：汉堡菜单可打开/关闭；5 个入口功能正常；FAB 与侧栏无遮挡冲突
+
+### 33. 自动记输入框键盘遮挡适配
+- 痛点：自动记输入框被软键盘遮挡，无法正常输入
+- 方案：NlParseSection 输入框适配 WindowInsets，键盘弹出时自动上移
+- 技术要点：Modifier.imePadding() + 焦点管理，仅自动记模式生效
+- 验收要点：键盘弹出时输入框不被遮挡；手动记模式不受影响
+
+### 34. 记一笔按钮右侧垂直居中
+- 痛点：FAB 默认右下角位置遮挡最近记录金额展示
+- 方案：FAB 从 Scaffold floatingActionButton 移至 Box 内容区，Alignment.CenterEnd + padding(end = 16.dp)
+- 技术要点：Box 包裹内容区 + Modifier.align(Alignment.CenterEnd)；TopAppBar 增加后 FAB 随 Box 一起偏移，不重叠
+- 决策理由：右侧垂直居中（vs 底部上移）避免遮挡最新记录金额
+- 验收要点：FAB 位于右侧垂直居中；不遮挡列表内容；侧栏打开时不冲突
+
+### 35. 报告页新增「本周」周报 + 分类开销饼状图
+- 痛点：仅有月度/年度报告，缺乏短期消费概览
+- 方案：ReportPeriodType 新增 WEEKLY 枚举，报告页新增「本周」选项 + Canvas 自绘饼状图（Top5 + 其他）
+- 技术要点：周窗口 = 本周一 00:00 至下周一 00:00 半开区间；期键用 ISO weekBasedYear（跨年周正确性：2027-01-01→2026-W53、2029-12-31→2030-W01）；byKey 反推锚点 1 月 4 日；预生成上周周报置于月/年之后；标脏机制经 window_start_ms/window_end_ms 范围条件自动覆盖周报；reports 表 period_type 字符串存储零 schema 变更
+- 饼状图：Canvas 自绘（不引第三方库）、固定色板 + 稳定哈希、Top5 +「其他」桶闭合 360°
+- 验收要点：「本周」选项可切换；周报数据正确；饼状图显示 Top5 分类 + 其他；跨年周正确处理
+
+### 36. 冷启动过渡画面
+- 痛点：应用启动时白屏，体验割裂
+- 方案：core-splashscreen 1.0.1 实现冷启动过渡画面，居中图标 + 背景与图标边缘一致
+- 技术要点：Theme.Yunayu.Splash（#FED1D0 浅粉）；installSplashScreen 先于 super.onCreate；图标圆形遮罩风险留痕（冒烟确认点）
+- 已知限制：圆形遮罩在部分设备可能裁剪图标边缘，需真机冒烟确认
+- 验收要点：冷启动显示过渡画面；背景色与图标协调；无白屏闪烁
+
+### 37. 标签管理页滑动流畅优化
+- 痛点：标签管理页滑动卡顿，展开/收起时位置跳变
+- 方案：LazyColumn 性能优化 + 滚动位置保持
+- 技术要点：derivedStateOf 减少重组；Lambda 稳定性优化；rememberLazyListState 显式管理；toggle 前记录 firstVisibleItemIndex/offset + LaunchedEffect(expandedRootIds) scrollToItem 恢复；heightIn(max=420.dp) 稳定 ModalBottomSheet 尺寸
+- 验收要点：滑动流畅无卡顿；展开/收起后滚动位置保持；动画保留
+
+### 38. 评审修复留痕
+- ISO 周年键：周报告期键改用 ISO weekBasedYear（DateTimeFormatter.ofPattern("YYYY-'W'ww")），修复跨年周（2027-01-01→2026-W53、2029-12-31→2030-W01）
+- jan4 锚点：byKey 反推锚点从 1 月 1 日改为 1 月 4 日（ISO 周定义：1 月 4 日所在周为该年第一周）
+- 饼图其他桶：total - top5Sum 确保闭合 360°，避免浮点误差导致缺口
+- remember(tag)：TagTreeList 记忆展开集合，避免重组丢失状态
+- ensureWeekly 顺序：周报预生成置于月/年之后，不阻塞既有补生成逻辑
+- HomeMainContent 拆分：HomeScreen 主内容区抽取为私有 Composable，降圈复杂度
