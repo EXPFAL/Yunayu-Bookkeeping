@@ -35,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -167,11 +168,18 @@ fun TagManageScreen(
                         uiState.childrenByRoot[root.id].orEmpty()
                     }
                     itemsIndexed(children, key = { _, tag -> tag.id }) { index, tag ->
-                        val isDragging = draggingItemId == tag.id
+                        val isDragging by remember(draggingItemId, tag.id) {
+                            derivedStateOf { draggingItemId == tag.id }
+                        }
+                        val itemModifier = remember(draggingParentId, root.id) {
+                            if (draggingParentId == root.id) Modifier else Modifier.animateItemPlacement()
+                        }
+                        val onRename = remember(tag) { { viewModel.requestRename(tag) } }
+                        val onDelete = remember(tag) { { viewModel.requestDelete(tag) } }
                         TagRow(
                             tag = tag,
                             isDragging = isDragging,
-                            modifier = if (draggingParentId == root.id) Modifier else Modifier.animateItemPlacement(),
+                            modifier = itemModifier,
                             onDragStart = {
                                 draggingParentId = root.id
                                 draggingItemId = tag.id
@@ -193,8 +201,8 @@ fun TagManageScreen(
                                 clearDrag()
                             },
                             onDragCancel = { clearDrag() },
-                            onRename = { viewModel.requestRename(tag) },
-                            onDelete = { viewModel.requestDelete(tag) },
+                            onRename = onRename,
+                            onDelete = onDelete,
                         )
                     }
                 }
