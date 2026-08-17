@@ -28,12 +28,15 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -119,6 +122,7 @@ private fun HomeMainContent(
     onShowBudgetSetup: () -> Unit,
 ) {
     val listState = rememberLazyListState()
+    var titleHeight by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(homeViewModel) {
         homeViewModel.events.collect { event ->
@@ -179,6 +183,12 @@ private fun HomeMainContent(
                         FirstRunHint()
                         Spacer(modifier = Modifier.height(16.dp))
                     }
+                    Text(
+                        "最近记录",
+                        style = MaterialTheme.typography.titleMedium,
+                        modifier = Modifier.onGloballyPositioned { titleHeight = it.size.height },
+                    )
+                    Spacer(Modifier.height(8.dp))
                     RecentTransactionsCard(
                         uiState = homeState,
                         modifier = Modifier.weight(1f),
@@ -189,8 +199,8 @@ private fun HomeMainContent(
                 FloatingActionButton(
                     onClick = onShowQuickAdd,
                     modifier = Modifier
-                        .align(Alignment.CenterEnd)
-                        .padding(end = 16.dp),
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 16.dp, bottom = with(LocalDensity.current) { titleHeight.toDp() + 24.dp }),
                 ) {
                     Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
                 }
@@ -224,7 +234,7 @@ private fun HomeDrawerContent(
     onItemClick: (FullScreen) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    ModalDrawerSheet(modifier = modifier) {
+    ModalDrawerSheet(modifier = modifier.fillMaxWidth(0.45f)) {
         Text(
             text = "功能菜单",
             style = MaterialTheme.typography.headlineSmall,
