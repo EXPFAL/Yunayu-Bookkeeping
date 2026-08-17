@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -36,6 +37,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -122,7 +124,6 @@ private fun HomeMainContent(
     onShowBudgetSetup: () -> Unit,
 ) {
     val listState = rememberLazyListState()
-    var titleHeight by remember { mutableIntStateOf(0) }
 
     LaunchedEffect(homeViewModel) {
         homeViewModel.events.collect { event ->
@@ -160,51 +161,91 @@ private fun HomeMainContent(
                 )
             },
         ) { innerPadding ->
-            Box(modifier = Modifier.fillMaxSize().padding(innerPadding)) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(24.dp),
-                ) {
-                    BudgetCard(
-                        loading = budgetState.loading,
-                        budgetCents = budgetState.budgetCents,
-                        snapshot = budgetState.snapshot,
-                        onEdit = onShowBudgetSetup,
-                        onSetup = onShowBudgetSetup,
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    HeldFundsCard(
-                        heldCents = homeState.heldCents,
-                        heldByAccount = homeState.heldByAccount,
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    if (!homeState.loading && homeState.recent.isEmpty()) {
-                        FirstRunHint()
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-                    Text(
-                        "最近记录",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.onGloballyPositioned { titleHeight = it.size.height },
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    RecentTransactionsCard(
-                        uiState = homeState,
-                        modifier = Modifier.weight(1f),
-                        listState = listState,
-                    )
-                }
+            HomeContent(
+                modifier = Modifier.fillMaxSize().padding(innerPadding),
+                homeState = homeState,
+                budgetState = budgetState,
+                listState = listState,
+                onShowQuickAdd = onShowQuickAdd,
+                onShowBudgetSetup = onShowBudgetSetup,
+            )
+        }
+    }
+}
 
-                FloatingActionButton(
-                    onClick = onShowQuickAdd,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 16.dp, bottom = with(LocalDensity.current) { titleHeight.toDp() + 24.dp }),
-                ) {
-                    Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
-                }
+/** 首页主内容区：预算卡片 + 最近记录 + FAB，FAB 底部与「最近记录」标题底部对齐。 */
+@Composable
+private fun HomeContent(
+    modifier: Modifier,
+    homeState: HomeUiState,
+    budgetState: MonthlyBudgetUiState,
+    listState: LazyListState,
+    onShowQuickAdd: () -> Unit,
+    onShowBudgetSetup: () -> Unit,
+) {
+    var containerHeightPx by remember { mutableIntStateOf(0) }
+    var containerTopPx by remember { mutableIntStateOf(0) }
+    var titleBottomPx by remember { mutableIntStateOf(0) }
+
+    Box(
+        modifier = modifier
+            .onGloballyPositioned {
+                containerHeightPx = it.size.height
+                containerTopPx = it.positionInRoot().y.toInt()
+            },
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+        ) {
+            BudgetCard(
+                loading = budgetState.loading,
+                budgetCents = budgetState.budgetCents,
+                snapshot = budgetState.snapshot,
+                onEdit = onShowBudgetSetup,
+                onSetup = onShowBudgetSetup,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            HeldFundsCard(
+                heldCents = homeState.heldCents,
+                heldByAccount = homeState.heldByAccount,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            if (!homeState.loading && homeState.recent.isEmpty()) {
+                FirstRunHint()
+                Spacer(modifier = Modifier.height(16.dp))
             }
+            Text(
+                "最近记录",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.onGloballyPositioned {
+                    titleBottomPx = it.positionInRoot().y.toInt() + it.size.height
+                },
+            )
+            Spacer(Modifier.height(8.dp))
+            RecentTransactionsCard(
+                uiState = homeState,
+                modifier = Modifier.weight(1f),
+                listState = listState,
+            )
+        }
+
+        // 测量初值为 0 时 FAB 可能闪现错误位置，接受首帧微调
+        val bottomPadding = if (containerHeightPx > 0 && titleBottomPx > 0) {
+            with(LocalDensity.current) {
+                (containerHeightPx - (titleBottomPx - containerTopPx)).toDp().coerceAtLeast(0.dp)
+            }
+        } else {
+            0.dp
+        }
+        FloatingActionButton(
+            onClick = onShowQuickAdd,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 16.dp, bottom = bottomPadding),
+        ) {
+            Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
         }
     }
 }
