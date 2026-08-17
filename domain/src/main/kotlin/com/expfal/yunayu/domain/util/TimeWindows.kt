@@ -93,6 +93,70 @@ object TimeWindows {
     /** 将自然年周期键解析为年份；非法键抛 [IllegalArgumentException]。 */
     private fun parseYearKey(periodKey: String): Int =
         periodKey.toIntOrNull() ?: throw IllegalArgumentException("非法年周期键: $periodKey")
+
+    /** 本周一 00:00（系统默认时区）对应的毫秒，作为周窗口含端点起点。 */
+    fun weekStartMillis(today: LocalDate): Long {
+        val monday = today.with(java.time.DayOfWeek.MONDAY)
+        return monday.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }
+
+    /** 下周一 00:00（系统默认时区）对应的毫秒，作为周窗口不含端终点。 */
+    fun nextWeekStartMillis(today: LocalDate): Long {
+        val nextMonday = today.with(java.time.DayOfWeek.MONDAY).plusDays(7)
+        return nextMonday.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+    }
+
+    /** ISO 周周期键，如「2026-W33」。 */
+    fun weekPeriodKey(today: LocalDate): String {
+        val weekOfYear = today.get(java.time.temporal.WeekFields.ISO.weekOfWeekBasedYear())
+        val weekBasedYear = today.get(java.time.temporal.WeekFields.ISO.weekBasedYear())
+        return "%04d-W%02d".format(weekBasedYear, weekOfYear)
+    }
+
+    /** [today] 所在自然周的完整统计窗口（含期键）。 */
+    fun weekWindow(today: LocalDate): TimeWindow = TimeWindow(
+        periodKey = weekPeriodKey(today),
+        startInclusiveMs = weekStartMillis(today),
+        endExclusiveMs = nextWeekStartMillis(today),
+    )
+
+    /** 上一周的完整统计窗口。 */
+    fun previousWeekWindow(today: LocalDate): TimeWindow = weekWindow(today.minusWeeks(1))
+
+    /** 从 ISO 周周期键（如「2026-W33」）反推该周完整统计窗口；非法键抛 [IllegalArgumentException]。 */
+    fun weekWindowByKey(periodKey: String): TimeWindow {
+        val (year, week) = parseWeekKey(periodKey)
+        val jan4 = LocalDate.of(year, 1, 4).with(java.time.DayOfWeek.MONDAY)
+        val monday = jan4.plusWeeks((week - 1).toLong())
+        return TimeWindow(
+            periodKey = periodKey,
+            startInclusiveMs = monday.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            endExclusiveMs = monday.plusDays(7).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+        )
+    }
+
+    /** 从 ISO 周周期键反推上一周完整统计窗口。 */
+    fun previousWeekWindowByKey(periodKey: String): TimeWindow {
+        val (year, week) = parseWeekKey(periodKey)
+        val jan4 = LocalDate.of(year, 1, 4).with(java.time.DayOfWeek.MONDAY)
+        val monday = jan4.plusWeeks((week - 1).toLong())
+        val prevMonday = monday.minusWeeks(1)
+        return TimeWindow(
+            periodKey = weekPeriodKey(prevMonday),
+            startInclusiveMs = prevMonday.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+            endExclusiveMs = prevMonday.plusDays(7).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
+        )
+    }
+
+    /** 将 ISO 周周期键解析为「年、周」；非法键抛 [IllegalArgumentException]。 */
+    private fun parseWeekKey(periodKey: String): Pair<Int, Int> {
+        val parts = periodKey.split("-W")
+        require(parts.size == 2) { "非法周周期键: $periodKey" }
+        val year = parts[0].toIntOrNull()
+        val week = parts[1].toIntOrNull()
+        require(year != null && week != null && week in 1..53) { "非法周周期键: $periodKey" }
+        return year to week
+    }
 }
 
 /** 一个报告周期的统计窗口：期键 + 半开时间区间 `[startInclusiveMs, endExclusiveMs)`。 */

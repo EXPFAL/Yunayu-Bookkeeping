@@ -157,6 +157,30 @@ class ReportViewModelTest {
         assertEquals(1, repo.upserted.size)
     }
 
+    @Test
+    fun `retry failed weekly report uses week windows`() = runTest {
+        val repo = FakeReportRepository()
+        val txRepo = FakeTransactionRepository()
+        val viewModel = newViewModel(repo, txRepo)
+
+        viewModel.retry(report(periodType = ReportPeriodType.WEEKLY, periodKey = "2026-W34"))
+
+        val upserted = repo.upserted.single()
+        assertEquals(ReportPeriodType.WEEKLY, upserted.periodType)
+        assertEquals("2026-W34", upserted.periodKey)
+        // 2026-W34 起于 2026-08-17（周一），止于 2026-08-24
+        assertEquals(startOfDay(LocalDate.of(2026, 8, 17)), upserted.windowStartMs)
+        assertEquals(startOfDay(LocalDate.of(2026, 8, 24)), upserted.windowEndMs)
+        // 上周窗口 2026-W33 起于 2026-08-10，止于 2026-08-17
+        assertEquals(
+            listOf(
+                startOfDay(LocalDate.of(2026, 8, 17)) to startOfDay(LocalDate.of(2026, 8, 24)),
+                startOfDay(LocalDate.of(2026, 8, 10)) to startOfDay(LocalDate.of(2026, 8, 17)),
+            ),
+            txRepo.windowTotalsCalls,
+        )
+    }
+
     private fun newViewModel(
         repo: ReportRepository,
         txRepo: TransactionRepository,

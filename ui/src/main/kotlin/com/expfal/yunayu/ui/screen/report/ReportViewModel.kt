@@ -125,6 +125,9 @@ class ReportViewModel @Inject constructor(
 
     /** 由报告期键反推「当期窗口、上期窗口」，作为重试的统计口径。 */
     private fun retryWindows(report: Report): Pair<TimeWindow, TimeWindow> = when (report.periodType) {
+        ReportPeriodType.WEEKLY ->
+            TimeWindows.weekWindowByKey(report.periodKey) to
+                TimeWindows.previousWeekWindowByKey(report.periodKey)
         ReportPeriodType.MONTHLY ->
             TimeWindows.monthWindowByKey(report.periodKey) to
                 TimeWindows.previousMonthWindowByKey(report.periodKey)

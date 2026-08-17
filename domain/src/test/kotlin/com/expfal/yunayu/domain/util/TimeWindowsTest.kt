@@ -144,4 +144,83 @@ class TimeWindowsTest {
         assertThrows(IllegalArgumentException::class.java) { TimeWindows.yearWindowByKey("2026-07") }
         assertThrows(IllegalArgumentException::class.java) { TimeWindows.yearWindowByKey("abc") }
     }
+
+    // ===== 周相关测试 =====
+
+    @Test
+    fun `week period key uses ISO week-based year for cross-year dates`() {
+        // 2027-01-01 属于 ISO 2026-W53
+        assertEquals("2026-W53", TimeWindows.weekPeriodKey(LocalDate.of(2027, 1, 1)))
+        // 2029-12-31 属于 ISO 2030-W01
+        assertEquals("2030-W01", TimeWindows.weekPeriodKey(LocalDate.of(2029, 12, 31)))
+    }
+
+    @Test
+    fun `week period key for normal mid-year date`() {
+        // 2026-08-17 是周一，属于 2026-W34
+        assertEquals("2026-W34", TimeWindows.weekPeriodKey(LocalDate.of(2026, 8, 17)))
+    }
+
+    @Test
+    fun `week window is half-open interval monday to next monday`() {
+        val today = LocalDate.of(2026, 8, 19) // 周三
+        val window = TimeWindows.weekWindow(today)
+
+        assertEquals(startOfDay(LocalDate.of(2026, 8, 17)), window.startInclusiveMs) // 周一
+        assertEquals(startOfDay(LocalDate.of(2026, 8, 24)), window.endExclusiveMs) // 下周一
+    }
+
+    @Test
+    fun `monday belongs to current week window`() {
+        val monday = LocalDate.of(2026, 8, 17)
+        val window = TimeWindows.weekWindow(monday)
+
+        assertEquals(startOfDay(monday), window.startInclusiveMs)
+        assertEquals(startOfDay(LocalDate.of(2026, 8, 24)), window.endExclusiveMs)
+    }
+
+    @Test
+    fun `weekWindowByKey for 2023-W01 when jan 1 is sunday`() {
+        // 2023-01-01 是周日，W01 应从 2023-01-02（周一）开始
+        val window = TimeWindows.weekWindowByKey("2023-W01")
+
+        assertEquals(startOfDay(LocalDate.of(2023, 1, 2)), window.startInclusiveMs)
+        assertEquals(startOfDay(LocalDate.of(2023, 1, 9)), window.endExclusiveMs)
+    }
+
+    @Test
+    fun `weekWindowByKey and weekPeriodKey are consistent`() {
+        val dates = listOf(
+            LocalDate.of(2026, 8, 19),
+            LocalDate.of(2027, 1, 1),
+            LocalDate.of(2029, 12, 31),
+            LocalDate.of(2023, 1, 3),
+        )
+        for (date in dates) {
+            val key = TimeWindows.weekPeriodKey(date)
+            val window = TimeWindows.weekWindowByKey(key)
+            assertEquals(key, window.periodKey)
+            val ms = startOfDay(date)
+            assert(ms >= window.startInclusiveMs && ms < window.endExclusiveMs) {
+                "$date (ms=$ms) should be in window [${window.startInclusiveMs}, ${window.endExclusiveMs})"
+            }
+        }
+    }
+
+    @Test
+    fun `previousWeekWindowByKey returns week before given key`() {
+        val window = TimeWindows.weekWindowByKey("2026-W34")
+        val prevWindow = TimeWindows.previousWeekWindowByKey("2026-W34")
+
+        assertEquals("2026-W33", prevWindow.periodKey)
+        assertEquals(window.startInclusiveMs, prevWindow.endExclusiveMs)
+    }
+
+    @Test
+    fun `week window by malformed period key throws`() {
+        assertThrows(IllegalArgumentException::class.java) { TimeWindows.weekWindowByKey("2026-W00") }
+        assertThrows(IllegalArgumentException::class.java) { TimeWindows.weekWindowByKey("2026-W54") }
+        assertThrows(IllegalArgumentException::class.java) { TimeWindows.weekWindowByKey("abc") }
+        assertThrows(IllegalArgumentException::class.java) { TimeWindows.weekWindowByKey("2026") }
+    }
 }

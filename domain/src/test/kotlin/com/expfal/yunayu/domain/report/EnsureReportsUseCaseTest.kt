@@ -31,9 +31,11 @@ class EnsureReportsUseCaseTest {
         useCase.ensure(LocalDate.of(2026, 8, 15))
 
         val upserted = reportRepository.upserted
-        assertEquals(1, upserted.size)
-        assertEquals(ReportPeriodType.MONTHLY, upserted.single().periodType)
-        assertEquals("2026-07", upserted.single().periodKey)
+        assertEquals(2, upserted.size) // 周报 + 月报
+        val monthly = upserted.find { it.periodType == ReportPeriodType.MONTHLY }
+        assertEquals("2026-07", monthly?.periodKey)
+        val weekly = upserted.find { it.periodType == ReportPeriodType.WEEKLY }
+        assertEquals("2026-W32", weekly?.periodKey)
     }
 
     @Test
@@ -47,9 +49,13 @@ class EnsureReportsUseCaseTest {
         useCase.ensure(LocalDate.of(2026, 1, 15))
 
         val upserted = reportRepository.upserted
-        assertEquals(2, upserted.size)
+        assertEquals(3, upserted.size) // 周报 + 月报 + 年报
         assertEquals(
-            setOf(ReportPeriodType.MONTHLY to "2025-12", ReportPeriodType.ANNUAL to "2025"),
+            setOf(
+                ReportPeriodType.WEEKLY to "2026-W02",
+                ReportPeriodType.MONTHLY to "2025-12",
+                ReportPeriodType.ANNUAL to "2025",
+            ),
             upserted.map { it.periodType to it.periodKey }.toSet(),
         )
     }
@@ -67,7 +73,7 @@ class EnsureReportsUseCaseTest {
 
         useCase.ensure(LocalDate.of(2026, 8, 15))
 
-        assertEquals(0, reportRepository.upserted.size)
+        assertEquals(1, reportRepository.upserted.size) // 只生成周报，月报已存在
     }
 
     @Test
@@ -80,7 +86,7 @@ class EnsureReportsUseCaseTest {
 
         useCase.ensure(LocalDate.of(2026, 1, 15))
 
-        assertEquals(2, reportRepository.upserted.size)
+        assertEquals(3, reportRepository.upserted.size) // 周报 + 月报 + 年报
     }
 
     @Test
@@ -93,9 +99,11 @@ class EnsureReportsUseCaseTest {
 
         useCase.ensure(LocalDate.of(2026, 12, 15))
 
-        assertEquals(1, reportRepository.upserted.size)
-        assertEquals(ReportPeriodType.MONTHLY, reportRepository.upserted.single().periodType)
-        assertEquals("2026-11", reportRepository.upserted.single().periodKey)
+        assertEquals(2, reportRepository.upserted.size) // 周报 + 月报
+        val monthly = reportRepository.upserted.find { it.periodType == ReportPeriodType.MONTHLY }
+        assertEquals("2026-11", monthly?.periodKey)
+        val weekly = reportRepository.upserted.find { it.periodType == ReportPeriodType.WEEKLY }
+        assertEquals("2026-W50", weekly?.periodKey)
     }
 
     /** [TransactionRepository] 手写 fake：返回空聚合（报告结构化数据非本测试关注点）。 */
@@ -169,6 +177,23 @@ class EnsureReportsUseCaseTest {
         override suspend fun isAvailable(): Boolean = true
 
         override suspend fun analyze(systemInstruction: String, dataText: String): String = "分析结论"
+    }
+
+    @Test
+    fun `ensures previous week report when missing`() = runTest {
+        val reportRepository = FakeReportRepository()
+        val useCase = EnsureReportsUseCase(
+            reportRepository,
+            GenerateReportUseCase(FakeTransactionRepository(), reportRepository, FakeReportAnalyzer()),
+        )
+
+        // 2026-08-17 是周一，上周是 2026-08-10 至 2026-08-17
+        useCase.ensure(LocalDate.of(2026, 8, 17))
+
+        val upserted = reportRepository.upserted
+        assertEquals(2, upserted.size) // 周报 + 月报
+        val weekly = upserted.find { it.periodType == ReportPeriodType.WEEKLY }
+        assertEquals("2026-W33", weekly?.periodKey)
     }
 
     private fun report(

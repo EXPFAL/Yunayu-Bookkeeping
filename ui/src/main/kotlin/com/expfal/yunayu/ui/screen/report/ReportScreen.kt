@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -42,6 +43,7 @@ import com.expfal.yunayu.domain.report.model.CategoryShare
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
+import com.expfal.yunayu.ui.component.PieChart
 import com.expfal.yunayu.ui.util.formatCents
 import java.util.Locale
 
@@ -93,10 +95,15 @@ fun ReportScreen(
     }
 }
 
-/** 月度/年度切换控件，样式对齐快捷记账的收/支 [FilterChip]。 */
+/** 周度/月度/年度切换控件，样式对齐快捷记账的收/支 [FilterChip]。 */
 @Composable
 private fun PeriodTypeToggle(selected: ReportPeriodType, onSelect: (ReportPeriodType) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = selected == ReportPeriodType.WEEKLY,
+            onClick = { onSelect(ReportPeriodType.WEEKLY) },
+            label = { Text("本周") },
+        )
         FilterChip(
             selected = selected == ReportPeriodType.MONTHLY,
             onClick = { onSelect(ReportPeriodType.MONTHLY) },
@@ -218,7 +225,7 @@ private fun RetryButton(generating: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 报告详情：收支与环比、分类占比、分析文本（null 时按状态给占位）。 */
+/** 报告详情：收支与环比、分类占比、饼状图、分析文本（null 时按状态给占位）。 */
 @Composable
 private fun ReportDetail(report: Report) {
     Surface(
@@ -236,6 +243,29 @@ private fun ReportDetail(report: Report) {
             DetailLine("环比支出", expenseDelta(report))
             Text("支出分类占比", style = MaterialTheme.typography.titleSmall)
             CategoryShares(report.topCategories)
+            // 饼状图：总支出 > 0 且有分类数据时显示
+            if (report.expenseCents > 0 && report.topCategories.isNotEmpty()) {
+                // 当 topCategories 被截断（<5）时，补齐「其他」桶保证圆环闭合
+                val sharesForChart = remember(report.topCategories, report.expenseCents) {
+                    val topSum = report.topCategories.sumOf { it.cents }
+                    if (topSum < report.expenseCents) {
+                        val otherCents = report.expenseCents - topSum
+                        val otherPercent = (otherCents * 100 / report.expenseCents).toInt()
+                        report.topCategories + CategoryShare(
+                            tagName = "其他",
+                            cents = otherCents,
+                            percent = otherPercent,
+                        )
+                    } else {
+                        report.topCategories
+                    }
+                }
+                PieChart(
+                    shares = sharesForChart,
+                    totalCents = report.expenseCents,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             Text("分析", style = MaterialTheme.typography.titleSmall)
             Text(
                 text = analysisText(report),
@@ -301,7 +331,7 @@ private fun LoadingState() {
     }
 }
 
-/** 空列表占位：提示应用启动时自动补生成上月报告。 */
+/** 空列表占位：提示应用启动时自动补生成上一周期报告。 */
 @Composable
 private fun EmptyState() {
     Column(
@@ -310,7 +340,7 @@ private fun EmptyState() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "暂无报告，打开应用时会自动补生成上月报告",
+            text = "暂无报告，打开应用时会自动补生成上一周期报告",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
