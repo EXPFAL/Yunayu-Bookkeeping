@@ -4,4 +4,6 @@
          minSdk>=26 时 adaptive 图标优先使用 mipmap-*/ic_launcher_background.png 渐变背景，
          此处色值仅作旧设备/异常兜底，不再作为 adaptive background 主引用。 -->
     <color name="ic_launcher_background">#FFE2E3</color>
+    <!-- SplashScreen 背景色：与图标边缘渐变色一致 -->
+    <color name="splash_background">#FED1D0</color>
 </resources>

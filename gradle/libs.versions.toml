@@ -7,6 +7,7 @@ composeBom = "2024.08.00"
 room = "2.8.4"
 hilt = "2.57.2"
 datastore = "1.1.1"
+splashscreen = "1.0.1"
 coreKtx = "1.13.1"
 activityCompose = "1.9.1"
 lifecycle = "2.8.4"
@@ -46,6 +47,9 @@ hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", v
 
 # DataStore 偏好
 datastore-preferences = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "datastore" }
+
+# SplashScreen
+androidx-core-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "splashscreen" }
 
 # Coroutines（:domain 仅依赖 stdlib + coroutines）
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }

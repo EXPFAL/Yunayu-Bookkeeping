@@ -2,4 +2,14 @@
 <resources>
     <!-- 应用视觉体系由 Compose Material3 主题承载，此处仅提供窗口级基础主题 -->
     <style name="Theme.Yunayu" parent="android:Theme.Material.Light.NoActionBar" />
+
+    <!-- SplashScreen 主题 -->
+    <style name="Theme.Yunayu.Splash" parent="Theme.SplashScreen">
+        <!-- 背景色与图标边缘渐变色一致 -->
+        <item name="windowSplashScreenBackground">@color/splash_background</item>
+        <!-- 启动图标 -->
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <!-- 启动后回退到应用主题 -->
+        <item name="postSplashScreenTheme">@style/Theme.Yunayu</item>
+    </style>
 </resources>
