@@ -91,7 +91,12 @@ class EnsureAccountsUseCaseTest {
             return account.id
         }
 
+        override suspend fun addAccount(name: String, initialBalanceCents: Long): Long =
+            addAccount(name)
+
         override suspend fun renameAccount(id: Long, newName: String) = Unit
+
+        override suspend fun updateAccount(id: Long, newName: String, initialBalanceCents: Long) = Unit
 
         override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact = AccountDeleteImpact(0)
 
@@ -100,5 +105,7 @@ class EnsureAccountsUseCaseTest {
         override fun observeLastUsedAccountId(): Flow<Long?> = flowOf(null)
 
         override suspend fun saveLastUsedAccountId(id: Long?) = Unit
+
+        override suspend fun updateInitialBalance(accountId: Long, cents: Long) = Unit
     }
 }

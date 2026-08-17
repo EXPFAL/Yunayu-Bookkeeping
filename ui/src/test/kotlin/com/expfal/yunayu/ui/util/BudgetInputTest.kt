@@ -38,4 +38,33 @@ class BudgetInputTest {
         assertNull(parseBudgetToCents("١.٢٣"))
         assertNull(parseBudgetToCents("12345678901234567890"))
     }
+
+    @Test
+    fun `parse initial balance returns cents allowing zero`() {
+        assertEquals(0L, parseInitialBalanceToCents(""))
+        assertEquals(0L, parseInitialBalanceToCents("0"))
+        assertEquals(0L, parseInitialBalanceToCents("0.00"))
+        assertEquals(123L, parseInitialBalanceToCents("1.23"))
+        assertEquals(5L, parseInitialBalanceToCents("0.05"))
+        assertEquals(100L, parseInitialBalanceToCents("1"))
+        assertEquals(100L, parseInitialBalanceToCents("1.0"))
+    }
+
+    @Test
+    fun `parse initial balance rejects invalid or negative input`() {
+        assertNull(parseInitialBalanceToCents("."))
+        assertNull(parseInitialBalanceToCents("1.2.3"))
+        assertNull(parseInitialBalanceToCents("1.234"))
+        assertNull(parseInitialBalanceToCents("-5"))
+        assertNull(parseInitialBalanceToCents("١٢٣"))
+        assertNull(parseInitialBalanceToCents("12345678901234567890"))
+    }
+
+    @Test
+    fun `cents to initial balance text omits trailing zeros and zero`() {
+        assertEquals("", centsToInitialBalanceText(0L))
+        assertEquals("", centsToInitialBalanceText(-1L))
+        assertEquals("100", centsToInitialBalanceText(10_000L))
+        assertEquals("1.23", centsToInitialBalanceText(123L))
+    }
 }

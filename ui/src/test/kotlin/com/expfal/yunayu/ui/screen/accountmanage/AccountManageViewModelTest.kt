@@ -55,10 +55,11 @@ class AccountManageViewModelTest {
             vm.events.collect { events.add(it) }
         }
 
-        vm.addAccount("微信")
+        vm.addAccount("微信", 0L)
         runCurrent()
 
         assertEquals(listOf("微信"), repo.added)
+        assertTrue(repo.initialBalanceUpdates.isEmpty())
         assertEquals(listOf(AccountManageEvent.Added), events)
         assertNull(vm.uiState.value.errorMessage)
         assertFalse(vm.uiState.value.busy)
@@ -70,7 +71,7 @@ class AccountManageViewModelTest {
         val vm = viewModel(repo)
         runCurrent()
 
-        vm.addAccount("微信")
+        vm.addAccount("微信", 0L)
         runCurrent()
 
         assertEquals("同名账户已存在", vm.uiState.value.errorMessage)
@@ -83,14 +84,72 @@ class AccountManageViewModelTest {
         val vm = viewModel(repo)
         runCurrent()
 
-        vm.addAccount(" ")
+        vm.addAccount(" ", 0L)
         runCurrent()
 
         assertEquals("账户名不可为空", vm.uiState.value.errorMessage)
     }
 
     @Test
-    fun `rename success emits Renamed and closes rename state`() = runTest {
+    fun `addAccount with initial balance delegates add then updateInitialBalance`() = runTest {
+        val repo = FakeAccountRepository().apply { addResultId = 42L }
+        val vm = viewModel(repo)
+        runCurrent()
+
+        vm.addAccount("微信", 12_345L)
+        runCurrent()
+
+        assertEquals(listOf("微信"), repo.added)
+        assertEquals(listOf(42L to 12_345L), repo.initialBalanceUpdates)
+        assertNull(vm.uiState.value.errorMessage)
+        assertFalse(vm.uiState.value.busy)
+    }
+
+    @Test
+    fun `addAccount skips updateInitialBalance when initial balance is zero`() = runTest {
+        val repo = FakeAccountRepository()
+        val vm = viewModel(repo)
+        runCurrent()
+
+        vm.addAccount("微信", 0L)
+        runCurrent()
+
+        assertEquals(listOf("微信"), repo.added)
+        assertTrue(repo.initialBalanceUpdates.isEmpty())
+    }
+
+    @Test
+    fun `addAccount rejects negative initial balance without writing`() = runTest {
+        val repo = FakeAccountRepository()
+        val vm = viewModel(repo)
+        runCurrent()
+
+        vm.addAccount("微信", -1L)
+        runCurrent()
+
+        assertEquals("期初余额不能为负", vm.uiState.value.errorMessage)
+        assertTrue(repo.added.isEmpty())
+        assertTrue(repo.initialBalanceUpdates.isEmpty())
+        assertFalse(vm.uiState.value.busy)
+    }
+
+    @Test
+    fun `addAccount atomic failure on balance write leaves no partial writes`() = runTest {
+        val repo = FakeAccountRepository().apply { addBalanceError = RuntimeException("balance write failed") }
+        val vm = viewModel(repo)
+        runCurrent()
+
+        vm.addAccount("微信", 12_345L)
+        runCurrent()
+
+        assertEquals("操作失败，请重试", vm.uiState.value.errorMessage)
+        assertTrue(repo.added.isEmpty())
+        assertTrue(repo.initialBalanceUpdates.isEmpty())
+        assertFalse(vm.uiState.value.busy)
+    }
+
+    @Test
+    fun `updateAccount saves name and initial balance and closes edit state`() = runTest {
         val repo = FakeAccountRepository()
         val vm = viewModel(repo)
         runCurrent()
@@ -101,33 +160,70 @@ class AccountManageViewModelTest {
         }
 
         val target = account(5, "旧名")
-        vm.requestRename(target)
-        vm.rename(5, "新名")
+        vm.requestEdit(target)
+        vm.updateAccount(5, "新名", 8_000L)
         runCurrent()
 
         assertEquals(listOf(5L to "新名"), repo.renamed)
-        assertEquals(listOf(AccountManageEvent.Renamed), events)
-        assertNull(vm.uiState.value.renamingAccount)
+        assertEquals(listOf(5L to 8_000L), repo.initialBalanceUpdates)
+        assertEquals(listOf(AccountManageEvent.Updated), events)
+        assertNull(vm.uiState.value.editingAccount)
+        assertFalse(vm.uiState.value.busy)
     }
 
     @Test
-    fun `rename duplicate name keeps rename state with inline error`() = runTest {
+    fun `updateAccount duplicate name keeps edit state with inline error`() = runTest {
         val repo = FakeAccountRepository().apply { renameError = DuplicateAccountNameException("dup") }
         val vm = viewModel(repo)
         runCurrent()
 
-        vm.requestRename(account(5, "旧名"))
-        vm.rename(5, "微信")
+        vm.requestEdit(account(5, "旧名"))
+        vm.updateAccount(5, "微信", 0L)
         runCurrent()
 
         assertEquals("同名账户已存在", vm.uiState.value.errorMessage)
-        assertEquals(5L, vm.uiState.value.renamingAccount?.id)
+        assertEquals(5L, vm.uiState.value.editingAccount?.id)
+        assertTrue(repo.initialBalanceUpdates.isEmpty())
+    }
+
+    @Test
+    fun `updateAccount rejects negative initial balance keeping edit state`() = runTest {
+        val repo = FakeAccountRepository()
+        val vm = viewModel(repo)
+        runCurrent()
+
+        vm.requestEdit(account(5, "旧名"))
+        vm.updateAccount(5, "旧名", -5L)
+        runCurrent()
+
+        assertEquals("期初余额不能为负", vm.uiState.value.errorMessage)
+        assertTrue(repo.renamed.isEmpty())
+        assertTrue(repo.initialBalanceUpdates.isEmpty())
+        assertEquals(5L, vm.uiState.value.editingAccount?.id)
+        assertFalse(vm.uiState.value.busy)
+    }
+
+    @Test
+    fun `updateAccount atomic failure on balance write leaves no partial writes`() = runTest {
+        val repo = FakeAccountRepository().apply { updateBalanceError = RuntimeException("balance write failed") }
+        val vm = viewModel(repo)
+        runCurrent()
+
+        vm.requestEdit(account(5, "旧名"))
+        vm.updateAccount(5, "新名", 8_000L)
+        runCurrent()
+
+        assertEquals("操作失败，请重试", vm.uiState.value.errorMessage)
+        assertTrue(repo.renamed.isEmpty())
+        assertTrue(repo.initialBalanceUpdates.isEmpty())
+        assertEquals(5L, vm.uiState.value.editingAccount?.id)
+        assertFalse(vm.uiState.value.busy)
     }
 
     @Test
     fun `requestDelete computes impact into pendingDelete`() = runTest {
         val repo = FakeAccountRepository().apply {
-            impactById = mapOf(5L to AccountDeleteImpact(7))
+            impactById = mapOf(5L to AccountDeleteImpact(affectedTransactionCount = 7, affectedTransferCount = 3))
         }
         val vm = viewModel(repo)
         runCurrent()
@@ -138,7 +234,23 @@ class AccountManageViewModelTest {
 
         assertEquals(target, vm.uiState.value.pendingDelete?.account)
         assertEquals(7, vm.uiState.value.pendingDelete?.affectedTransactionCount)
+        assertEquals(3, vm.uiState.value.pendingDelete?.affectedTransferCount)
         assertFalse(vm.uiState.value.busy)
+    }
+
+    @Test
+    fun `requestDelete surfaces transfer count for delete confirmation`() = runTest {
+        val repo = FakeAccountRepository().apply {
+            impactById = mapOf(5L to AccountDeleteImpact(affectedTransactionCount = 0, affectedTransferCount = 2))
+        }
+        val vm = viewModel(repo)
+        runCurrent()
+
+        vm.requestDelete(account(5, "微信"))
+        runCurrent()
+
+        assertEquals(0, vm.uiState.value.pendingDelete?.affectedTransactionCount)
+        assertEquals(2, vm.uiState.value.pendingDelete?.affectedTransferCount)
     }
 
     @Test
@@ -189,10 +301,10 @@ class AccountManageViewModelTest {
         val vm = viewModel(repo)
         runCurrent()
 
-        vm.addAccount("微信")
+        vm.addAccount("微信", 0L)
         runCurrent()
-        vm.addAccount("支付宝")
-        vm.rename(1L, "新名")
+        vm.addAccount("支付宝", 0L)
+        vm.updateAccount(1L, "新名", 0L)
 
         repo.addGate?.complete(Unit)
         runCurrent()
@@ -212,7 +324,9 @@ class AccountManageViewModelTest {
         val accountsFlow = MutableStateFlow<List<Account>>(emptyList())
 
         var addError: Throwable? = null
+        var addBalanceError: Throwable? = null
         var renameError: Throwable? = null
+        var updateBalanceError: Throwable? = null
         var deleteImpactError: Throwable? = null
         var deleteError: Throwable? = null
         var addGate: CompletableDeferred<Unit>? = null
@@ -220,9 +334,11 @@ class AccountManageViewModelTest {
 
         val added = mutableListOf<String>()
         val renamed = mutableListOf<Pair<Long, String>>()
+        val initialBalanceUpdates = mutableListOf<Pair<Long, Long>>()
         val deletedIds = mutableListOf<Long>()
         var impactById: Map<Long, AccountDeleteImpact> = emptyMap()
         var defaultImpact = AccountDeleteImpact(0)
+        var addResultId: Long = 100L
 
         override fun observeAccounts(): Flow<List<Account>> = accountsFlow
 
@@ -234,12 +350,34 @@ class AccountManageViewModelTest {
             addGate?.await()
             addError?.let { throw it }
             added += name
-            return 100L
+            return addResultId
+        }
+
+        /** 模拟事务原子语义：任一步失败即不提交（不记录任何写）。 */
+        override suspend fun addAccount(name: String, initialBalanceCents: Long): Long {
+            addGate?.await()
+            addError?.let { throw it }
+            if (initialBalanceCents != 0L) {
+                addBalanceError?.let { throw it }
+            }
+            added += name
+            if (initialBalanceCents != 0L) {
+                initialBalanceUpdates += addResultId to initialBalanceCents
+            }
+            return addResultId
         }
 
         override suspend fun renameAccount(id: Long, newName: String) {
             renameError?.let { throw it }
             renamed += id to newName
+        }
+
+        /** 模拟事务原子语义：任一步失败即不提交（不记录任何写）。 */
+        override suspend fun updateAccount(id: Long, newName: String, initialBalanceCents: Long) {
+            renameError?.let { throw it }
+            updateBalanceError?.let { throw it }
+            renamed += id to newName
+            initialBalanceUpdates += id to initialBalanceCents
         }
 
         override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact {
@@ -256,5 +394,9 @@ class AccountManageViewModelTest {
         override fun observeLastUsedAccountId(): Flow<Long?> = flowOf(null)
 
         override suspend fun saveLastUsedAccountId(id: Long?) = Unit
+
+        override suspend fun updateInitialBalance(accountId: Long, cents: Long) {
+            initialBalanceUpdates += accountId to cents
+        }
     }
 }

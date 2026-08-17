@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
@@ -35,16 +36,21 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expfal.yunayu.domain.model.Account
+import com.expfal.yunayu.ui.util.centsToInitialBalanceText
+import com.expfal.yunayu.ui.util.filterBudgetInput
+import com.expfal.yunayu.ui.util.parseInitialBalanceToCents
 
 /**
- * 「管理账户」全屏：账户列表（名称 + 交易数），行尾改名 / 删除入口，右上角新增账户。
+ * 「管理账户」全屏：账户列表（名称 + 交易数），行尾编辑 / 删除入口，右上角新增账户。
  *
- * 新增 / 改名经弹窗内 [OutlinedTextField] + 内联错误，删除经「先算影响面、再二次确认」两段式；
- * 成功 / 失败事件驱动 Snackbar。子 Composable 各自独立，控制在 80 行内。
+ * 新增 / 编辑经弹窗内 [OutlinedTextField]（账户名 + 期初余额） + 内联错误，期初余额金额输入
+ * 复用 [filterBudgetInput] / [parseInitialBalanceToCents] 校验；删除经「先算影响面、再二次确认」
+ * 两段式；成功 / 失败事件驱动 Snackbar。子 Composable 各自独立，控制在 80 行内。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,7 +65,7 @@ fun AccountManageScreen(
 
     val handleBack = {
         viewModel.cancelDelete()
-        viewModel.dismissRename()
+        viewModel.dismissEdit()
         viewModel.clearError()
         onBack()
     }
@@ -69,7 +75,7 @@ fun AccountManageScreen(
         viewModel.events.collect { event ->
             when (event) {
                 AccountManageEvent.Added -> snackbarHostState.showSnackbar("已添加")
-                AccountManageEvent.Renamed -> snackbarHostState.showSnackbar("已重命名")
+                AccountManageEvent.Updated -> snackbarHostState.showSnackbar("已保存")
                 AccountManageEvent.Deleted -> snackbarHostState.showSnackbar("已删除")
                 is AccountManageEvent.Failed -> snackbarHostState.showSnackbar(event.message)
             }
@@ -113,7 +119,7 @@ fun AccountManageScreen(
             else -> AccountList(
                 rows = uiState.accounts,
                 modifier = Modifier.fillMaxSize().padding(innerPadding),
-                onRename = viewModel::requestRename,
+                onEdit = viewModel::requestEdit,
                 onDelete = viewModel::requestDelete,
             )
         }
@@ -122,9 +128,9 @@ fun AccountManageScreen(
     if (showAddDialog) {
         AddAccountDialog(
             errorMessage = uiState.errorMessage,
-            onConfirm = { name ->
+            onConfirm = { name, cents ->
                 addSubmitted = true
-                viewModel.addAccount(name)
+                viewModel.addAccount(name, cents)
             },
             onDismiss = {
                 showAddDialog = false
@@ -133,12 +139,12 @@ fun AccountManageScreen(
         )
     }
 
-    uiState.renamingAccount?.let { account ->
-        RenameAccountDialog(
+    uiState.editingAccount?.let { account ->
+        EditAccountDialog(
             account = account,
             errorMessage = uiState.errorMessage,
-            onConfirm = { name -> viewModel.rename(account.id, name) },
-            onDismiss = { viewModel.dismissRename() },
+            onConfirm = { name, cents -> viewModel.updateAccount(account.id, name, cents) },
+            onDismiss = { viewModel.dismissEdit() },
         )
     }
 
@@ -151,30 +157,30 @@ fun AccountManageScreen(
     }
 }
 
-/** 账户列表：每行名称 + 交易数 + 改名 / 删除入口。 */
+/** 账户列表：每行名称 + 交易数 + 编辑 / 删除入口。 */
 @Composable
 private fun AccountList(
     rows: List<AccountRow>,
     modifier: Modifier = Modifier,
-    onRename: (Account) -> Unit,
+    onEdit: (Account) -> Unit,
     onDelete: (Account) -> Unit,
 ) {
     LazyColumn(modifier) {
         items(rows, key = { it.account.id }) { row ->
             AccountListRow(
                 row = row,
-                onRename = { onRename(row.account) },
+                onEdit = { onEdit(row.account) },
                 onDelete = { onDelete(row.account) },
             )
         }
     }
 }
 
-/** 账户行：名称 + 交易数 + 改名 / 删除图标。 */
+/** 账户行：名称 + 交易数 + 编辑 / 删除图标。 */
 @Composable
 private fun AccountListRow(
     row: AccountRow,
-    onRename: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Row(
@@ -189,8 +195,8 @@ private fun AccountListRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-        IconButton(onClick = onRename) {
-            Icon(Icons.Default.Edit, contentDescription = "改名")
+        IconButton(onClick = onEdit) {
+            Icon(Icons.Default.Edit, contentDescription = "编辑")
         }
         IconButton(onClick = onDelete) {
             Icon(Icons.Default.Delete, contentDescription = "删除", tint = MaterialTheme.colorScheme.error)
@@ -198,14 +204,16 @@ private fun AccountListRow(
     }
 }
 
-/** 新增账户弹窗：输入 + 错误文案，空名禁用确认。 */
+/** 新增账户弹窗：账户名 + 期初余额（可留空），空名或非法金额禁用确认，错误文案内联。 */
 @Composable
 private fun AddAccountDialog(
     errorMessage: String?,
-    onConfirm: (String) -> Unit,
+    onConfirm: (String, Long) -> Unit,
     onDismiss: () -> Unit,
 ) {
     var name by remember { mutableStateOf("") }
+    var initialBalanceText by remember { mutableStateOf("") }
+    val initialBalanceCents = parseInitialBalanceToCents(initialBalanceText)
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("添加账户") },
@@ -218,42 +226,13 @@ private fun AddAccountDialog(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
-                if (errorMessage != null) {
-                    Spacer(Modifier.height(8.dp))
-                    Text(
-                        errorMessage,
-                        color = MaterialTheme.colorScheme.error,
-                        style = MaterialTheme.typography.bodySmall,
-                    )
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("添加") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
-}
-
-/** 改名弹窗：预填当前名，空名禁用确认，失败透出错误文案。 */
-@Composable
-private fun RenameAccountDialog(
-    account: Account,
-    errorMessage: String?,
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    var name by remember { mutableStateOf(account.name) }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("重命名账户") },
-        text = {
-            Column {
+                Spacer(Modifier.height(8.dp))
                 OutlinedTextField(
-                    value = name,
-                    onValueChange = { name = it },
-                    label = { Text("账户名") },
+                    value = initialBalanceText,
+                    onValueChange = { initialBalanceText = filterBudgetInput(it) },
+                    label = { Text("期初余额（元，可留空）") },
                     singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     modifier = Modifier.fillMaxWidth(),
                 )
                 if (errorMessage != null) {
@@ -267,23 +246,85 @@ private fun RenameAccountDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onConfirm(name) }, enabled = name.isNotBlank()) { Text("保存") }
+            TextButton(
+                onClick = { onConfirm(name, initialBalanceCents ?: 0L) },
+                enabled = name.isNotBlank() && initialBalanceCents != null,
+            ) { Text("添加") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
 
-/** 删除二次确认弹窗：展示受影响交易数，删除用错误色突出。 */
+/** 编辑账户弹窗：账户名 + 期初余额预填当前值，空名或非法金额禁用确认，失败透出错误文案。 */
+@Composable
+private fun EditAccountDialog(
+    account: Account,
+    errorMessage: String?,
+    onConfirm: (String, Long) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var name by remember { mutableStateOf(account.name) }
+    var initialBalanceText by remember { mutableStateOf(centsToInitialBalanceText(account.initialBalanceCents)) }
+    val initialBalanceCents = parseInitialBalanceToCents(initialBalanceText)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("编辑账户") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text("账户名") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = initialBalanceText,
+                    onValueChange = { initialBalanceText = filterBudgetInput(it) },
+                    label = { Text("期初余额（元）") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                if (errorMessage != null) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        errorMessage,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(name, initialBalanceCents ?: 0L) },
+                enabled = name.isNotBlank() && initialBalanceCents != null,
+            ) { Text("保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+    )
+}
+
+/** 删除二次确认弹窗：展示受影响交易数与转账数，删除用错误色突出。 */
 @Composable
 private fun DeleteAccountDialog(
     target: AccountDeleteTarget,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
 ) {
+    val transferPart = if (target.affectedTransferCount > 0) {
+        "，${target.affectedTransferCount} 笔转账将被删除"
+    } else {
+        ""
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("删除账户") },
-        text = { Text("删除「${target.account.name}」后，${target.affectedTransactionCount} 条记录将变为未指定，确定吗？") },
+        text = {
+            Text("删除「${target.account.name}」后，${target.affectedTransactionCount} 条记录将变为未指定$transferPart，确定吗？")
+        },
         confirmButton = {
             TextButton(onClick = onConfirm) {
                 Text("删除", color = MaterialTheme.colorScheme.error)

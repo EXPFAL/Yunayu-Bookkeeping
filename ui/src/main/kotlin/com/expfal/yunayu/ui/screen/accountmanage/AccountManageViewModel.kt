@@ -31,10 +31,11 @@ data class AccountRow(
     val transactionCount: Int,
 )
 
-/** 删除目标快照：账户 + 将受影响的交易数。 */
+/** 删除目标快照：账户 + 将受影响的交易数与转账数。 */
 data class AccountDeleteTarget(
     val account: Account,
     val affectedTransactionCount: Int,
+    val affectedTransferCount: Int = 0,
 )
 
 /** 账户管理屏 UI 状态快照。 */
@@ -43,7 +44,7 @@ data class AccountManageUiState(
     val accounts: List<AccountRow> = emptyList(),
     val busy: Boolean = false,
     val errorMessage: String? = null,
-    val renamingAccount: Account? = null,
+    val editingAccount: Account? = null,
     val pendingDelete: AccountDeleteTarget? = null,
 )
 
@@ -53,8 +54,8 @@ sealed interface AccountManageEvent {
     /** 账户新增成功，列表由观察链自动刷新。 */
     data object Added : AccountManageEvent
 
-    /** 账户改名成功，列表由观察链自动刷新。 */
-    data object Renamed : AccountManageEvent
+    /** 账户编辑（改名 + 期初余额）成功，列表由观察链自动刷新。 */
+    data object Updated : AccountManageEvent
 
     /** 账户删除成功，列表由观察链自动刷新。 */
     data object Deleted : AccountManageEvent
@@ -68,10 +69,12 @@ sealed interface AccountManageEvent {
  *
  * 账户列表观察链以 [AccountRepository.observeAccounts] 为源，[flatMapLatest] 展开为逐账户
  * [AccountRepository.getDeleteImpact]（删除影响面即交易数，账户数少，取最小实现）的计数快照，
- * 异常由 `.catch` 兜底并置 loading=false。变更动作统一经 `busy` 防重入；新增 / 改名的重名
- * 与非法入参映射到 [AccountManageUiState.errorMessage] 内联展示（不崩溃），删除采用
+ * 异常由 `.catch` 兜底并置 loading=false。变更动作统一经 `busy` 防重入；新增 / 编辑的重名、
+ * 非法入参与负期初余额映射到 [AccountManageUiState.errorMessage] 内联展示（不崩溃），删除采用
  * 「先算影响面、再二次确认」两段式，成功 / 失败分别发出 [AccountManageEvent.Deleted] /
- * [AccountManageEvent.Failed]。
+ * [AccountManageEvent.Failed]。期初余额保存统一走 [AccountRepository.updateInitialBalance]：
+ * 编辑在 [AccountRepository.renameAccount] 成功后写期初，新增在 [AccountRepository.addAccount]
+ * 成功后追加写期初（0 跳过写库）。
  */
 @OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
@@ -102,12 +105,21 @@ class AccountManageViewModel @Inject constructor(
         }
     }
 
-    /** 新增账户；重名 / 非法入参映射内联错误文案，成功发 [AccountManageEvent.Added]。 */
-    fun addAccount(name: String) {
+    /**
+     * 新增账户并设置期初余额（分）：单次调用 [AccountRepository.addAccount] 原子完成
+     * 建户 + 期初写入（期初非 0 时由仓储在同一事务内落库），避免两步写半状态。
+     *
+     * 负期初余额 / 重名 / 非法入参映射内联错误文案，成功发 [AccountManageEvent.Added]。
+     */
+    fun addAccount(name: String, initialBalanceCents: Long) {
         if (_uiState.value.busy) return
+        if (initialBalanceCents < 0L) {
+            _uiState.update { it.copy(errorMessage = "期初余额不能为负") }
+            return
+        }
         _uiState.update { it.copy(busy = true, errorMessage = null) }
         viewModelScope.launch {
-            runCatching { accountRepository.addAccount(name) }
+            runCatching { accountRepository.addAccount(name, initialBalanceCents) }
                 .onSuccess {
                     _events.tryEmit(AccountManageEvent.Added)
                     _uiState.update { it.copy(busy = false, errorMessage = null) }
@@ -116,28 +128,38 @@ class AccountManageViewModel @Inject constructor(
         }
     }
 
-    /** 进入改名态：记录待改名账户，供 UI 弹出改名弹窗。 */
-    fun requestRename(account: Account) {
+    /** 进入编辑态：记录待编辑账户，供 UI 弹出「编辑账户」弹窗（改名 + 期初余额）。 */
+    fun requestEdit(account: Account) {
         if (_uiState.value.busy) return
-        _uiState.update { it.copy(renamingAccount = account, errorMessage = null) }
+        _uiState.update { it.copy(editingAccount = account, errorMessage = null) }
     }
 
-    /** 取消改名态，清空改名相关错误反馈。 */
-    fun dismissRename() {
-        _uiState.update { it.copy(renamingAccount = null, errorMessage = null) }
+    /** 取消编辑态，清空编辑相关错误反馈。 */
+    fun dismissEdit() {
+        _uiState.update { it.copy(editingAccount = null, errorMessage = null) }
     }
 
-    /** 提交改名；成功发 [AccountManageEvent.Renamed] 并关闭改名态，失败保留改名态并内联错误。 */
-    fun rename(accountId: Long, newName: String) {
+    /**
+     * 提交编辑：单次调用 [AccountRepository.updateAccount] 原子完成改名 + 期初写入，
+     * 避免两步写半状态（保存统一走原子更新口径）。
+     *
+     * 负期初余额直接内联拒绝；成功发 [AccountManageEvent.Updated] 并关闭编辑态，
+     * 失败保留编辑态并内联错误。
+     */
+    fun updateAccount(accountId: Long, newName: String, initialBalanceCents: Long) {
         if (_uiState.value.busy) return
+        if (initialBalanceCents < 0L) {
+            _uiState.update { it.copy(errorMessage = "期初余额不能为负") }
+            return
+        }
         _uiState.update { it.copy(busy = true, errorMessage = null) }
         viewModelScope.launch {
-            runCatching { accountRepository.renameAccount(accountId, newName) }
+            runCatching { accountRepository.updateAccount(accountId, newName, initialBalanceCents) }
                 .onSuccess {
-                    _events.tryEmit(AccountManageEvent.Renamed)
-                    _uiState.update { it.copy(busy = false, renamingAccount = null, errorMessage = null) }
+                    _events.tryEmit(AccountManageEvent.Updated)
+                    _uiState.update { it.copy(busy = false, editingAccount = null, errorMessage = null) }
                 }
-                .onFailure { throwable -> handleActionFailure(throwable, "Failed to rename account") }
+                .onFailure { throwable -> handleActionFailure(throwable, "Failed to update account") }
         }
     }
 
@@ -151,7 +173,11 @@ class AccountManageViewModel @Inject constructor(
                     _uiState.update {
                         it.copy(
                             busy = false,
-                            pendingDelete = AccountDeleteTarget(account, impact.affectedTransactionCount),
+                            pendingDelete = AccountDeleteTarget(
+                                account = account,
+                                affectedTransactionCount = impact.affectedTransactionCount,
+                                affectedTransferCount = impact.affectedTransferCount,
+                            ),
                         )
                     }
                 }

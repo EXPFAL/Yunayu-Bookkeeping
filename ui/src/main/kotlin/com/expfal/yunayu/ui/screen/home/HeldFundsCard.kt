@@ -25,14 +25,15 @@ import com.expfal.yunayu.domain.model.AccountBalance
 import com.expfal.yunayu.ui.util.formatCents
 
 /**
- * 首页「持有资金」卡片：口径 = 累计收入 − 累计支出（全历史净结余）。
+ * 首页「持有资金」卡片：口径 = 期初余额总和 + 累计净结余（含账户口径）。
  *
- * 正结余以常规色展示并标注「自记账日起净结余」；负结余以 error 色展示并标注「已超支」，
+ * 正结余以常规色展示并标注「含期初余额」；负结余以 error 色展示并标注「已超支」，
  * 金额符号统一以「-¥」前置表达方向。
  *
- * 当存在具名账户分组时，在总计行上方按账户逐行展示净额（「未指定账户」置末位）；
- * 各账户余额之和 + 未指定账户 = 总计（恒等式由数据层 GROUP BY 保证）。分组为空或仅
- * 一条未指定账户行时不渲染分组区，仅显示总计。
+ * 当存在具名账户分组时，在总计行上方按账户逐行展示余额（各账户余额 = 期初 + 交易净额 +
+ * 转账净额；「未指定账户」无期初与转账，仅交易净额，置末位）；各账户余额之和 + 未指定账户
+ * = 总计（恒等式由数据层聚合保证：总资金 = 期初总和 + 累计净结余 = Σ账户余额 + 未指定净额）。
+ * 分组为空或仅一条未指定账户行时不渲染分组区，仅显示总计。
  */
 @Composable
 fun HeldFundsCard(
@@ -42,7 +43,7 @@ fun HeldFundsCard(
 ) {
     val isOverspent = heldCents < 0L
     val amountText = (if (isOverspent) "-¥ " else "¥ ") + formatCents(if (isOverspent) -heldCents else heldCents)
-    val subtitle = if (isOverspent) "已超支 · 自记账日起净结余" else "自记账日起净结余"
+    val subtitle = if (isOverspent) "已超支 · 含期初余额" else "含期初余额 · 净结余"
     val accentColor = if (isOverspent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
     val subColor = if (isOverspent) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
     val showBreakdown = heldByAccount.any { it.accountId != null }
@@ -100,7 +101,7 @@ private fun heldFundsCardBrush(): Brush {
     }
 }
 
-/** 按账户逐行展示净额：具名账户在前（保持原有顺序），「未指定账户」置末位。 */
+/** 按账户逐行展示余额（含期初）：具名账户在前（保持原有顺序），「未指定账户」置末位。 */
 @Composable
 private fun AccountBreakdown(balances: List<AccountBalance>) {
     val (named, unspecified) = balances.partition { it.accountId != null }

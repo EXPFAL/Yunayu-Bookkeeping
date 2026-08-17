@@ -150,6 +150,42 @@ class HomeViewModelTest {
         assertEquals(-500L, state.heldByAccount.single().balanceCents)
     }
 
+    @Test
+    fun `held cents equals sum of account balances including initial balance`() = runTest {
+        val transactionRepo = FakeTransactionRepository().apply { heldCentsFlow.value = 15_000L }
+        val accountRepo = FakeAccountRepository().apply {
+            balancesFlow.value = listOf(
+                AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 11_000L),
+                AccountBalance(accountId = 2L, accountName = "支付宝", balanceCents = 6_000L),
+                AccountBalance(accountId = null, accountName = null, balanceCents = -2_000L),
+            )
+        }
+        val viewModel = createViewModel(transactionRepository = transactionRepo, accountRepository = accountRepo)
+
+        val state = viewModel.uiState.value
+        assertEquals(15_000L, state.heldCents)
+        // 恒等式：总资金 = Σ账户余额 + 未指定净额（含期初口径下仍自一致）
+        assertEquals(state.heldCents, state.heldByAccount.sumOf { it.balanceCents })
+    }
+
+    @Test
+    fun `initial balance change re-emits held funds and account breakdown`() = runTest {
+        val transactionRepo = FakeTransactionRepository()
+        val accountRepo = FakeAccountRepository()
+        val viewModel = createViewModel(transactionRepository = transactionRepo, accountRepository = accountRepo)
+
+        transactionRepo.heldCentsFlow.value = 5_000L
+        accountRepo.balancesFlow.value = listOf(AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 5_000L))
+        assertEquals(5_000L, viewModel.uiState.value.heldCents)
+        assertEquals(5_000L, viewModel.uiState.value.heldByAccount.single().balanceCents)
+
+        // 修改期初后两条观察链重新发射，持有资金与账户分组同步刷新
+        transactionRepo.heldCentsFlow.value = 12_000L
+        accountRepo.balancesFlow.value = listOf(AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 12_000L))
+        assertEquals(12_000L, viewModel.uiState.value.heldCents)
+        assertEquals(12_000L, viewModel.uiState.value.heldByAccount.single().balanceCents)
+    }
+
     private fun recent(
         id: Long,
         tagName: String? = null,
@@ -210,6 +246,10 @@ class HomeViewModelTest {
         override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
+
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
     }
 
     /** [AccountRepository] 手写 fake：以 MutableStateFlow 驱动按账户分组余额。 */
@@ -226,7 +266,11 @@ class HomeViewModelTest {
 
         override suspend fun addAccount(name: String): Long = 0L
 
+        override suspend fun addAccount(name: String, initialBalanceCents: Long): Long = 0L
+
         override suspend fun renameAccount(id: Long, newName: String) = Unit
+
+        override suspend fun updateAccount(id: Long, newName: String, initialBalanceCents: Long) = Unit
 
         override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact = AccountDeleteImpact(0)
 
@@ -235,6 +279,8 @@ class HomeViewModelTest {
         override fun observeLastUsedAccountId(): Flow<Long?> = flowOf(null)
 
         override suspend fun saveLastUsedAccountId(id: Long?) = Unit
+
+        override suspend fun updateInitialBalance(accountId: Long, cents: Long) = Unit
     }
 
     private fun createViewModel(
