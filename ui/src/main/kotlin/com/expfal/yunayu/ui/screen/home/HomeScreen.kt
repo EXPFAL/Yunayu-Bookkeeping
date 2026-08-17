@@ -48,20 +48,19 @@ import com.expfal.yunayu.ui.screen.budget.BudgetCard
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetSheet
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetUiState
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetViewModel
-import com.expfal.yunayu.ui.screen.quickadd.QuickAddSheet
+import com.expfal.yunayu.ui.screen.quickadd.QuickAddScreen
 import com.expfal.yunayu.ui.screen.report.ReportScreen
 import com.expfal.yunayu.ui.screen.tagmanage.TagManageScreen
 import com.expfal.yunayu.ui.screen.transactionmanage.TransactionManageScreen
 import kotlinx.coroutines.launch
 
-/** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告 / 收支管理 / 账户管理，六态互斥。 */
-private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS, REPORT, TRANSACTIONS, ACCOUNT_MANAGE }
+/** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告 / 收支管理 / 账户管理 / 记一笔，七态互斥。 */
+private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS, REPORT, TRANSACTIONS, ACCOUNT_MANAGE, QUICK_ADD }
 
-/** 首页：月度预算看板卡片置顶，下方最近记录列表，悬浮「快速记账」按钮唤起快捷记账弹层。 */
+/** 首页：月度预算看板卡片置顶，下方最近记录列表，悬浮「快速记账」按钮进入全屏记账页面。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
-    var showQuickAdd by remember { mutableStateOf(false) }
     var showBudgetSetup by remember { mutableStateOf(false) }
     var fullScreen by remember { mutableStateOf(FullScreen.NONE) }
     val budgetViewModel: MonthlyBudgetViewModel = viewModel()
@@ -70,6 +69,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    // F3 修复：提升 listState 到 when 分发之外，跨全屏切换存活，避免返回时滚动位置丢失
+    val listState = rememberLazyListState()
 
     when (fullScreen) {
         FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
@@ -77,6 +78,13 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         FullScreen.REPORT -> ReportScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.TRANSACTIONS -> TransactionManageScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.ACCOUNT_MANAGE -> AccountManageScreen(onBack = { fullScreen = FullScreen.NONE })
+        FullScreen.QUICK_ADD -> QuickAddScreen(
+            onBack = { fullScreen = FullScreen.NONE },
+            onSaved = {
+                fullScreen = FullScreen.NONE
+                homeViewModel.notifySaved()
+            },
+        )
         FullScreen.NONE -> HomeMainContent(
             modifier = modifier,
             homeViewModel = homeViewModel,
@@ -84,22 +92,14 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             budgetState = budgetState,
             drawerState = drawerState,
             scope = scope,
+            listState = listState,
             currentFullScreen = fullScreen,
             onFullScreenChange = { fullScreen = it },
-            onShowQuickAdd = { showQuickAdd = true },
+            onShowQuickAdd = { fullScreen = FullScreen.QUICK_ADD },
             onShowBudgetSetup = { showBudgetSetup = true },
         )
     }
 
-    if (showQuickAdd) {
-        QuickAddSheet(
-            onDismissRequest = { showQuickAdd = false },
-            onSaved = {
-                showQuickAdd = false
-                homeViewModel.notifySaved()
-            },
-        )
-    }
     if (showBudgetSetup) {
         MonthlyBudgetSheet(
             viewModel = budgetViewModel,
@@ -118,13 +118,12 @@ private fun HomeMainContent(
     budgetState: MonthlyBudgetUiState,
     drawerState: androidx.compose.material3.DrawerState,
     scope: kotlinx.coroutines.CoroutineScope,
+    listState: LazyListState,
     currentFullScreen: FullScreen,
     onFullScreenChange: (FullScreen) -> Unit,
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
 ) {
-    val listState = rememberLazyListState()
-
     LaunchedEffect(homeViewModel) {
         homeViewModel.events.collect { event ->
             when (event) {

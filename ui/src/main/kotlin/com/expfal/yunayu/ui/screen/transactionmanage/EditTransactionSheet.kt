@@ -173,7 +173,7 @@ private fun EditContent(
     }
 }
 
-/** 收/支方向切换控件，样式与快捷记账的 [com.expfal.yunayu.ui.screen.quickadd.QuickAddSheet] 对齐。 */
+/** 收/支方向切换控件，样式与快捷记账的 [com.expfal.yunayu.ui.screen.quickadd.QuickAddScreen] 对齐。 */
 @Composable
 private fun EditTypeToggle(
     transactionType: TransactionType,
