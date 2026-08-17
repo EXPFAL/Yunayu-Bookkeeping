@@ -66,6 +66,8 @@ data class QuickAddUiState(
     val transferNote: String = "",
     /** 转账保存前校验失败的用户可见提示；成功或重新输入时清除。 */
     val transferError: String? = null,
+    /** 数字模式收支的可选手动备注；转账模式忽略（转账有独立 [transferNote]）。 */
+    val manualNote: String = "",
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -79,10 +81,10 @@ sealed interface QuickAddEvent {
 }
 
 /**
- * 「3秒极速记账」ViewModel：数字键盘直输金额 + 自然语言记账 + 最近常用分类预选 + 大额二次确认。
+ * 「3秒极速记账」ViewModel：手动记直输金额 + 自动记自然语言记账 + 最近常用分类预选 + 大额二次确认。
  *
- * 数字模式金额以文本维护（整数 ≤7 位、小数 ≤2 位），落库前经 [parseAmountToCents]
- * 转换为「分」；自然语言模式调用 [ParseNaturalLanguageTransactionUseCase] 产出草稿预览，
+ * 手动记金额以文本维护（整数 ≤7 位、小数 ≤2 位），落库前经 [parseAmountToCents]
+ * 转换为「分」；自动记模式调用 [ParseNaturalLanguageTransactionUseCase] 产出草稿预览，
  * 确认后经 [AddParsedTransactionUseCase] 直通落库。成功保存后经 [events] 发出一次性
  * [QuickAddEvent.Saved]，失败发出 [QuickAddEvent.SaveFailed]。事件流无回放、缓冲为 1 且
  * 满时丢弃最旧，杜绝下次打开弹层回放陈旧事件。
@@ -137,6 +139,7 @@ class QuickAddViewModel @Inject constructor(
                 toAccountId = null,
                 transferNote = "",
                 transferError = null,
+                manualNote = "",
             )
         }
         reloadAccounts()
@@ -336,6 +339,11 @@ class QuickAddViewModel @Inject constructor(
         _uiState.update { it.copy(transferNote = note) }
     }
 
+    /** 更新数字模式收支的手动备注。 */
+    fun onManualNoteChange(note: String) {
+        _uiState.update { it.copy(manualNote = note) }
+    }
+
     /**
      * 尝试保存：金额非法或非正数时不响应；金额超过阈值且未确认时仅弹确认；
      * 否则真正落库。转账模式绕过必要支出确认，直接走转账落库。saving 期间重复调用直接忽略。
@@ -378,6 +386,7 @@ class QuickAddViewModel @Inject constructor(
         val selectedAccountId = _uiState.value.selectedAccountId
         _uiState.update { it.copy(saving = true, saveFailed = false) }
         viewModelScope.launch {
+            val note = _uiState.value.manualNote.trim().ifBlank { null }
             runCatching {
                 addTransactionUseCase(
                     amountCents = amountCents,
@@ -385,6 +394,7 @@ class QuickAddViewModel @Inject constructor(
                     occurredAt = System.currentTimeMillis(),
                     type = type,
                     accountId = selectedAccountId,
+                    note = note,
                 )
             }.onSuccess {
                 nlConfirmPending = false
@@ -396,6 +406,7 @@ class QuickAddViewModel @Inject constructor(
                         saving = false,
                         saveFailed = false,
                         confirmRequested = false,
+                        manualNote = "",
                     )
                 }
                 rememberLastUsedAccount(selectedAccountId)
@@ -467,7 +478,7 @@ class QuickAddViewModel @Inject constructor(
     }
 
     /**
-     * 切换「数字键盘 / 自然语言」输入模式；saving / nlParsing 期间禁止切换。
+     * 切换「手动记 / 自动记」输入模式；saving / nlParsing 期间禁止切换。
      * 切换即清空 NL 输入与预览，防止下次进入看到陈旧状态。
      */
     fun setNlMode(enabled: Boolean) {

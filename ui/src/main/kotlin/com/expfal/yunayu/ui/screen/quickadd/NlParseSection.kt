@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -32,10 +33,10 @@ fun nlFailureMessage(failure: NlParseFailure): String = when (failure) {
     NlParseFailure.EMPTY_INPUT -> "请先输入一句话，例如「午饭花了20块」"
     NlParseFailure.NO_AMOUNT -> "没听清金额，请补充金额后再试，例如「午饭20块」"
     NlParseFailure.MALFORMED_OUTPUT -> "没解析出来，换个说法再试一次"
-    NlParseFailure.ENGINE_UNAVAILABLE -> "自然语言记账暂不可用（未配置或网络异常），可用数字键盘记账"
+    NlParseFailure.ENGINE_UNAVAILABLE -> "自动记暂不可用（未配置或网络异常），可手动记账"
 }
 
-/** 「数字键盘 / 自然语言」输入模式切换控件。 */
+/** 「手动记 / 自动记」输入模式切换控件。 */
 @Composable
 fun NlModeToggle(
     nlMode: Boolean,
@@ -49,17 +50,17 @@ fun NlModeToggle(
         FilterChip(
             selected = !nlMode,
             onClick = { onModeChange(false) },
-            label = { Text("数字键盘") },
+            label = { Text("手动记") },
         )
         FilterChip(
             selected = nlMode,
             onClick = { onModeChange(true) },
-            label = { Text("自然语言") },
+            label = { Text("自动记") },
         )
     }
 }
 
-/** 自然语言输入区：输入框 + 解析按钮 + 解析中态 / 失败文案 / 预览卡 + 确认按钮。 */
+/** 自动记输入区：输入框 + 解析按钮 + 解析中态 / 失败文案 / 预览卡 + 确认按钮。 */
 @Composable
 fun NlParseSection(
     inputText: String,
@@ -98,7 +99,7 @@ fun NlParseSection(
     }
 }
 
-/** 自然语言输入框与解析按钮。 */
+/** 自动记输入框与解析按钮。 */
 @Composable
 private fun NlInputField(
     inputText: String,
@@ -113,7 +114,7 @@ private fun NlInputField(
         placeholder = { Text("例如：午饭花了20块") },
         minLines = 1,
         maxLines = 3,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().imePadding(),
     )
     Spacer(Modifier.height(12.dp))
     Button(

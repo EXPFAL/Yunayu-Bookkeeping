@@ -22,11 +22,12 @@ class AddTransactionUseCase(
         occurredAt: Long = System.currentTimeMillis(),
         type: TransactionType = TransactionType.EXPENSE,
         accountId: Long? = null,
+        note: String? = null,
     ): Long = transactionRepository.add(
         Transaction(
             amountCents = amountCents,
             type = type,
-            note = null,
+            note = note,
             tagId = tagId,
             accountId = accountId,
             occurredAt = occurredAt,

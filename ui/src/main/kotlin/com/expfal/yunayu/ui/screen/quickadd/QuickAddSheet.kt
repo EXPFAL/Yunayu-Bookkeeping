@@ -282,6 +282,16 @@ private fun NumberInputSection(
     uiState: QuickAddUiState,
     viewModel: QuickAddViewModel,
 ) {
+    if (!uiState.transferMode) {
+        OutlinedTextField(
+            value = uiState.manualNote,
+            onValueChange = viewModel::onManualNoteChange,
+            placeholder = { Text("备注（可选）") },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(modifier = Modifier.height(12.dp))
+    }
     NumberPad(
         onDigit = viewModel::onDigit,
         onDelete = viewModel::onDelete,

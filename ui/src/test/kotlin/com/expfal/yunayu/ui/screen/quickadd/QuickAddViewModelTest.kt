@@ -1092,6 +1092,58 @@ class QuickAddViewModelTest {
         assertEquals("", viewModel.uiState.value.amountText)
     }
 
+    @Test
+    fun `manualNote is passed to transaction note on save`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val viewModel = viewModel(FakeTagRepository(), txRepo)
+
+        viewModel.onDigit('5')
+        viewModel.onManualNoteChange("午饭钱")
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals("午饭钱", txRepo.added.single().note)
+    }
+
+    @Test
+    fun `manualNote is null when empty or blank`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val viewModel = viewModel(FakeTagRepository(), txRepo)
+
+        viewModel.onDigit('5')
+        viewModel.onManualNoteChange("   ")
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertNull(txRepo.added.single().note)
+    }
+
+    @Test
+    fun `manualNote is cleared after successful save`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val viewModel = viewModel(FakeTagRepository(), txRepo)
+
+        viewModel.onDigit('5')
+        viewModel.onManualNoteChange("午饭钱")
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals("", viewModel.uiState.value.manualNote)
+    }
+
+    @Test
+    fun `manualNote is cleared on resetForOpen`() = runTest {
+        val viewModel = viewModel()
+
+        viewModel.onManualNoteChange("旧备注")
+        assertEquals("旧备注", viewModel.uiState.value.manualNote)
+
+        viewModel.resetForOpen()
+        assertEquals("", viewModel.uiState.value.manualNote)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository = FakeTagRepository(),
         txRepo: TransactionRepository = FakeTransactionRepository(),
