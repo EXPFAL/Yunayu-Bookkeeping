@@ -11,4 +11,5 @@ data class Account(
     val id: Long = 0L,
     val name: String,
     val createdAt: Long = 0L,
+    val initialBalanceCents: Long = 0L,
 )

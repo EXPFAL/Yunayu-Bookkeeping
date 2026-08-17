@@ -5,7 +5,15 @@ import android.content.ContextWrapper
 import android.database.sqlite.SQLiteConstraintException
 import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.edit
+import androidx.room.DatabaseConfiguration
+import androidx.room.InvalidationTracker
+import androidx.sqlite.db.SupportSQLiteOpenHelper
+import com.expfal.yunayu.data.local.YunayuDatabase
+import com.expfal.yunayu.data.local.dao.AccountDao
+import com.expfal.yunayu.data.local.dao.ReportDao
+import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
+import com.expfal.yunayu.data.local.dao.TransferDao
 import com.expfal.yunayu.data.local.entity.AccountEntity
 import com.expfal.yunayu.domain.model.Account
 import com.expfal.yunayu.domain.model.AccountBalance
@@ -128,14 +136,75 @@ class AccountRepositoryImplTest {
     }
 
     @Test
-    fun `getDeleteImpact delegates countByAccountId`() = runTest {
+    fun `addAccountAtomic inserts then writes initial balance in one unit`() = runTest {
+        val dao = FakeAccountDao().apply { nextInsertId = 42L }
+        val repository = repository(dao, FakeTransactionDao())
+
+        val id = repository.addAccountAtomic("微信", 12_345L)
+
+        assertEquals(42L, id)
+        assertEquals(1, dao.insertedAccounts.size)
+        assertEquals(listOf(42L to 12_345L), dao.updateInitialBalanceCalls)
+    }
+
+    @Test
+    fun `addAccountAtomic skips initial balance write when zero`() = runTest {
+        val dao = FakeAccountDao()
+        val repository = repository(dao, FakeTransactionDao())
+
+        repository.addAccountAtomic("微信", 0L)
+
+        assertEquals(1, dao.insertedAccounts.size)
+        assertTrue(dao.updateInitialBalanceCalls.isEmpty())
+    }
+
+    @Test
+    fun `addAccountAtomic propagates balance write failure`() = runTest {
+        // 期初写入抛异常时事务体向外传播，由外层 withTransaction 回滚第一步的 insert
+        val dao = FakeAccountDao().apply { updateInitialBalanceError = RuntimeException("db down") }
+        val repository = repository(dao, FakeTransactionDao())
+
+        val error = captureError { repository.addAccountAtomic("微信", 12_345L) }
+
+        assertEquals(RuntimeException::class.java, error?.javaClass)
+    }
+
+    @Test
+    fun `updateAccountAtomic renames then writes initial balance in one unit`() = runTest {
+        val dao = FakeAccountDao().apply { allAccounts = listOf(accountEntity(2L, "微信")) }
+        val repository = repository(dao, FakeTransactionDao())
+
+        repository.updateAccountAtomic(2L, "建行", 8_000L)
+
+        assertEquals(listOf(2L to "建行"), dao.renameCalls)
+        assertEquals(listOf(2L to 8_000L), dao.updateInitialBalanceCalls)
+    }
+
+    @Test
+    fun `updateAccountAtomic propagates balance write failure`() = runTest {
+        // 期初写入抛异常时事务体向外传播，由外层 withTransaction 回滚第一步的 rename
+        val dao = FakeAccountDao().apply {
+            allAccounts = listOf(accountEntity(2L, "微信"))
+            updateInitialBalanceError = RuntimeException("db down")
+        }
+        val repository = repository(dao, FakeTransactionDao())
+
+        val error = captureError { repository.updateAccountAtomic(2L, "建行", 8_000L) }
+
+        assertEquals(RuntimeException::class.java, error?.javaClass)
+    }
+
+    @Test
+    fun `getDeleteImpact delegates countByAccountId for transactions and transfers`() = runTest {
         val transactionDao = FakeTransactionDao().apply { countByAccountIdResult = 7 }
-        val repository = repository(FakeAccountDao(), transactionDao)
+        val transferDao = FakeTransferDao().apply { countByAccountIdResult = 3 }
+        val repository = repository(FakeAccountDao(), transactionDao, transferDao)
 
         val impact = repository.getDeleteImpact(2L)
 
-        assertEquals(AccountDeleteImpact(7), impact)
+        assertEquals(AccountDeleteImpact(affectedTransactionCount = 7, affectedTransferCount = 3), impact)
         assertEquals(listOf(2L), transactionDao.countByAccountIdCalls)
+        assertEquals(listOf(2L), transferDao.countByAccountIdCalls)
     }
 
     @Test
@@ -151,36 +220,134 @@ class AccountRepositoryImplTest {
     @Test
     fun `observeAccounts maps entities to domain models`() = runTest {
         val dao = FakeAccountDao().apply {
-            observeAllFlow = flowOf(listOf(accountEntity(1L, "微信", 100L), accountEntity(2L, "支付宝", 200L)))
+            observeAllFlow = flowOf(
+                listOf(
+                    accountEntity(1L, "微信", 100L, initialBalanceCents = 5_000L),
+                    accountEntity(2L, "支付宝", 200L),
+                ),
+            )
         }
         val repository = repository(dao, FakeTransactionDao())
 
         val accounts = repository.observeAccounts().first()
 
         assertEquals(
-            listOf(Account(id = 1L, name = "微信", createdAt = 100L), Account(id = 2L, name = "支付宝", createdAt = 200L)),
+            listOf(
+                Account(id = 1L, name = "微信", createdAt = 100L, initialBalanceCents = 5_000L),
+                Account(id = 2L, name = "支付宝", createdAt = 200L),
+            ),
             accounts,
         )
     }
 
     @Test
-    fun `observeBalances maps rows to AccountBalance including unspecified`() = runTest {
+    fun `observeBalances aggregates initial balance transaction net and transfer net`() = runTest {
+        val accountDao = FakeAccountDao().apply {
+            observeAllFlow = flowOf(
+                listOf(
+                    accountEntity(1L, "微信", 100L, initialBalanceCents = 5_000L),
+                    accountEntity(2L, "支付宝", 200L),
+                ),
+            )
+        }
         val transactionDao = FakeTransactionDao().apply {
             balancesByAccountFlow = flowOf(
                 listOf(
                     TransactionDao.HeldByAccountRow(1L, "微信", 7_000L),
+                    TransactionDao.HeldByAccountRow(2L, "支付宝", 5_000L),
                     TransactionDao.HeldByAccountRow(null, null, -2_000L),
                 ),
             )
         }
-        val repository = repository(FakeAccountDao(), transactionDao)
+        val transferDao = FakeTransferDao().apply {
+            netByAccountFlow = flowOf(
+                listOf(
+                    TransferDao.TransferNetRow(1L, -1_000L),
+                    TransferDao.TransferNetRow(2L, 1_000L),
+                ),
+            )
+        }
+        val repository = repository(accountDao, transactionDao, transferDao)
 
         val balances = repository.observeBalances().first()
 
         assertEquals(
-            listOf(AccountBalance(1L, "微信", 7_000L), AccountBalance(null, null, -2_000L)),
+            listOf(
+                AccountBalance(1L, "微信", 11_000L),
+                AccountBalance(2L, "支付宝", 6_000L),
+                AccountBalance(null, null, -2_000L),
+            ),
             balances,
         )
+    }
+
+    @Test
+    fun `observeBalances invariant total equals initial sum plus transaction net`() = runTest {
+        // 期初总和 = 5000 + 0 = 5000；交易净额 = 7000 + 5000 - 2000 = 10000；转账净额合计 0
+        val accountDao = FakeAccountDao().apply {
+            observeAllFlow = flowOf(
+                listOf(
+                    accountEntity(1L, "微信", 100L, initialBalanceCents = 5_000L),
+                    accountEntity(2L, "支付宝", 200L),
+                ),
+            )
+        }
+        val transactionDao = FakeTransactionDao().apply {
+            balancesByAccountFlow = flowOf(
+                listOf(
+                    TransactionDao.HeldByAccountRow(1L, "微信", 7_000L),
+                    TransactionDao.HeldByAccountRow(2L, "支付宝", 5_000L),
+                    TransactionDao.HeldByAccountRow(null, null, -2_000L),
+                ),
+            )
+        }
+        val transferDao = FakeTransferDao().apply {
+            netByAccountFlow = flowOf(
+                listOf(
+                    TransferDao.TransferNetRow(1L, -1_000L),
+                    TransferDao.TransferNetRow(2L, 1_000L),
+                ),
+            )
+        }
+        val repository = repository(accountDao, transactionDao, transferDao)
+
+        val balances = repository.observeBalances().first()
+
+        // 总资金 = Σ账户余额 + 未指定净额 = 期初总和 + 累计净结余；转账净额合计 0 不改变总额
+        assertEquals(15_000L, balances.sumOf { it.balanceCents })
+        assertEquals(5_000L + 10_000L, balances.sumOf { it.balanceCents })
+    }
+
+    @Test
+    fun `updateInitialBalance delegates to dao`() = runTest {
+        val dao = FakeAccountDao()
+        val repository = repository(dao, FakeTransactionDao())
+
+        repository.updateInitialBalance(2L, 12_345L)
+
+        assertEquals(listOf(2L to 12_345L), dao.updateInitialBalanceCalls)
+    }
+
+    @Test
+    fun `observeBalances excludes deleted account so initial balance does not linger`() = runTest {
+        // 账户 2（期初 0）已删除，观察流只剩账户 1（期初 5000）
+        val accountDao = FakeAccountDao().apply {
+            observeAllFlow = flowOf(
+                listOf(accountEntity(1L, "微信", 100L, initialBalanceCents = 5_000L)),
+            )
+        }
+        val transactionDao = FakeTransactionDao().apply {
+            balancesByAccountFlow = flowOf(
+                listOf(TransactionDao.HeldByAccountRow(1L, "微信", 7_000L)),
+            )
+        }
+        val repository = repository(accountDao, transactionDao)
+
+        val balances = repository.observeBalances().first()
+
+        assertEquals(listOf(AccountBalance(1L, "微信", 12_000L)), balances)
+        // 已删除账户的期初/交易不残留，总额只含剩余账户
+        assertEquals(12_000L, balances.sumOf { it.balanceCents })
     }
 
     @Test
@@ -209,11 +376,31 @@ class AccountRepositoryImplTest {
         assertNull(dataStore.data.map { it.toLastUsedAccountId() }.first())
     }
 
-    private fun repository(accountDao: FakeAccountDao, transactionDao: FakeTransactionDao): AccountRepositoryImpl =
-        AccountRepositoryImpl(accountDao, transactionDao, nullContext)
+    private fun repository(
+        accountDao: FakeAccountDao,
+        transactionDao: FakeTransactionDao,
+        transferDao: FakeTransferDao = FakeTransferDao(),
+    ): AccountRepositoryImpl = AccountRepositoryImpl(fakeDatabase(), accountDao, transactionDao, transferDao, nullContext)
 
-    private fun accountEntity(id: Long, name: String, createdAt: Long = 100L) =
-        AccountEntity(id = id, name = name, createdAt = createdAt)
+    /** 构造阶段占位：非事务路径不触碰数据库，事务路径经 [AccountRepositoryImpl] 的 internal 事务体直测。 */
+    private fun fakeDatabase(): YunayuDatabase = object : YunayuDatabase() {
+        override fun accountDao(): AccountDao = throw UnsupportedOperationException()
+        override fun tagDao(): TagDao = throw UnsupportedOperationException()
+        override fun transactionDao(): TransactionDao = throw UnsupportedOperationException()
+        override fun transferDao(): TransferDao = throw UnsupportedOperationException()
+        override fun reportDao(): ReportDao = throw UnsupportedOperationException()
+        override fun createOpenHelper(config: DatabaseConfiguration): SupportSQLiteOpenHelper =
+            throw UnsupportedOperationException()
+        override fun createInvalidationTracker(): InvalidationTracker = throw UnsupportedOperationException()
+        override fun clearAllTables() = Unit
+    }
+
+    private fun accountEntity(
+        id: Long,
+        name: String,
+        createdAt: Long = 100L,
+        initialBalanceCents: Long = 0L,
+    ) = AccountEntity(id = id, name = name, createdAt = createdAt, initialBalanceCents = initialBalanceCents)
 
     private fun newDataStore(scope: CoroutineScope, fileName: String) = PreferenceDataStoreFactory.create(
         scope = scope,

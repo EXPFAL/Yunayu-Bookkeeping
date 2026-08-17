@@ -174,6 +174,53 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate5To6_addsInitialBalanceAndCreatesTransfersTable() {
+        helper.createDatabase(TEST_DB, 5).apply {
+            execSQL("INSERT INTO accounts (name, created_at) VALUES ('微信', 1)")
+            execSQL("INSERT INTO accounts (name, created_at) VALUES ('支付宝', 2)")
+            execSQL(
+                "INSERT INTO transactions (amount_cents, type, note, tag_id, account_id, occurred_at, created_at) " +
+                    "VALUES (100, 'EXPENSE', '买书', NULL, 1, 1, 1)",
+            )
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 6, true, YunayuDatabase.MIGRATION_5_6)
+
+        // accounts 既有数据完整，且 initial_balance_cents 默认 0
+        val names = mutableListOf<String>()
+        db.query("SELECT name, initial_balance_cents FROM accounts ORDER BY id").use { cursor ->
+            while (cursor.moveToNext()) {
+                names += cursor.getString(0)
+                assertEquals(0L, cursor.getLong(1))
+            }
+        }
+        assertEquals(listOf("微信", "支付宝"), names)
+
+        // transactions 既有数据完整（account_id 保持既有归属）
+        db.query("SELECT amount_cents, account_id FROM transactions WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(100L, cursor.getLong(0))
+            assertEquals(1L, cursor.getLong(1))
+        }
+
+        // transfers 表存在
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'transfers'")
+            .use { cursor -> assertTrue(cursor.moveToFirst()) }
+
+        // transfers 三索引均存在
+        listOf(
+            "index_transfers_occurred_at",
+            "index_transfers_from_account_id",
+            "index_transfers_to_account_id",
+        ).forEach { indexName ->
+            db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = '$indexName'")
+                .use { cursor -> assertTrue(cursor.moveToFirst()) }
+        }
+    }
+
     private companion object {
         const val TEST_DB = "migration-test.db"
     }

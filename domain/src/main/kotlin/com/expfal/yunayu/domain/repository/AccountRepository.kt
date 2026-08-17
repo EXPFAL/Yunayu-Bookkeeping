@@ -27,10 +27,23 @@ interface AccountRepository {
     suspend fun addAccount(name: String): Long
 
     /**
+     * 原子新增账户并写入期初余额（分）：建户与期初写入在同一事务内完成，
+     * 期初非 0 时一并落库，任一步失败整体回滚，避免「账户已建但期初丢失」的半写。
+     * 名称校验与重名语义同 [addAccount]。
+     */
+    suspend fun addAccount(name: String, initialBalanceCents: Long): Long
+
+    /**
      * 重命名账户；空名抛 [IllegalArgumentException]，目标不存在抛 [IllegalArgumentException]，
      * 与其它账户重名抛 [DuplicateAccountNameException]。
      */
     suspend fun renameAccount(id: Long, newName: String)
+
+    /**
+     * 原子更新账户名与期初余额（分）：改名与期初写入在同一事务内完成，
+     * 任一步失败整体回滚，避免「已改名但期初未改」的半写。校验语义同 [renameAccount]。
+     */
+    suspend fun updateAccount(id: Long, newName: String, initialBalanceCents: Long)
 
     /**
      * 计算删除 [id] 的影响面（将被置空账户 `account_id → NULL` 影响的交易数）。
@@ -39,9 +52,14 @@ interface AccountRepository {
 
     /**
      * 删除账户。交易的账户归属由 DB 外键 `ON DELETE SET NULL` 置为「未指定账户」，
-     * 不级联删除交易。
+     * 不级联删除交易；涉及该账户的转账由外键 `ON DELETE CASCADE` 级联删除。
      */
     suspend fun deleteAccount(id: Long)
+
+    /**
+     * 更新账户期初余额（分）。账户余额 = 期初余额 + 该账户交易净额 + 该账户转账净额。
+     */
+    suspend fun updateInitialBalance(accountId: Long, cents: Long)
 
     /** 观察上次使用的账户 id；用户尚未选择过账户时发射 `null`。 */
     fun observeLastUsedAccountId(): Flow<Long?>

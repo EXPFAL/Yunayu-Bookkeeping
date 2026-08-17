@@ -29,7 +29,15 @@ interface AccountDao {
     @Query("UPDATE accounts SET name = :name WHERE id = :id")
     suspend fun renameById(id: Long, name: String): Int
 
-    /** 按 id 删除账户（交易置空由外键 ON DELETE SET NULL 执行）。 */
+    /** 按 id 删除账户（交易置空由外键 ON DELETE SET NULL 执行，转账由 CASCADE 级联删除）。 */
     @Query("DELETE FROM accounts WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    /** 按 id 更新账户期初余额（分）。 */
+    @Query("UPDATE accounts SET initial_balance_cents = :cents WHERE id = :id")
+    suspend fun updateInitialBalance(id: Long, cents: Long)
+
+    /** 观察全部账户期初余额之和（分），无账户时返回 0。 */
+    @Query("SELECT COALESCE(SUM(initial_balance_cents), 0) FROM accounts")
+    fun observeInitialBalanceSum(): Flow<Long>
 }

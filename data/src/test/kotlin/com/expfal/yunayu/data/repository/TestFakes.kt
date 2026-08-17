@@ -3,9 +3,11 @@ package com.expfal.yunayu.data.repository
 import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
+import com.expfal.yunayu.data.local.dao.TransferDao
 import com.expfal.yunayu.data.local.entity.AccountEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
+import com.expfal.yunayu.data.local.entity.TransferEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 
@@ -22,6 +24,9 @@ class FakeAccountDao : AccountDao {
     val renameCalls = mutableListOf<Pair<Long, String>>()
     var renameResult: Int = 1
     val deleteCalls = mutableListOf<Long>()
+    var initialBalanceSumFlow: Flow<Long> = flowOf(0L)
+    val updateInitialBalanceCalls = mutableListOf<Pair<Long, Long>>()
+    var updateInitialBalanceError: Throwable? = null
 
     override fun observeAll(): Flow<List<AccountEntity>> = observeAllFlow
 
@@ -46,6 +51,13 @@ class FakeAccountDao : AccountDao {
     override suspend fun deleteById(id: Long) {
         deleteCalls += id
     }
+
+    override suspend fun updateInitialBalance(id: Long, cents: Long) {
+        updateInitialBalanceError?.let { throw it }
+        updateInitialBalanceCalls += id to cents
+    }
+
+    override fun observeInitialBalanceSum(): Flow<Long> = initialBalanceSumFlow
 }
 
 /** [TagDao] 手写 fake：按 parentId 返回预置子节点，记录新增/重命名/删除调用。 */
@@ -125,11 +137,20 @@ class FakeTransactionDao : TransactionDao {
         return nextInsertId
     }
 
+    var entityById: Map<Long, TransactionEntity> = emptyMap()
+    val updated = mutableListOf<TransactionEntity>()
+
+    override suspend fun update(entity: TransactionEntity) {
+        updated += entity
+    }
+
     override suspend fun delete(transaction: TransactionEntity) = Unit
 
     override suspend fun deleteById(id: Long) {
         deletedByIdCalls += id
     }
+
+    override suspend fun getById(id: Long): TransactionEntity? = entityById[id]
 
     override fun observeAll(): Flow<List<TransactionEntity>> = flowOf(emptyList())
 
@@ -247,6 +268,36 @@ class FakeTransactionDao : TransactionDao {
         countByAccountIdCalls += accountId
         return countByAccountIdResult
     }
+}
+
+/** [TransferDao] 手写 fake：记录插入/删除调用，观察流与净额聚合流可注入。 */
+class FakeTransferDao : TransferDao {
+
+    var observeAllFlow: Flow<List<TransferEntity>> = flowOf(emptyList())
+    val inserted = mutableListOf<TransferEntity>()
+    var nextInsertId: Long = 1L
+    val deletedByIdCalls = mutableListOf<Long>()
+    var netByAccountFlow: Flow<List<TransferDao.TransferNetRow>> = flowOf(emptyList())
+    var countByAccountIdResult: Int = 0
+    val countByAccountIdCalls = mutableListOf<Long>()
+
+    override fun observeAll(): Flow<List<TransferEntity>> = observeAllFlow
+
+    override suspend fun insert(transfer: TransferEntity): Long {
+        inserted += transfer
+        return nextInsertId
+    }
+
+    override suspend fun deleteById(id: Long) {
+        deletedByIdCalls += id
+    }
+
+    override suspend fun countByAccountId(accountId: Long): Int {
+        countByAccountIdCalls += accountId
+        return countByAccountIdResult
+    }
+
+    override fun observeNetByAccount(): Flow<List<TransferDao.TransferNetRow>> = netByAccountFlow
 }
 
 /** [TagMergeExecutor] 手写 fake：记录 merge 调用，可配置异常。 */

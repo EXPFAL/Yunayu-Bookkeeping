@@ -8,12 +8,14 @@ import com.expfal.yunayu.data.repository.RoomTagMergeExecutor
 import com.expfal.yunayu.data.repository.TagMergeExecutor
 import com.expfal.yunayu.data.repository.TagRepositoryImpl
 import com.expfal.yunayu.data.repository.TransactionRepositoryImpl
+import com.expfal.yunayu.data.repository.TransferRepositoryImpl
 import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.NlApiConfigRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import com.expfal.yunayu.domain.repository.TransferRepository
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -36,6 +38,10 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindTransactionRepository(impl: TransactionRepositoryImpl): TransactionRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindTransferRepository(impl: TransferRepositoryImpl): TransferRepository
 
     @Binds
     @Singleton

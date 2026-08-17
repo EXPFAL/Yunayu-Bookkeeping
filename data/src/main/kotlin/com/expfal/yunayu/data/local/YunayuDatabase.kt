@@ -8,14 +8,16 @@ import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.ReportDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
+import com.expfal.yunayu.data.local.dao.TransferDao
 import com.expfal.yunayu.data.local.entity.AccountEntity
 import com.expfal.yunayu.data.local.entity.ReportEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
+import com.expfal.yunayu.data.local.entity.TransferEntity
 import com.expfal.yunayu.domain.model.AccountPresets
 
 /**
- * Yunayu 数据库。包含 accounts / tags / transactions / reports 四张表（月度预算经 DataStore 存储，不落库）。
+ * Yunayu 数据库。包含 accounts / tags / transactions / transfers / reports 五张表（月度预算经 DataStore 存储，不落库）。
  *
  * Schema 变更策略：version 递增 + 显式 Migration，禁止 fallbackToDestructiveMigration
  * （用户数据不可丢失）；schema 经 exportSchema 输出至 data/schemas。
@@ -25,9 +27,10 @@ import com.expfal.yunayu.domain.model.AccountPresets
         AccountEntity::class,
         TagEntity::class,
         TransactionEntity::class,
+        TransferEntity::class,
         ReportEntity::class,
     ],
-    version = 5,
+    version = 6,
     exportSchema = true,
 )
 abstract class YunayuDatabase : RoomDatabase() {
@@ -37,6 +40,8 @@ abstract class YunayuDatabase : RoomDatabase() {
     abstract fun tagDao(): TagDao
 
     abstract fun transactionDao(): TransactionDao
+
+    abstract fun transferDao(): TransferDao
 
     abstract fun reportDao(): ReportDao
 
@@ -290,6 +295,58 @@ abstract class YunayuDatabase : RoomDatabase() {
                     )
                     db.execSQL(
                         "CREATE INDEX IF NOT EXISTS `index_transactions_account_id` ON `transactions` (`account_id`)",
+                    )
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /**
+         * Schema v5 → v6 迁移：新增 accounts 期初余额列 + 新建 transfers 转账表。
+         *
+         * 1. accounts 新增 `initial_balance_cents` 期初余额列（非空默认 0，简单列添加）。
+         * 2. 新建 transfers 表（from_account_id / to_account_id 均非空外键 → accounts.id，
+         *    ON DELETE CASCADE）+ occurred_at / from_account_id / to_account_id 三索引。
+         *
+         * SQL 与 Room 由 [TransferEntity] / [AccountEntity] 生成的 schema 严格一致（列名 / 类型 /
+         * 非空约束 / 列顺序 / 外键 / 索引），整体包事务，防止半迁移状态。
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    // 1) accounts 新增期初余额列（ALTER ADD COLUMN 要求非空列带默认值）
+                    db.execSQL(
+                        "ALTER TABLE accounts ADD COLUMN initial_balance_cents INTEGER NOT NULL DEFAULT 0",
+                    )
+
+                    // 2) 新建 transfers 表
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `transfers` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`from_account_id` INTEGER NOT NULL, " +
+                            "`to_account_id` INTEGER NOT NULL, " +
+                            "`amount_cents` INTEGER NOT NULL, " +
+                            "`note` TEXT, " +
+                            "`occurred_at` INTEGER NOT NULL, " +
+                            "`created_at` INTEGER NOT NULL, " +
+                            "FOREIGN KEY(`from_account_id`) REFERENCES `accounts`(`id`) " +
+                            "ON UPDATE NO ACTION ON DELETE CASCADE , " +
+                            "FOREIGN KEY(`to_account_id`) REFERENCES `accounts`(`id`) " +
+                            "ON UPDATE NO ACTION ON DELETE CASCADE )",
+                    )
+
+                    // 3) transfers 三索引
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_transfers_occurred_at` ON `transfers` (`occurred_at`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_transfers_from_account_id` ON `transfers` (`from_account_id`)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_transfers_to_account_id` ON `transfers` (`to_account_id`)",
                     )
                     db.setTransactionSuccessful()
                 } finally {

@@ -10,6 +10,7 @@ import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.ReportDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
+import com.expfal.yunayu.data.local.dao.TransferDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -33,6 +34,7 @@ object DatabaseModule {
                 YunayuDatabase.MIGRATION_2_3,
                 YunayuDatabase.MIGRATION_3_4,
                 YunayuDatabase.MIGRATION_4_5,
+                YunayuDatabase.MIGRATION_5_6,
             )
             .build()
 
@@ -86,6 +88,10 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideTransactionDao(database: YunayuDatabase): TransactionDao = database.transactionDao()
+
+    @Provides
+    @Singleton
+    fun provideTransferDao(database: YunayuDatabase): TransferDao = database.transferDao()
 
     @Provides
     @Singleton
