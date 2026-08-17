@@ -201,7 +201,12 @@ private fun QuickAddScreenContent(
     }
 }
 
-/** 标准布局：上部可滚动表单 + 下部固定输入区。 */
+/** 标准布局：上部内容区 + 下部固定输入区。
+ *
+ * 手动记模式：上部可滚动（类型切换/金额/标签/账户/备注），下部固定数字键盘。
+ * 自动记模式：上部不滚动（模式切换/标签/账户/NL输入框 + 下方空白），下部无固定区。
+ * 键盘弹出时 imePadding 收缩下方空白，仅覆盖空白、不遮挡输入框。
+ */
 @Composable
 private fun StandardLayout(
     uiState: QuickAddUiState,
@@ -212,7 +217,8 @@ private fun StandardLayout(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState())
+                // 自动记模式不走 verticalScroll，避免键盘弹出时 bringIntoView 滚动
+                .then(if (uiState.nlMode) Modifier else Modifier.verticalScroll(rememberScrollState()))
                 .padding(horizontal = 24.dp),
         ) {
             QuickAddFormContent(
@@ -220,16 +226,43 @@ private fun StandardLayout(
                 viewModel = viewModel,
                 onShowTagPicker = onShowTagPicker,
             )
+            // 自动记模式：NL 输入框+解析按钮上移至页面中部，下方空白供 imePadding 收缩
+            if (uiState.nlMode) {
+                NlParseSection(
+                    inputText = uiState.nlInputText,
+                    parsing = uiState.nlParsing,
+                    saving = uiState.saving,
+                    draft = uiState.nlDraft,
+                    failure = uiState.nlFailure,
+                    nlTagId = uiState.nlTagId,
+                    suggestedTags = uiState.suggestedTags,
+                    rootNameById = uiState.rootNameById,
+                    allTagsByRoot = uiState.allTagsByRoot,
+                    onInputChange = viewModel::onNlInputChange,
+                    onParse = viewModel::onParseNl,
+                    onSave = viewModel::onSaveNl,
+                )
+                // 下方空白：键盘弹出时 imePadding 收缩此空间，仅覆盖空白不遮挡输入框
+                Spacer(modifier = Modifier.weight(1f))
+            }
         }
-        FixedInputSection(
-            uiState = uiState,
-            viewModel = viewModel,
-        )
+        // 手动记模式：下部固定数字键盘+保存按钮；自动记模式无固定区
+        if (!uiState.nlMode) {
+            FixedInputSection(
+                uiState = uiState,
+                viewModel = viewModel,
+            )
+        }
         FeedbackSection(uiState = uiState)
     }
 }
 
-/** 退化布局：单一滚动布局，固定区并入滚动，避免小屏/横屏裁剪。 */
+/**
+ * 退化布局：单一滚动布局，固定区并入滚动，避免小屏/横屏裁剪。
+ *
+ * 自动记模式：NL 输入框+解析按钮紧随标签/账户选择，下方保留空白（退化模式下滚动容器处理）。
+ * 手动记模式：数字键盘+保存按钮紧随备注输入框。
+ */
 @Composable
 private fun CompactLayout(
     uiState: QuickAddUiState,
@@ -248,10 +281,31 @@ private fun CompactLayout(
             onShowTagPicker = onShowTagPicker,
         )
         Spacer(modifier = Modifier.height(16.dp))
-        FixedInputSection(
-            uiState = uiState,
-            viewModel = viewModel,
-        )
+        // 自动记模式：NL 输入框+解析按钮紧随内容
+        if (uiState.nlMode) {
+            NlParseSection(
+                inputText = uiState.nlInputText,
+                parsing = uiState.nlParsing,
+                saving = uiState.saving,
+                draft = uiState.nlDraft,
+                failure = uiState.nlFailure,
+                nlTagId = uiState.nlTagId,
+                suggestedTags = uiState.suggestedTags,
+                rootNameById = uiState.rootNameById,
+                allTagsByRoot = uiState.allTagsByRoot,
+                onInputChange = viewModel::onNlInputChange,
+                onParse = viewModel::onParseNl,
+                onSave = viewModel::onSaveNl,
+            )
+            // 退化模式下保留底部空白，保持视觉一致性
+            Spacer(modifier = Modifier.height(100.dp))
+        } else {
+            // 手动记模式：数字键盘+保存按钮
+            FixedInputSection(
+                uiState = uiState,
+                viewModel = viewModel,
+            )
+        }
         FeedbackSection(uiState = uiState)
         Spacer(modifier = Modifier.height(16.dp))
     }
@@ -276,9 +330,10 @@ private fun QuickAddFormContent(
             onTypeChange = viewModel::setType,
             onTransfer = viewModel::setTransferMode,
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        // 优化项 1：金额上下间距统一 24dp
+        Spacer(modifier = Modifier.height(24.dp))
         AmountDisplay(amountText = uiState.amountText)
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
     }
     if (!uiState.nlMode && uiState.transferMode) {
         TransferFormBranch(
@@ -447,7 +502,12 @@ private fun ExpenseFormBranch(
     Spacer(modifier = Modifier.height(20.dp))
 }
 
-/** 下部固定输入区：手动记=数字键盘，自动记=NL输入框+解析按钮，保存按钮。 */
+/**
+ * 下部固定输入区：手动记=数字键盘+保存按钮。
+ *
+ * 注：自动记模式的 NL 输入框+解析按钮已上移至 StandardLayout/CompactLayout 的内容区，
+ * 此函数仅处理手动记模式，自动记模式调用时不应到达此处（由调用方守卫）。
+ */
 @Composable
 private fun FixedInputSection(
     uiState: QuickAddUiState,
@@ -459,44 +519,28 @@ private fun FixedInputSection(
             .padding(horizontal = 24.dp)
             .padding(bottom = 28.dp),
     ) {
-        if (uiState.nlMode) {
-            NlParseSection(
-                inputText = uiState.nlInputText,
-                parsing = uiState.nlParsing,
-                saving = uiState.saving,
-                draft = uiState.nlDraft,
-                failure = uiState.nlFailure,
-                nlTagId = uiState.nlTagId,
-                suggestedTags = uiState.suggestedTags,
-                rootNameById = uiState.rootNameById,
-                allTagsByRoot = uiState.allTagsByRoot,
-                onInputChange = viewModel::onNlInputChange,
-                onParse = viewModel::onParseNl,
-                onSave = viewModel::onSaveNl,
+        // 手动记模式：数字键盘+保存按钮
+        NumberPad(
+            onDigit = viewModel::onDigit,
+            onDelete = viewModel::onDelete,
+        )
+        Spacer(modifier = Modifier.height(20.dp))
+        Button(
+            onClick = viewModel::onSave,
+            enabled = !uiState.saving &&
+                QuickAddViewModel.parseAmountToCents(uiState.amountText) != null &&
+                (!uiState.transferMode || (uiState.fromAccountId != null && uiState.toAccountId != null)),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(52.dp),
+        ) {
+            Text(
+                text = when {
+                    uiState.saving -> if (uiState.transferMode) "转账中…" else "记一笔中…"
+                    uiState.transferMode -> "转账"
+                    else -> "记一笔"
+                },
             )
-        } else {
-            NumberPad(
-                onDigit = viewModel::onDigit,
-                onDelete = viewModel::onDelete,
-            )
-            Spacer(modifier = Modifier.height(20.dp))
-            Button(
-                onClick = viewModel::onSave,
-                enabled = !uiState.saving &&
-                    QuickAddViewModel.parseAmountToCents(uiState.amountText) != null &&
-                    (!uiState.transferMode || (uiState.fromAccountId != null && uiState.toAccountId != null)),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(52.dp),
-            ) {
-                Text(
-                    text = when {
-                        uiState.saving -> if (uiState.transferMode) "转账中…" else "记一笔中…"
-                        uiState.transferMode -> "转账"
-                        else -> "记一笔"
-                    },
-                )
-            }
         }
     }
 }
