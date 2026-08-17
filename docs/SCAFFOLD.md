@@ -869,3 +869,63 @@ interface SemesterBudgetEngine {
 - 源图无透明背景，无法完整抠出脸体，图标以「线条前景 + 浅粉底色」呈现，非完整脸体形象。
 - 历史已挂父类标签的交易数据保留（仅不再提供新选择入口），如需后续清理须经整理 / 标签合并链路处理。
 
+---
+
+## 23. 交易编辑 / 期初余额 / 转账迭代交付记录
+
+> 触发时机：三项需求（交易编辑、账户期初余额、转账）落地。schema v4→v5 后再次升级 v5→v6，新增 accounts 期初余额列与独立 transfers 转账表；TransactionType 不动，转账结构性隔离于收支统计之外。
+
+### 23.1 Schema v6 与 MIGRATION_5_6
+
+- `accounts` 表新增 `initial_balance_cents` 期初余额列（`INTEGER NOT NULL DEFAULT 0`，`ALTER TABLE ADD COLUMN` 简单列添加）。
+- 新增 `transfers` 表：`id`(PK autoGenerate) / `from_account_id`(NOT NULL FK→accounts, ON DELETE CASCADE) / `to_account_id`(NOT NULL FK→accounts, ON DELETE CASCADE) / `amount_cents`(NOT NULL) / `note`(TEXT 可空) / `occurred_at`(NOT NULL) / `created_at`(NOT NULL)；三索引 `occurred_at` / `from_account_id` / `to_account_id`。
+- `MIGRATION_5_6` 单事务包裹（沿用 MIGRATION_1_2 / 2_3 / 3_4 / 4_5 先例）：① accounts ADD COLUMN 期初；② CREATE TABLE transfers；③ 建三索引。SQL 与 Room 由 `TransferEntity` / `AccountEntity` 生成的 schema 严格一致。
+- `YunayuDatabase` version 5→6、`exportSchema` 输出 `data/schemas/com.expfal.yunayu.data.local.YunayuDatabase/6.json`；`DatabaseModule` 注册 `MIGRATION_5_6` 并新增 `provideTransferDao`；`RepositoryModule` 新增 `bindTransferRepository`。
+- `MigrationTest` v5→v6 用例：accounts 期初列存在、transfers 表与三索引存在、存量账户期初恒 0。
+
+### 23.2 转账建模决策（独立 transfers 表）
+
+- **结论**：新建独立 `transfers` 表，`TransactionType` 不动（仅 EXPENSE / INCOME），转账经独立 `TransferRepository` / `RecordTransferUseCase` 落库。
+- **权衡理由**：独立表对现有收支口径零污染，无需全局排查所有收支聚合 SQL；TRANSFER 类型扩展会污染 transactions 语义（金额正负语义混乱），改动面大且回归测试成本高。
+- **结构性隔离**：`RecordTransferUseCase` 仅注入 `TransferRepository`，不触碰 `ReportRepository` / 预算仓储、不触发报告标脏——这是设计而非遗漏（转账只改变账户余额，不影响任何收支口径）。
+- **外键语义**：`from_account_id` / `to_account_id` 均 `ON DELETE CASCADE`（转账离开账户后即失去意义），与 `transactions.account_id` 的 `ON DELETE SET NULL`（交易置未指定）不同。
+- **转账净额聚合**：`TransferDao.observeNetByAccount` 以 `UNION ALL`（转出记负、转入记正）`GROUP BY account_id` 产出每账户转账净额，供账户余额聚合使用。
+
+### 23.3 资金口径决策（含期初 + 转账守恒）
+
+- **账户余额** = 期初余额 + 交易净额（收入−支出）+ 转账净额（转入−转出）；未指定账户无期初与转账，仅含交易净额。`AccountRepositoryImpl.observeBalances` 以 `combine(observeAll, observeBalancesByAccount, observeNetByAccount)` 三流聚合。
+- **observeHeldCents** = 期初总和 + 交易净结余：`TransactionRepositoryImpl` 以 `combine(observeHeldCents, observeInitialBalanceSum)` 求和（`AccountDao.observeInitialBalanceSum` = `SUM(initial_balance_cents)`）。
+- **恒等式**：总资金 = Σ账户余额 + 未指定净额 = 期初总和 + 累计净结余；转账在账户间守恒（Σ转出 = Σ转入）不改变总额。
+- **报告 / 预算口径与转账无关**：转账不触碰报告标脏、不计入月支出统计。
+
+### 23.4 交易编辑决策
+
+- **数据层**：`TransactionDao` 新增 `@Update update(entity)` + `getById(id)`；`TransactionRepository` 新增 `getById` / `updateTransaction`。
+- **整行覆盖 + createdAt 保留**：`TransactionRepositoryImpl.updateTransaction` 先 `getById` 取 `createdAt`（不存在则静默返回，不做无意义 update），再 `update(toEntity(existing.createdAt))` 整行覆盖金额 / 类型 / 备注 / 标签 / 账户，`occurredAt` 由用例透传原值、`createdAt` 保留原值（编辑不改变发生时间与创建时间）。
+- **校验**：`UpdateTransactionUseCase` 校验 id 非 0、金额 > 0、type ∈ `TransactionType.entries`；任一失败抛 `IllegalArgumentException` 不产生写入。
+- **编辑标脏复用删除单点循环**：更新成功后 `reportRepository.invalidateWhereWindowContains(transaction.occurredAt)` 置覆盖窗口报告 FAILED（标脏失败不阻断更新成功，仅 `CancellationException` 重抛），复用 §17.3 删除标脏先例。
+- **occurredAt 本期不可编辑**：`EditTransactionViewModel` 打开时按主键加载并预填，保存时透传加载到的 `occurredAt` 原值，UI 不提供时间编辑入口。
+
+### 23.5 评审修复留痕
+
+- **编辑加载竞态防护**：`EditTransactionViewModel.open` 以 `loadJob?.cancel()` 取消上一次未完成加载并重置全部陈旧状态；回写前两次校验 `_uiState.value.transactionId == transactionId`（旧加载迟到时丢弃结果，防止旧目标数据覆盖新目标）；事件流 `extraBufferCapacity = 1 + DROP_OLDEST` 杜绝跨开闭回放陈旧事件。
+- **账户写操作 withTransaction 原子化**：`AccountRepository` 新增 `addAccount(name, initialBalanceCents)` / `updateAccount(id, newName, initialBalanceCents)` 原子接口，`AccountRepositoryImpl` 以 `database.withTransaction` 包裹建户+写期初 / 改名+写期初，任一步失败整体回滚，避免「账户已建但期初丢失」的半写。
+- **selectTab 清 pending**：`TransactionManageViewModel.selectTab` 切换「收支 / 转账」时同时清空 `pendingDelete` 与 `pendingTransferDelete`，避免跨 Tab 删除确认弹窗叠加。
+- **Composable 拆分**：`QuickAddSheet` 拆分为 `QuickAddForm` / `ExpenseFormHeader` / `TransferFormBranch` / `TypeToggle` / `FeedbackSection` 等子组件；`TransactionManageScreen` 拆分为 `ManageTabRow` / `ManageTabContent` / `ManageDialogs` 等子组件，降复杂度。
+- **gate*.log 入 gitignore**：`.gitignore` 追加 `gate*.log`（与既有 `androidtest_assemble.log` / `gate_run.log` 并列，门禁/构建日志不入库）。
+
+### 23.6 接口扩展 fake 同步纪律
+
+- `AccountRepository` 新增 `addAccount(name, initialBalanceCents)` / `updateAccount` / `updateInitialBalance` 三方法、`TransactionRepository` 新增 `getById` / `updateTransaction` 两方法，均不设默认实现，须同步全部手写 fake。
+- `FakeAccountRepository`（addAccount 双参 + updateAccount + updateInitialBalance）承载于：`EnsureAccountsUseCaseTest`、`HomeViewModelTest`、`QuickAddViewModelTest`、`TransactionManageViewModelTest`、`AccountManageViewModelTest` 共 5 处。
+- `FakeTransactionRepository`（getById + updateTransaction）承载于：`EnsureReportsUseCaseTest`、`GenerateReportUseCaseTest`、`AddParsedTransactionUseCaseTest`、`AddTransactionUseCaseTest`、`DeleteTransactionUseCaseTest`、`MergeTagsUseCaseTest`、`MonthlyBudgetEngineImplTest`、`ApplyOrganizeUseCaseTest`（:domain 8 处）+ `OrganizeViewModelTest`、`ReportViewModelTest`、`TagManageViewModelTest`（:ui 3 处）共 11 处。
+- `data/.../TestFakes.kt`：`FakeAccountDao` 补 `updateInitialBalance` / `observeInitialBalanceSum`、`FakeTransactionDao` 补 `update` / `getById`，并新增 `FakeTransferDao`。
+
+### 23.7 已知限制
+
+- **转账编辑不做**：本期仅支持转账录入 / 查看 / 删除，无编辑入口（`TransferRepository` 仅 `observeTransfers` / `insertTransfer` / `deleteById`）。
+- **时间编辑不做**：交易编辑不含时间字段（`occurredAt` 保持原值），报告标脏以原 `occurredAt` 命中窗口。
+- **NL 不支持转账**：自然语言记账仅收支两态，转账仅数字模式三段切换入口。
+- **INFO 级遗留**：`updateTransaction` 对已删行静默成功（`getById` 返回 null 时直接 return，不报错）；转账模式切换残留 from/to 选择（`setType` / `setNlMode` 退出转账时不清理 `fromAccountId` / `toAccountId`，下次进转账模式时若未重选可能残留），均属低风险可接受。
+
+
