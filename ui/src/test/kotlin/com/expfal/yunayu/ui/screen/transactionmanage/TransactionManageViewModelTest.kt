@@ -10,6 +10,7 @@ import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.model.Transfer
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
@@ -17,6 +18,7 @@ import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import com.expfal.yunayu.domain.repository.TransferRepository
 import com.expfal.yunayu.domain.usecase.DeleteTransactionUseCase
 import com.expfal.yunayu.domain.util.TimeWindows
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
@@ -331,6 +333,144 @@ class TransactionManageViewModelTest {
         assertFalse(vm.uiState.value.busy)
     }
 
+    @Test
+    fun `selectTab switches to transfers`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val vm = viewModel(txRepo)
+        settle()
+
+        vm.selectTab(ManageTab.TRANSFERS)
+
+        assertEquals(ManageTab.TRANSFERS, vm.uiState.value.tab)
+    }
+
+    @Test
+    fun `selectTab clears both pending deletes`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val vm = viewModel(txRepo)
+        settle()
+
+        vm.requestDelete(recent(id = 1L))
+        vm.requestDeleteTransfer(
+            TransferRow(
+                id = 2L,
+                fromAccountName = "微信",
+                toAccountName = "支付宝",
+                amountCents = 100L,
+                note = null,
+                occurredAt = 0L,
+            ),
+        )
+        assertEquals(1L, vm.uiState.value.pendingDelete?.id)
+        assertEquals(2L, vm.uiState.value.pendingTransferDelete?.id)
+
+        vm.selectTab(ManageTab.TRANSFERS)
+
+        assertNull(vm.uiState.value.pendingDelete)
+        assertNull(vm.uiState.value.pendingTransferDelete)
+        assertEquals(ManageTab.TRANSFERS, vm.uiState.value.tab)
+    }
+
+    @Test
+    fun `observeTransfers maps account names into rows`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val transferRepo = FakeTransferRepository()
+        val accountRepo = FakeAccountRepository().apply {
+            accountsFlow.value = listOf(Account(id = 7L, name = "微信"), Account(id = 8L, name = "支付宝"))
+        }
+        transferRepo.transfersFlow.value = listOf(
+            transfer(1L, from = 7L, to = 8L, amount = 5_000L, note = "调账", occurredAt = 123L),
+        )
+        val vm = viewModel(txRepo, accountRepo = accountRepo, transferRepo = transferRepo)
+        settle()
+
+        val row = vm.uiState.value.transfers.single()
+        assertEquals(1L, row.id)
+        assertEquals("微信", row.fromAccountName)
+        assertEquals("支付宝", row.toAccountName)
+        assertEquals(5_000L, row.amountCents)
+        assertEquals("调账", row.note)
+        assertEquals(123L, row.occurredAt)
+    }
+
+    @Test
+    fun `transfer with deleted account falls back to deleted name`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val transferRepo = FakeTransferRepository()
+        val accountRepo = FakeAccountRepository().apply {
+            accountsFlow.value = listOf(Account(id = 7L, name = "微信"))
+        }
+        transferRepo.transfersFlow.value = listOf(transfer(1L, from = 7L, to = 99L))
+        val vm = viewModel(txRepo, accountRepo = accountRepo, transferRepo = transferRepo)
+        settle()
+
+        val row = vm.uiState.value.transfers.single()
+        assertEquals("微信", row.fromAccountName)
+        assertEquals("已删除账户", row.toAccountName)
+    }
+
+    @Test
+    fun `confirmDeleteTransfer success emits Deleted and clears pending`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val transferRepo = FakeTransferRepository()
+        val vm = viewModel(txRepo, transferRepo = transferRepo)
+        settle()
+
+        val events = mutableListOf<TransactionManageEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.events.collect { events.add(it) }
+        }
+
+        val row = TransferRow(
+            id = 7L,
+            fromAccountName = "微信",
+            toAccountName = "支付宝",
+            amountCents = 100L,
+            note = null,
+            occurredAt = 0L,
+        )
+        vm.requestDeleteTransfer(row)
+        assertEquals(row, vm.uiState.value.pendingTransferDelete)
+
+        vm.confirmDeleteTransfer()
+        runCurrent()
+
+        assertEquals(listOf(7L), transferRepo.deletedIds)
+        assertNull(vm.uiState.value.pendingTransferDelete)
+        assertFalse(vm.uiState.value.busy)
+        assertEquals(listOf(TransactionManageEvent.Deleted), events)
+    }
+
+    @Test
+    fun `confirmDeleteTransfer failure emits Failed`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val transferRepo = FakeTransferRepository().apply { deleteError = RuntimeException("db down") }
+        val vm = viewModel(txRepo, transferRepo = transferRepo)
+        settle()
+
+        val events = mutableListOf<TransactionManageEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.events.collect { events.add(it) }
+        }
+
+        vm.requestDeleteTransfer(
+            TransferRow(
+                id = 1L,
+                fromAccountName = "微信",
+                toAccountName = "支付宝",
+                amountCents = 100L,
+                note = null,
+                occurredAt = 0L,
+            ),
+        )
+        vm.confirmDeleteTransfer()
+        runCurrent()
+
+        assertEquals(listOf(TransactionManageEvent.Failed), events)
+        assertNull(vm.uiState.value.pendingTransferDelete)
+        assertFalse(vm.uiState.value.busy)
+    }
+
     /** 推进虚拟时间跨过关键词防抖窗口，让初始查询与后续重查落定。 */
     private fun TestScope.settle() {
         advanceTimeBy(300)
@@ -342,11 +482,13 @@ class TransactionManageViewModelTest {
         tagRepo: TagRepository = FakeTagRepository(),
         reportRepo: ReportRepository = FakeReportRepository(),
         accountRepo: AccountRepository = FakeAccountRepository(),
+        transferRepo: TransferRepository = FakeTransferRepository(),
     ) = TransactionManageViewModel(
         transactionRepository = txRepo,
         accountRepository = accountRepo,
         tagRepository = tagRepo,
         deleteTransactionUseCase = DeleteTransactionUseCase(txRepo, reportRepo),
+        transferRepository = transferRepo,
     )
 
     private fun recent(id: Long, occurredAt: Long = 0L) = RecentTransaction(
@@ -354,6 +496,22 @@ class TransactionManageViewModelTest {
         amountCents = 1_000L,
         type = TransactionType.EXPENSE,
         tagName = "学习",
+        occurredAt = occurredAt,
+    )
+
+    private fun transfer(
+        id: Long,
+        from: Long,
+        to: Long,
+        amount: Long = 1_000L,
+        note: String? = null,
+        occurredAt: Long = 0L,
+    ) = Transfer(
+        id = id,
+        fromAccountId = from,
+        toAccountId = to,
+        amountCents = amount,
+        note = note,
         occurredAt = occurredAt,
     )
 
@@ -416,6 +574,10 @@ class TransactionManageViewModelTest {
         override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
+
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
     }
 
     /** [AccountRepository] 手写 fake：账户观察流由 [accountsFlow] 驱动，可注入加载异常。 */
@@ -435,7 +597,11 @@ class TransactionManageViewModelTest {
 
         override suspend fun addAccount(name: String): Long = 0L
 
+        override suspend fun addAccount(name: String, initialBalanceCents: Long): Long = 0L
+
         override suspend fun renameAccount(id: Long, newName: String) = Unit
+
+        override suspend fun updateAccount(id: Long, newName: String, initialBalanceCents: Long) = Unit
 
         override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact = AccountDeleteImpact(0)
 
@@ -444,6 +610,8 @@ class TransactionManageViewModelTest {
         override fun observeLastUsedAccountId(): Flow<Long?> = flowOf(null)
 
         override suspend fun saveLastUsedAccountId(id: Long?) = Unit
+
+        override suspend fun updateInitialBalance(accountId: Long, cents: Long) = Unit
     }
 
     /** [TagRepository] 手写 fake：返回预置根 / 子标签。 */
@@ -487,6 +655,25 @@ class TransactionManageViewModelTest {
 
         override suspend fun invalidateWhereWindowContains(epochMillis: Long) {
             invalidated += epochMillis
+        }
+    }
+
+    /** [TransferRepository] 手写 fake：以 MutableStateFlow 驱动观察，记录删除调用并可注入异常。 */
+    private class FakeTransferRepository : TransferRepository {
+
+        val transfersFlow = MutableStateFlow<List<Transfer>>(emptyList())
+        val deleteCalls = mutableListOf<Long>()
+        val deletedIds = mutableListOf<Long>()
+        var deleteError: Throwable? = null
+
+        override fun observeTransfers(): Flow<List<Transfer>> = transfersFlow
+
+        override suspend fun insertTransfer(transfer: Transfer): Long = 0L
+
+        override suspend fun deleteById(id: Long) {
+            deleteError?.let { throw it }
+            deleteCalls += id
+            deletedIds += id
         }
     }
 }

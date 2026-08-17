@@ -12,6 +12,7 @@ import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.model.Transfer
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
@@ -19,9 +20,11 @@ import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import com.expfal.yunayu.domain.repository.TransferRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
+import com.expfal.yunayu.domain.usecase.RecordTransferUseCase
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -981,11 +984,120 @@ class QuickAddViewModelTest {
         assertFalse(viewModel.uiState.value.saving)
     }
 
+    @Test
+    fun `setTransferMode enters transfer mode`() = runTest {
+        val viewModel = viewModel()
+
+        viewModel.setTransferMode()
+
+        assertTrue(viewModel.uiState.value.transferMode)
+    }
+
+    @Test
+    fun `setType exits transfer mode`() = runTest {
+        val viewModel = viewModel()
+        viewModel.setTransferMode()
+        assertTrue(viewModel.uiState.value.transferMode)
+
+        viewModel.setType(TransactionType.INCOME)
+
+        assertFalse(viewModel.uiState.value.transferMode)
+        assertEquals(TransactionType.INCOME, viewModel.uiState.value.transactionType)
+    }
+
+    @Test
+    fun `setNlMode exits transfer mode`() = runTest {
+        val viewModel = viewModel()
+        viewModel.setTransferMode()
+        assertTrue(viewModel.uiState.value.transferMode)
+
+        viewModel.setNlMode(true)
+
+        assertFalse(viewModel.uiState.value.transferMode)
+        assertTrue(viewModel.uiState.value.nlMode)
+    }
+
+    @Test
+    fun `transfer save without from account shows error and does not insert`() = runTest {
+        val transferRepo = FakeTransferRepository()
+        val viewModel = viewModel(transferRepo = transferRepo)
+        viewModel.setTransferMode()
+        viewModel.onDigit('5')
+
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals("请选择转出账户", viewModel.uiState.value.transferError)
+        assertTrue(transferRepo.inserted.isEmpty())
+    }
+
+    @Test
+    fun `transfer save without to account shows error and does not insert`() = runTest {
+        val transferRepo = FakeTransferRepository()
+        val viewModel = viewModel(transferRepo = transferRepo)
+        viewModel.setTransferMode()
+        viewModel.onSelectFromAccount(1L)
+        viewModel.onDigit('5')
+
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals("请选择转入账户", viewModel.uiState.value.transferError)
+        assertTrue(transferRepo.inserted.isEmpty())
+    }
+
+    @Test
+    fun `transfer save with same from and to shows error and does not insert`() = runTest {
+        val transferRepo = FakeTransferRepository()
+        val viewModel = viewModel(transferRepo = transferRepo)
+        viewModel.setTransferMode()
+        viewModel.onSelectFromAccount(1L)
+        viewModel.onSelectToAccount(1L)
+        viewModel.onDigit('5')
+
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals("转出与转入账户不能相同", viewModel.uiState.value.transferError)
+        assertTrue(transferRepo.inserted.isEmpty())
+    }
+
+    @Test
+    fun `transfer save success calls recordTransferUseCase and emits Saved`() = runTest {
+        val transferRepo = FakeTransferRepository().apply { nextId = 42L }
+        val viewModel = viewModel(transferRepo = transferRepo)
+        viewModel.setTransferMode()
+        viewModel.onSelectFromAccount(1L)
+        viewModel.onSelectToAccount(2L)
+        viewModel.onTransferNoteChange(" 调账 ")
+        viewModel.onDigit('1')
+        viewModel.onDigit('2')
+        viewModel.onDigit('.')
+
+        val events = mutableListOf<QuickAddEvent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            viewModel.events.collect { events.add(it) }
+        }
+
+        viewModel.onSave()
+        runCurrent()
+
+        val saved = transferRepo.inserted.single()
+        assertEquals(1L, saved.fromAccountId)
+        assertEquals(2L, saved.toAccountId)
+        assertEquals(1200L, saved.amountCents)
+        assertEquals("调账", saved.note)
+        assertEquals(listOf(QuickAddEvent.Saved), events)
+        assertFalse(viewModel.uiState.value.transferMode)
+        assertEquals("", viewModel.uiState.value.amountText)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository = FakeTagRepository(),
         txRepo: TransactionRepository = FakeTransactionRepository(),
         nlParser: NLTransactionParser = FakeNlParser(),
         accountRepo: AccountRepository = FakeAccountRepository(),
+        transferRepo: TransferRepository = FakeTransferRepository(),
     ): QuickAddViewModel {
         val vm = QuickAddViewModel(
             accountRepository = accountRepo,
@@ -994,6 +1106,7 @@ class QuickAddViewModelTest {
             addTransactionUseCase = AddTransactionUseCase(txRepo),
             parseNaturalLanguageTransactionUseCase = ParseNaturalLanguageTransactionUseCase(nlParser, tagRepo),
             addParsedTransactionUseCase = AddParsedTransactionUseCase(txRepo),
+            recordTransferUseCase = RecordTransferUseCase(transferRepo),
         )
         vm.refreshSuggestedTags()
         return vm
@@ -1066,7 +1179,11 @@ class QuickAddViewModelTest {
 
         override suspend fun addAccount(name: String): Long = 0L
 
+        override suspend fun addAccount(name: String, initialBalanceCents: Long): Long = 0L
+
         override suspend fun renameAccount(id: Long, newName: String) = Unit
+
+        override suspend fun updateAccount(id: Long, newName: String, initialBalanceCents: Long) = Unit
 
         override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact = AccountDeleteImpact(0)
 
@@ -1081,6 +1198,8 @@ class QuickAddViewModelTest {
             saveLastUsedError?.let { throw it }
             savedLastUsedIds += id
         }
+
+        override suspend fun updateInitialBalance(accountId: Long, cents: Long) = Unit
     }
 
     /** [TransactionRepository] 手写 fake：记录 add 入参，可选经 [addGate] 挂起模拟慢写或抛错。 */
@@ -1135,6 +1254,29 @@ class QuickAddViewModelTest {
         override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
+
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
+    }
+
+    /** [TransferRepository] 手写 fake：记录转账插入与删除调用。 */
+    private class FakeTransferRepository : TransferRepository {
+
+        val inserted = mutableListOf<Transfer>()
+        var nextId: Long = 0L
+        val deletedIds = mutableListOf<Long>()
+
+        override fun observeTransfers(): Flow<List<Transfer>> = flowOf(emptyList())
+
+        override suspend fun insertTransfer(transfer: Transfer): Long {
+            inserted += transfer
+            return nextId
+        }
+
+        override suspend fun deleteById(id: Long) {
+            deletedIds += id
+        }
     }
 
     /** [NLTransactionParser] 手写 fake：可控可用性与返回，用于 NL 解析路径。 */

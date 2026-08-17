@@ -10,6 +10,7 @@ import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import com.expfal.yunayu.domain.repository.TransferRepository
 import com.expfal.yunayu.domain.usecase.DeleteTransactionUseCase
 import com.expfal.yunayu.domain.util.TimeWindows
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -40,6 +41,22 @@ enum class TimeFilter {
     THIS_MONTH,
 }
 
+/** 收支管理列表切换维度。 */
+enum class ManageTab {
+    TRANSACTIONS,
+    TRANSFERS,
+}
+
+/** 转账列表行：转出/转入账户名已解析，删除提示与展示直接消费。 */
+data class TransferRow(
+    val id: Long,
+    val fromAccountName: String,
+    val toAccountName: String,
+    val amountCents: Long,
+    val note: String?,
+    val occurredAt: Long,
+)
+
 /** 收支管理屏 UI 状态快照。 */
 data class TransactionManageUiState(
     val transactions: List<RecentTransaction> = emptyList(),
@@ -53,6 +70,9 @@ data class TransactionManageUiState(
     val pendingDelete: RecentTransaction? = null,
     val busy: Boolean = false,
     val uncategorizedCount: Int = 0,
+    val tab: ManageTab = ManageTab.TRANSACTIONS,
+    val transfers: List<TransferRow> = emptyList(),
+    val pendingTransferDelete: TransferRow? = null,
 )
 
 /** 收支管理屏对外暴露的一次性事件。 */
@@ -88,6 +108,7 @@ class TransactionManageViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val tagRepository: TagRepository,
     private val deleteTransactionUseCase: DeleteTransactionUseCase,
+    private val transferRepository: TransferRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(TransactionManageUiState())
@@ -109,6 +130,7 @@ class TransactionManageViewModel @Inject constructor(
         loadAllTags()
         observeUncategorizedCount()
         observeAccounts()
+        observeTransfers()
     }
 
     /** 切换时间筛选维度，立即重查。 */
@@ -170,6 +192,47 @@ class TransactionManageViewModel @Inject constructor(
     /** 取消删除确认，清空 [TransactionManageUiState.pendingDelete]。 */
     fun cancelDelete() {
         _uiState.update { it.copy(pendingDelete = null) }
+    }
+
+    /** 切换「收支 / 转账」列表维度；清空两侧待确认删除，避免跨 Tab 弹窗叠加。 */
+    fun selectTab(tab: ManageTab) {
+        _uiState.update {
+            it.copy(
+                tab = tab,
+                pendingDelete = null,
+                pendingTransferDelete = null,
+            )
+        }
+    }
+
+    /** 请求删除一笔转账，置入 [TransactionManageUiState.pendingTransferDelete] 供 UI 二次确认。 */
+    fun requestDeleteTransfer(transfer: TransferRow) {
+        _uiState.update { it.copy(pendingTransferDelete = transfer) }
+    }
+
+    /** 确认删除转账：成功后清空 pending 并发 [TransactionManageEvent.Deleted]，失败发 [TransactionManageEvent.Failed]。 */
+    fun confirmDeleteTransfer() {
+        val pending = _uiState.value.pendingTransferDelete ?: return
+        if (_uiState.value.busy) return
+        _uiState.update { it.copy(busy = true) }
+        viewModelScope.launch {
+            runCatching { transferRepository.deleteById(pending.id) }
+                .onSuccess {
+                    _events.tryEmit(TransactionManageEvent.Deleted)
+                    _uiState.update { it.copy(busy = false, pendingTransferDelete = null) }
+                }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.e(TAG, "Failed to delete transfer", throwable)
+                    _events.tryEmit(TransactionManageEvent.Failed)
+                    _uiState.update { it.copy(busy = false, pendingTransferDelete = null) }
+                }
+        }
+    }
+
+    /** 取消删除转账确认，清空 [TransactionManageUiState.pendingTransferDelete]。 */
+    fun cancelDeleteTransfer() {
+        _uiState.update { it.copy(pendingTransferDelete = null) }
     }
 
     /** 观察未分类交易数供「整理」入口展示；失败降级为 0，取消异常直接重抛。 */
@@ -242,6 +305,42 @@ class TransactionManageViewModel @Inject constructor(
                         accountFilterFlow.value = AccountFilter.All
                         _uiState.update { it.copy(accountFilter = AccountFilter.All) }
                     }
+                }
+        }
+    }
+
+    /**
+     * 观察全部转账并解析转出/转入账户名，供转账 Tab 列表展示。
+     *
+     * 以 [TransferRepository.observeTransfers] 与 [AccountRepository.observeAccounts] 组合，
+     * 账户 id → 名称查不到（账户已删但 FK 未级联前的窗口）时回退「已删除账户」；
+     * 异常由 `.catch` 兜底并降级为空列表，取消异常直接重抛。
+     */
+    private fun observeTransfers() {
+        viewModelScope.launch {
+            combine(
+                transferRepository.observeTransfers(),
+                accountRepository.observeAccounts(),
+            ) { transfers, accounts ->
+                val nameById = accounts.associate { it.id to it.name }
+                transfers.map { transfer ->
+                    TransferRow(
+                        id = transfer.id,
+                        fromAccountName = nameById[transfer.fromAccountId] ?: "已删除账户",
+                        toAccountName = nameById[transfer.toAccountId] ?: "已删除账户",
+                        amountCents = transfer.amountCents,
+                        note = transfer.note,
+                        occurredAt = transfer.occurredAt,
+                    )
+                }
+            }
+                .catch { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.e(TAG, "Failed to observe transfers", throwable)
+                    _uiState.update { it.copy(transfers = emptyList()) }
+                }
+                .collect { transfers ->
+                    _uiState.update { it.copy(transfers = transfers) }
                 }
         }
     }

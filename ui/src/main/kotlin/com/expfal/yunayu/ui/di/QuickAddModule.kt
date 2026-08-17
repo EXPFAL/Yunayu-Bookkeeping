@@ -2,9 +2,11 @@ package com.expfal.yunayu.ui.di
 
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import com.expfal.yunayu.domain.repository.TransferRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
+import com.expfal.yunayu.domain.usecase.RecordTransferUseCase
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -34,4 +36,9 @@ object QuickAddModule {
     fun provideAddParsedTransactionUseCase(
         transactionRepository: TransactionRepository,
     ): AddParsedTransactionUseCase = AddParsedTransactionUseCase(transactionRepository)
+
+    @Provides
+    fun provideRecordTransferUseCase(
+        transferRepository: TransferRepository,
+    ): RecordTransferUseCase = RecordTransferUseCase(transferRepository)
 }

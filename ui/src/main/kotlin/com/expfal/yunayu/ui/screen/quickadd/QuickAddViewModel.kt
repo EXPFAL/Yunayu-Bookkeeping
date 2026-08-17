@@ -16,6 +16,7 @@ import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
+import com.expfal.yunayu.domain.usecase.RecordTransferUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -55,6 +56,16 @@ data class QuickAddUiState(
     val accounts: List<Account> = emptyList(),
     /** 当前选中的账户 id；`null` 表示「未指定账户」。 */
     val selectedAccountId: Long? = null,
+    /** 数字模式是否为「转账」；转账与收支/NL 互斥，转出/转入账户独立于 [selectedAccountId]。 */
+    val transferMode: Boolean = false,
+    /** 转账转出账户 id；未选择为 `null`。 */
+    val fromAccountId: Long? = null,
+    /** 转账转入账户 id；未选择为 `null`。 */
+    val toAccountId: Long? = null,
+    /** 转账备注文本（可空落库时 trim 后为 null）。 */
+    val transferNote: String = "",
+    /** 转账保存前校验失败的用户可见提示；成功或重新输入时清除。 */
+    val transferError: String? = null,
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -84,6 +95,7 @@ class QuickAddViewModel @Inject constructor(
     private val addTransactionUseCase: AddTransactionUseCase,
     private val parseNaturalLanguageTransactionUseCase: ParseNaturalLanguageTransactionUseCase,
     private val addParsedTransactionUseCase: AddParsedTransactionUseCase,
+    private val recordTransferUseCase: RecordTransferUseCase,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(QuickAddUiState())
@@ -120,6 +132,11 @@ class QuickAddViewModel @Inject constructor(
                 transactionType = TransactionType.EXPENSE,
                 accounts = emptyList(),
                 selectedAccountId = null,
+                transferMode = false,
+                fromAccountId = null,
+                toAccountId = null,
+                transferNote = "",
+                transferError = null,
             )
         }
         reloadAccounts()
@@ -280,25 +297,57 @@ class QuickAddViewModel @Inject constructor(
 
     /**
      * 切换数字模式收/支方向；saving / nlParsing / confirmRequested 期间忽略（守卫同 [setNlMode]），
-     * 方向不变时不刷新。切换后按新方向重新加载建议分类。
+     * 方向不变且非转账模式时不刷新。切换后按新方向重新加载建议分类，并退出转账模式。
      */
     fun setType(type: TransactionType) {
         val state = _uiState.value
         if (state.saving || state.nlParsing || state.confirmRequested) return
-        if (state.transactionType == type) return
-        _uiState.update { it.copy(transactionType = type) }
+        if (!state.transferMode && state.transactionType == type) return
+        _uiState.update { it.copy(transactionType = type, transferMode = false, transferError = null) }
         refreshSuggestedTags()
         loadAllTags(type)
     }
 
     /**
+     * 进入数字模式「转账」：saving / nlParsing / confirmRequested 期间忽略；已处于转账模式时无操作。
+     * 转账与 NL 模式互斥（NL 入口 [setNlMode] 会退出转账），与收支方向互斥（[setType] 会退出转账）。
+     */
+    fun setTransferMode() {
+        val state = _uiState.value
+        if (state.saving || state.nlParsing || state.confirmRequested) return
+        if (state.transferMode) return
+        _uiState.update { it.copy(transferMode = true, transferError = null) }
+    }
+
+    /** 选择转账转出账户；saving 期间忽略。 */
+    fun onSelectFromAccount(accountId: Long) {
+        if (_uiState.value.saving) return
+        _uiState.update { it.copy(fromAccountId = accountId, transferError = null) }
+    }
+
+    /** 选择转账转入账户；saving 期间忽略。 */
+    fun onSelectToAccount(accountId: Long) {
+        if (_uiState.value.saving) return
+        _uiState.update { it.copy(toAccountId = accountId, transferError = null) }
+    }
+
+    /** 更新转账备注文本。 */
+    fun onTransferNoteChange(note: String) {
+        _uiState.update { it.copy(transferNote = note) }
+    }
+
+    /**
      * 尝试保存：金额非法或非正数时不响应；金额超过阈值且未确认时仅弹确认；
-     * 否则真正落库。saving 期间重复调用直接忽略。
+     * 否则真正落库。转账模式绕过必要支出确认，直接走转账落库。saving 期间重复调用直接忽略。
      */
     fun onSave() {
         val state = _uiState.value
         if (state.saving) return
         val amountCents = parseAmountToCents(state.amountText) ?: return
+        if (state.transferMode) {
+            persistTransfer(amountCents)
+            return
+        }
         if (amountCents > NECESSARY_THRESHOLD_CENTS && !state.confirmRequested) {
             nlConfirmPending = false
             _uiState.update { it.copy(confirmRequested = true) }
@@ -361,6 +410,63 @@ class QuickAddViewModel @Inject constructor(
     }
 
     /**
+     * 转账落库：转出/转入账户必选且不同，否则设置 [QuickAddUiState.transferError] 供 UI 展示且不写库；
+     * 成功后发 [QuickAddEvent.Saved]（对齐收支路径的震动 + 关闭）并复位转账表单，失败发
+     * [QuickAddEvent.SaveFailed]。转账不触发报告标脏、不触碰预算/统计，隔离由 [RecordTransferUseCase] 保证。
+     */
+    private fun persistTransfer(amountCents: Long) {
+        val state = _uiState.value
+        val fromAccountId = state.fromAccountId
+        val toAccountId = state.toAccountId
+        when {
+            fromAccountId == null -> {
+                _uiState.update { it.copy(transferError = "请选择转出账户") }
+                return
+            }
+            toAccountId == null -> {
+                _uiState.update { it.copy(transferError = "请选择转入账户") }
+                return
+            }
+            fromAccountId == toAccountId -> {
+                _uiState.update { it.copy(transferError = "转出与转入账户不能相同") }
+                return
+            }
+        }
+        val note = state.transferNote.trim().ifBlank { null }
+        _uiState.update { it.copy(saving = true, saveFailed = false, transferError = null) }
+        viewModelScope.launch {
+            runCatching {
+                recordTransferUseCase(
+                    fromAccountId = fromAccountId,
+                    toAccountId = toAccountId,
+                    amountCents = amountCents,
+                    note = note,
+                )
+            }.onSuccess {
+                _events.tryEmit(QuickAddEvent.Saved)
+                _uiState.update { current ->
+                    current.copy(
+                        amountText = "",
+                        transferMode = false,
+                        fromAccountId = null,
+                        toAccountId = null,
+                        transferNote = "",
+                        transferError = null,
+                        saving = false,
+                        saveFailed = false,
+                        confirmRequested = false,
+                    )
+                }
+            }.onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
+                Log.e(TAG, "Failed to save transfer", throwable)
+                _events.tryEmit(QuickAddEvent.SaveFailed)
+                _uiState.update { it.copy(saving = false, saveFailed = true, confirmRequested = false) }
+            }
+        }
+    }
+
+    /**
      * 切换「数字键盘 / 自然语言」输入模式；saving / nlParsing 期间禁止切换。
      * 切换即清空 NL 输入与预览，防止下次进入看到陈旧状态。
      */
@@ -376,6 +482,8 @@ class QuickAddViewModel @Inject constructor(
                 confirmRequested = false,
                 nlTagId = null,
                 transactionType = TransactionType.EXPENSE,
+                transferMode = false,
+                transferError = null,
             )
         }
     }

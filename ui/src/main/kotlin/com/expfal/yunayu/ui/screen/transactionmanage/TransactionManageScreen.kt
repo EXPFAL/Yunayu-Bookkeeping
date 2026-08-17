@@ -1,6 +1,7 @@
 package com.expfal.yunayu.ui.screen.transactionmanage
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -40,6 +41,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -50,6 +52,8 @@ import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.ui.component.TagTreeList
 import com.expfal.yunayu.ui.component.TransactionRow
 import com.expfal.yunayu.ui.screen.organize.OrganizeScreen
+import com.expfal.yunayu.ui.util.formatCents
+import com.expfal.yunayu.ui.util.formatTime
 
 /**
  * 「收支管理」全屏：顶部时间 / 账户 / 标签 / 备注四组筛选，下方交易列表，行尾删除入口。
@@ -67,6 +71,7 @@ fun TransactionManageScreen(
     val snackbarHostState = remember { SnackbarHostState() }
     var showTagSheet by remember { mutableStateOf(false) }
     var showOrganize by remember { mutableStateOf(false) }
+    var editingTransactionId by remember { mutableStateOf<Long?>(null) }
 
     if (showOrganize) {
         OrganizeScreen(onBack = { showOrganize = false })
@@ -109,43 +114,111 @@ fun TransactionManageScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 24.dp),
         ) {
-            FilterSection(
-                timeRange = uiState.timeRange,
-                selectedTagIds = uiState.selectedTagIds,
-                keyword = uiState.keyword,
-                accounts = uiState.accounts,
-                accountFilter = uiState.accountFilter,
-                onTimeRangeSelect = viewModel::selectTimeRange,
-                onAccountFilterSelect = viewModel::selectAccountFilter,
-                onOpenTagSheet = { showTagSheet = true },
-                onKeywordChange = viewModel::onKeywordChange,
+            ManageTabRow(
+                selected = uiState.tab,
+                onSelect = viewModel::selectTab,
             )
             Spacer(Modifier.height(12.dp))
-            when {
-                uiState.loading -> LoadingState()
-                uiState.transactions.isEmpty() -> EmptyState(hasActiveFilter = hasActiveFilter(uiState))
-                else -> TransactionList(
-                    transactions = uiState.transactions,
-                    onDeleteRequest = viewModel::requestDelete,
-                )
-            }
+            ManageTabContent(
+                uiState = uiState,
+                viewModel = viewModel,
+                onOpenTagSheet = { showTagSheet = true },
+                onEditTransaction = { editingTransactionId = it },
+            )
         }
     }
 
+    ManageDialogs(
+        uiState = uiState,
+        viewModel = viewModel,
+        showTagSheet = showTagSheet,
+        editingTransactionId = editingTransactionId,
+        onDismissTagSheet = { showTagSheet = false },
+        onDismissEdit = { editingTransactionId = null },
+    )
+}
+
+/** 「收支 / 转账」Tab 分支内容：转账列表，或收支筛选区 + 交易列表。 */
+@Composable
+private fun ManageTabContent(
+    uiState: TransactionManageUiState,
+    viewModel: TransactionManageViewModel,
+    onOpenTagSheet: () -> Unit,
+    onEditTransaction: (Long) -> Unit,
+) {
+    if (uiState.tab == ManageTab.TRANSFERS) {
+        when {
+            uiState.transfers.isEmpty() -> EmptyTransferState()
+            else -> TransferList(
+                transfers = uiState.transfers,
+                onDeleteRequest = viewModel::requestDeleteTransfer,
+            )
+        }
+    } else {
+        FilterSection(
+            timeRange = uiState.timeRange,
+            selectedTagIds = uiState.selectedTagIds,
+            keyword = uiState.keyword,
+            accounts = uiState.accounts,
+            accountFilter = uiState.accountFilter,
+            onTimeRangeSelect = viewModel::selectTimeRange,
+            onAccountFilterSelect = viewModel::selectAccountFilter,
+            onOpenTagSheet = onOpenTagSheet,
+            onKeywordChange = viewModel::onKeywordChange,
+        )
+        Spacer(Modifier.height(12.dp))
+        when {
+            uiState.loading -> LoadingState()
+            uiState.transactions.isEmpty() -> EmptyState(hasActiveFilter = hasActiveFilter(uiState))
+            else -> TransactionList(
+                transactions = uiState.transactions,
+                onDeleteRequest = viewModel::requestDelete,
+                onEditRequest = { onEditTransaction(it.id) },
+            )
+        }
+    }
+}
+
+/** 弹窗挂载：标签筛选层 + 两侧删除确认弹窗（按 Tab 匹配）+ 编辑弹层。 */
+@Composable
+private fun ManageDialogs(
+    uiState: TransactionManageUiState,
+    viewModel: TransactionManageViewModel,
+    showTagSheet: Boolean,
+    editingTransactionId: Long?,
+    onDismissTagSheet: () -> Unit,
+    onDismissEdit: () -> Unit,
+) {
     if (showTagSheet) {
         TagFilterSheet(
             allTagsByRoot = uiState.allTagsByRoot,
             selectedIds = uiState.selectedTagIds,
             onToggleSelect = viewModel::toggleTagSelection,
             onClear = viewModel::clearTagSelection,
-            onDone = { showTagSheet = false },
+            onDone = onDismissTagSheet,
         )
     }
-
-    uiState.pendingDelete?.let {
-        DeleteTransactionDialog(
-            onConfirm = viewModel::confirmDelete,
-            onDismiss = viewModel::cancelDelete,
+    if (uiState.tab == ManageTab.TRANSACTIONS) {
+        uiState.pendingDelete?.let {
+            DeleteTransactionDialog(
+                onConfirm = viewModel::confirmDelete,
+                onDismiss = viewModel::cancelDelete,
+            )
+        }
+    }
+    if (uiState.tab == ManageTab.TRANSFERS) {
+        uiState.pendingTransferDelete?.let {
+            DeleteTransferDialog(
+                onConfirm = viewModel::confirmDeleteTransfer,
+                onDismiss = viewModel::cancelDeleteTransfer,
+            )
+        }
+    }
+    editingTransactionId?.let { id ->
+        EditTransactionSheet(
+            transactionId = id,
+            onDismissRequest = onDismissEdit,
+            onSaved = onDismissEdit,
         )
     }
 }
@@ -296,16 +369,18 @@ private fun TagFilterSheet(
     }
 }
 
-/** 交易列表：行尾删除图标入口。 */
+/** 交易列表：行尾删除图标入口，整行点击进入编辑。 */
 @Composable
 private fun TransactionList(
     transactions: List<RecentTransaction>,
     onDeleteRequest: (RecentTransaction) -> Unit,
+    onEditRequest: (RecentTransaction) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
         items(transactions, key = { it.id }) { transaction ->
             TransactionRow(
                 transaction = transaction,
+                modifier = Modifier.clickable { onEditRequest(transaction) },
                 trailing = {
                     IconButton(onClick = { onDeleteRequest(transaction) }) {
                         Icon(
@@ -337,6 +412,122 @@ private fun DeleteTransactionDialog(
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("再想想") } },
     )
+}
+
+/** 顶部「收支 / 转账」Tab 切换；转账 Tab 下筛选区不渲染。 */
+@Composable
+private fun ManageTabRow(
+    selected: ManageTab,
+    onSelect: (ManageTab) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = selected == ManageTab.TRANSACTIONS,
+            onClick = { onSelect(ManageTab.TRANSACTIONS) },
+            label = { Text("收支") },
+        )
+        FilterChip(
+            selected = selected == ManageTab.TRANSFERS,
+            onClick = { onSelect(ManageTab.TRANSFERS) },
+            label = { Text("转账") },
+        )
+    }
+}
+
+/** 转账列表：行尾删除入口；转账不支持编辑（本期不做）。 */
+@Composable
+private fun TransferList(
+    transfers: List<TransferRow>,
+    onDeleteRequest: (TransferRow) -> Unit,
+) {
+    LazyColumn(Modifier.fillMaxSize()) {
+        items(transfers, key = { it.id }) { transfer ->
+            TransferRowItem(
+                transfer = transfer,
+                onDelete = { onDeleteRequest(transfer) },
+            )
+        }
+    }
+}
+
+/** 转账行：转出账户 → 转入账户 + 金额 + 时间 + 备注 + 行尾删除。 */
+@Composable
+private fun TransferRowItem(
+    transfer: TransferRow,
+    onDelete: () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+    ) {
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = "${transfer.fromAccountName} → ${transfer.toAccountName}",
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            Text(
+                formatTime(transfer.occurredAt),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val note = transfer.note
+            if (!note.isNullOrBlank()) {
+                Text(
+                    note,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        Text(
+            text = formatCents(transfer.amountCents),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        IconButton(onClick = onDelete) {
+            Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "删除",
+                tint = MaterialTheme.colorScheme.error,
+            )
+        }
+    }
+}
+
+/** 删除转账二次确认弹窗：删除后账户余额实时恢复。 */
+@Composable
+private fun DeleteTransferDialog(
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("删除转账") },
+        text = { Text("删除这笔转账？删除后账户余额将恢复") },
+        confirmButton = {
+            TextButton(onClick = onConfirm) {
+                Text("删除", color = MaterialTheme.colorScheme.error)
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("再想想") } },
+    )
+}
+
+/** 转账空列表占位。 */
+@Composable
+private fun EmptyTransferState() {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.Center,
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text(
+            text = "暂无转账记录",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
 }
 
 /** 加载态占位。 */
