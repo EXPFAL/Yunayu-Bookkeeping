@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -107,6 +106,8 @@ private fun NlInputField(
     onInputChange: (String) -> Unit,
     onParse: () -> Unit,
 ) {
+    // imePadding 已由外层 QuickAddForm Column 统一消费，字段级不再重复声明，
+    // 避免双重 insets 偏移导致输入框过度上移。
     OutlinedTextField(
         value = inputText,
         onValueChange = onInputChange,
@@ -114,7 +115,7 @@ private fun NlInputField(
         placeholder = { Text("例如：午饭花了20块") },
         minLines = 1,
         maxLines = 3,
-        modifier = Modifier.fillMaxWidth().imePadding(),
+        modifier = Modifier.fillMaxWidth(),
     )
     Spacer(Modifier.height(12.dp))
     Button(
