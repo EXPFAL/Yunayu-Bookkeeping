@@ -132,6 +132,10 @@ class EnsureReportsUseCaseTest {
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
 
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
+
         override suspend fun getWindowTotals(
             startInclusiveMs: Long,
             endExclusiveMs: Long,

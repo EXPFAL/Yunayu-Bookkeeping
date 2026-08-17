@@ -526,6 +526,10 @@ class TagManageViewModelTest {
             occurredAtsGate?.let { it.await() }
             return occurredAts
         }
+
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
     }
 
     /** [ReportRepository] 手写 fake：合并标脏无副作用。 */

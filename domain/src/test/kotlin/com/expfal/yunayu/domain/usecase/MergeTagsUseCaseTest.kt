@@ -155,6 +155,10 @@ class MergeTagsUseCaseTest {
             occurredAtsCalls += tagIds
             return occurredAts
         }
+
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
     }
 
     /** [ReportRepository] 手写 fake：记录标脏入参。 */

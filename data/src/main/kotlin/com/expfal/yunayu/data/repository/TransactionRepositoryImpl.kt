@@ -1,6 +1,7 @@
 package com.expfal.yunayu.data.repository
 
 import android.util.Log
+import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import com.expfal.yunayu.domain.model.AccountFilter
@@ -11,6 +12,7 @@ import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -20,6 +22,7 @@ import javax.inject.Singleton
 @Singleton
 class TransactionRepositoryImpl @Inject constructor(
     private val transactionDao: TransactionDao,
+    private val accountDao: AccountDao,
 ) : TransactionRepository {
 
     override suspend fun add(transaction: Transaction): Long =
@@ -27,6 +30,14 @@ class TransactionRepositoryImpl @Inject constructor(
 
     override suspend fun delete(transactionId: Long) {
         transactionDao.deleteById(transactionId)
+    }
+
+    override suspend fun getById(id: Long): Transaction? =
+        transactionDao.getById(id)?.toDomain()
+
+    override suspend fun updateTransaction(transaction: Transaction) {
+        val existing = transactionDao.getById(transaction.id) ?: return
+        transactionDao.update(transaction.toEntity(existing.createdAt))
     }
 
     override fun observeAll(): Flow<List<Transaction>> =
@@ -40,7 +51,10 @@ class TransactionRepositoryImpl @Inject constructor(
         endExclusiveMs: Long,
     ): Flow<Long> = transactionDao.observeExpenseSumBetween(startInclusiveMs, endExclusiveMs)
 
-    override fun observeHeldCents(): Flow<Long> = transactionDao.observeHeldCents()
+    override fun observeHeldCents(): Flow<Long> = combine(
+        transactionDao.observeHeldCents(),
+        accountDao.observeInitialBalanceSum(),
+    ) { netCents, initialBalanceSum -> netCents + initialBalanceSum }
 
     override suspend fun getWindowTotals(
         startInclusiveMs: Long,
@@ -105,7 +119,7 @@ class TransactionRepositoryImpl @Inject constructor(
     override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> =
         if (tagIds.isEmpty()) emptyList() else transactionDao.getOccurredAtsByTagIds(tagIds)
 
-    private fun Transaction.toEntity(): TransactionEntity = TransactionEntity(
+    private fun Transaction.toEntity(createdAt: Long = System.currentTimeMillis()): TransactionEntity = TransactionEntity(
         id = id,
         amountCents = amountCents,
         type = type.name,
@@ -113,7 +127,7 @@ class TransactionRepositoryImpl @Inject constructor(
         tagId = tagId,
         accountId = accountId,
         occurredAt = occurredAt,
-        createdAt = System.currentTimeMillis(),
+        createdAt = createdAt,
     )
 
     private fun TransactionEntity.toDomain(): Transaction = Transaction(

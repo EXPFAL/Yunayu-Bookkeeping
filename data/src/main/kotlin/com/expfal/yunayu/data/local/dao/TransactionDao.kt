@@ -7,6 +7,7 @@ import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Transaction
+import androidx.room.Update
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import kotlinx.coroutines.flow.Flow
@@ -62,12 +63,19 @@ interface TransactionDao {
     @Insert
     suspend fun insert(transaction: TransactionEntity): Long
 
+    @Update
+    suspend fun update(entity: TransactionEntity)
+
     @Delete
     suspend fun delete(transaction: TransactionEntity)
 
     /** 按主键删除一笔交易。 */
     @Query("DELETE FROM transactions WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    /** 按主键一次性查询交易；不存在返回 `null`。 */
+    @Query("SELECT * FROM transactions WHERE id = :id")
+    suspend fun getById(id: Long): TransactionEntity?
 
     /** 观察全部交易，按发生时间倒序。 */
     @Query("SELECT * FROM transactions ORDER BY occurred_at DESC")

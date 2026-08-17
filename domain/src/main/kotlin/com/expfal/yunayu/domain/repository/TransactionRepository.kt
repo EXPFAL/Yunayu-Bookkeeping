@@ -16,6 +16,15 @@ interface TransactionRepository {
     /** 删除一笔交易（按主键）。 */
     suspend fun delete(transactionId: Long)
 
+    /** 按主键一次性查询交易；不存在返回 `null`。 */
+    suspend fun getById(id: Long): Transaction?
+
+    /**
+     * 更新一笔交易（按主键整行覆盖金额 / 类型 / 备注 / 标签 / 账户），
+     * 保留原 `occurredAt` 与 `createdAt`（编辑不改变发生时间与创建时间）。
+     */
+    suspend fun updateTransaction(transaction: Transaction)
+
     /** 观察全部交易，按发生时间倒序。 */
     fun observeAll(): Flow<List<Transaction>>
 
@@ -32,8 +41,8 @@ interface TransactionRepository {
     fun observeRecent(limit: Int): Flow<List<RecentTransaction>>
 
     /**
-     * 观察持有资金（分）：口径为「累计收入 − 累计支出」（全历史净结余），
-     * 无任何交易时发射 `0`。
+     * 观察持有资金（分）：口径为「期初余额总和 + 累计收入 − 累计支出」（全历史净结余），
+     * 转账在账户间守恒、不改变总额；无账户与交易时发射 `0`。
      */
     fun observeHeldCents(): Flow<Long>
 

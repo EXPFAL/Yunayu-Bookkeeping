@@ -380,6 +380,10 @@ class ApplyOrganizeUseCaseTest {
         }
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
+
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
     }
 
     /** [TagRepository] 手写 fake：预置根 / 子标签，记录 addSubTag 入参。 */

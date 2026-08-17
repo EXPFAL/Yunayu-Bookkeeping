@@ -351,6 +351,10 @@ class OrganizeViewModelTest {
         }
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
+
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
     }
 
     /** [TagRepository] 手写 fake：返回预置根 / 子标签。 */

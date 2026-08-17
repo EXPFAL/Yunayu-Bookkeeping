@@ -250,6 +250,10 @@ class ReportViewModelTest {
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
 
+        override suspend fun getById(id: Long): Transaction? = null
+
+        override suspend fun updateTransaction(transaction: Transaction) = Unit
+
         override fun observeHeldCents(): Flow<Long> = flowOf(0L)
 
         override suspend fun getWindowTotals(

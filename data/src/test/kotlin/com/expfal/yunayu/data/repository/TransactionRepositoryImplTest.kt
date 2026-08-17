@@ -19,7 +19,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `add maps expense transaction fields to entity`() = runTest {
         val dao = FakeTransactionDao().apply { nextInsertId = 42L }
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
         val now = System.currentTimeMillis()
 
         val id = repository.add(
@@ -47,7 +47,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `add maps income type and delegates insert exactly once`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         val id = repository.add(
             Transaction(
@@ -70,7 +70,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `observeExpenseSumBetween delegates to dao with window args`() = runTest {
         val dao = FakeTransactionDao().apply { expenseSumFlow = flowOf(12_345L) }
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         val sum = repository.observeExpenseSumBetween(100L, 200L).first()
 
@@ -79,13 +79,24 @@ class TransactionRepositoryImplTest {
     }
 
     @Test
-    fun `observeHeldCents delegates to dao`() = runTest {
+    fun `observeHeldCents with zero initial balance returns transaction net`() = runTest {
         val dao = FakeTransactionDao().apply { heldCentsFlow = flowOf(-5_000L) }
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         val held = repository.observeHeldCents().first()
 
         assertEquals(-5_000L, held)
+    }
+
+    @Test
+    fun `observeHeldCents combines transaction net with initial balance sum`() = runTest {
+        val dao = FakeTransactionDao().apply { heldCentsFlow = flowOf(-5_000L) }
+        val accountDao = FakeAccountDao().apply { initialBalanceSumFlow = flowOf(20_000L) }
+        val repository = TransactionRepositoryImpl(dao, accountDao)
+
+        val held = repository.observeHeldCents().first()
+
+        assertEquals(15_000L, held)
     }
 
     @Test
@@ -109,7 +120,7 @@ class TransactionRepositoryImplTest {
                 ),
             )
         }
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         val recent = repository.observeRecent(5).first()
 
@@ -127,7 +138,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `delete delegates transaction id to dao`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         repository.delete(42L)
 
@@ -137,7 +148,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `observeFiltered with empty tagIds delegates to non-tag query`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         repository.observeFiltered(100L, 200L, emptyList(), "关键词", AccountFilter.All).first()
 
@@ -152,7 +163,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `observeFiltered with tagIds delegates to by-tags query`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         repository.observeFiltered(null, null, listOf(1L, 2L), null, AccountFilter.All).first()
 
@@ -167,7 +178,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `observeFiltered maps account filter to dao mode and id`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         repository.observeFiltered(null, null, emptyList(), null, AccountFilter.All).first()
         repository.observeFiltered(null, null, emptyList(), null, AccountFilter.Unspecified).first()
@@ -186,7 +197,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `observeFiltered escapes like wildcards in keyword`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         repository.observeFiltered(null, null, emptyList(), "100%_a\\b", AccountFilter.All).first()
 
@@ -196,7 +207,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `observeFiltered treats blank keyword as null`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         repository.observeFiltered(null, null, emptyList(), "   ", AccountFilter.All).first()
 
@@ -206,7 +217,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `observeUncategorizedCount delegates to dao`() = runTest {
         val dao = FakeTransactionDao().apply { uncategorizedCountFlow = flowOf(7) }
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         val count = repository.observeUncategorizedCount().first()
 
@@ -232,7 +243,7 @@ class TransactionRepositoryImplTest {
                 ),
             )
         }
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         val rows = repository.getUncategorized()
 
@@ -245,7 +256,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `assignTags delegates to dao applyTagAssignments`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
         val assignments = mapOf(1L to listOf(10L, 11L), 2L to listOf(20L))
 
         repository.assignTags(assignments)
@@ -256,7 +267,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `assignTags with empty map skips dao`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         repository.assignTags(emptyMap())
 
@@ -266,7 +277,7 @@ class TransactionRepositoryImplTest {
     @Test
     fun `getOccurredAtsByTagIds delegates to dao`() = runTest {
         val dao = FakeTransactionDao().apply { occurredAtsByTagIdsResult = listOf(100L, 200L) }
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         val occurred = repository.getOccurredAtsByTagIds(listOf(1L, 2L))
 
@@ -277,11 +288,103 @@ class TransactionRepositoryImplTest {
     @Test
     fun `getOccurredAtsByTagIds with empty ids skips dao`() = runTest {
         val dao = FakeTransactionDao()
-        val repository = TransactionRepositoryImpl(dao)
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
 
         val occurred = repository.getOccurredAtsByTagIds(emptyList())
 
         assertEquals(emptyList<Long>(), occurred)
         assertTrue(dao.occurredAtsByTagIdsCalls.isEmpty())
+    }
+
+    @Test
+    fun `getById maps entity to domain`() = runTest {
+        val dao = FakeTransactionDao().apply {
+            entityById = mapOf(
+                7L to TransactionEntity(
+                    id = 7L,
+                    amountCents = 1_200L,
+                    type = "EXPENSE",
+                    note = "买书",
+                    tagId = null,
+                    accountId = null,
+                    occurredAt = 800L,
+                    createdAt = 1L,
+                ),
+            )
+        }
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
+
+        val transaction = repository.getById(7L)
+
+        assertEquals(7L, transaction?.id)
+        assertEquals(1_200L, transaction?.amountCents)
+        assertEquals(TransactionType.EXPENSE, transaction?.type)
+        assertEquals("买书", transaction?.note)
+        assertNull(transaction?.tagId)
+        assertNull(transaction?.accountId)
+        assertEquals(800L, transaction?.occurredAt)
+    }
+
+    @Test
+    fun `getById returns null when absent`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
+
+        val transaction = repository.getById(99L)
+
+        assertNull(transaction)
+    }
+
+    @Test
+    fun `updateTransaction preserves existing createdAt and delegates update`() = runTest {
+        val dao = FakeTransactionDao().apply {
+            entityById = mapOf(
+                42L to TransactionEntity(
+                    id = 42L,
+                    amountCents = 100L,
+                    type = "EXPENSE",
+                    note = null,
+                    tagId = null,
+                    accountId = null,
+                    occurredAt = 1L,
+                    createdAt = 777L,
+                ),
+            )
+        }
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
+
+        repository.updateTransaction(
+            Transaction(
+                id = 42L,
+                amountCents = 2_500L,
+                type = TransactionType.INCOME,
+                note = "更新",
+                tagId = 3L,
+                accountId = 9L,
+                occurredAt = 900L,
+            ),
+        )
+
+        val entity = dao.updated.single()
+        assertEquals(42L, entity.id)
+        assertEquals(2_500L, entity.amountCents)
+        assertEquals("INCOME", entity.type)
+        assertEquals("更新", entity.note)
+        assertEquals(3L, entity.tagId)
+        assertEquals(9L, entity.accountId)
+        assertEquals(900L, entity.occurredAt)
+        assertEquals(777L, entity.createdAt)
+    }
+
+    @Test
+    fun `updateTransaction skips update when entity missing`() = runTest {
+        val dao = FakeTransactionDao()
+        val repository = TransactionRepositoryImpl(dao, FakeAccountDao())
+
+        repository.updateTransaction(
+            Transaction(id = 42L, amountCents = 2_500L, type = TransactionType.EXPENSE),
+        )
+
+        assertTrue(dao.updated.isEmpty())
     }
 }
