@@ -5,7 +5,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,6 +20,7 @@ import com.expfal.yunayu.ui.component.TransactionRow
 fun RecentTransactionsCard(
     uiState: HomeUiState,
     modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
 ) {
     Column(modifier.fillMaxWidth()) {
         Text("最近记录", style = MaterialTheme.typography.titleMedium)
@@ -33,7 +36,7 @@ fun RecentTransactionsCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            else -> LazyColumn(Modifier.fillMaxWidth()) {
+            else -> LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
                 items(uiState.recent, key = { it.id }) { transaction ->
                     TransactionRow(transaction)
                 }

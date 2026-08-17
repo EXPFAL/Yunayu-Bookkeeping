@@ -9,13 +9,21 @@ import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
+
+/** 首页事件，用于一次性指令（如保存后自动滚动）。 */
+sealed interface HomeEvent {
+    /** 记账保存成功，通知 UI 滚动到最新记录。 */
+    data object Saved : HomeEvent
+}
 
 /** 首页最近记录列表 UI 状态快照。 */
 data class HomeUiState(
@@ -42,10 +50,18 @@ class HomeViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(HomeUiState())
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
+    private val _events = Channel<HomeEvent>(Channel.BUFFERED)
+    val events = _events.receiveAsFlow()
+
     init {
         observeRecent()
         observeHeldCents()
         observeHeldByAccount()
+    }
+
+    /** 发送保存成功事件，触发 UI 滚动到最新记录。 */
+    fun notifySaved() {
+        _events.trySend(HomeEvent.Saved)
     }
 
     /** 观察最近 [RECENT_LIMIT] 笔交易摘要；失败仅置 loading=false，不影响持有资金字段。 */

@@ -13,8 +13,10 @@ import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
@@ -184,6 +186,17 @@ class HomeViewModelTest {
         accountRepo.balancesFlow.value = listOf(AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 12_000L))
         assertEquals(12_000L, viewModel.uiState.value.heldCents)
         assertEquals(12_000L, viewModel.uiState.value.heldByAccount.single().balanceCents)
+    }
+
+    @Test
+    fun `notifySaved emits Saved event`() = runTest {
+        val viewModel = createViewModel()
+
+        val deferred = async { viewModel.events.first() }
+        viewModel.notifySaved()
+        val event = deferred.await()
+
+        assertTrue(event is HomeEvent.Saved)
     }
 
     private fun recent(
