@@ -175,7 +175,7 @@ private fun EditContent(
 
 /** 收/支方向切换控件，样式与快捷记账的 [com.expfal.yunayu.ui.screen.quickadd.QuickAddScreen] 对齐。 */
 @Composable
-private fun EditTypeToggle(
+internal fun EditTypeToggle(
     transactionType: TransactionType,
     onTypeChange: (TransactionType) -> Unit,
 ) {
@@ -195,7 +195,7 @@ private fun EditTypeToggle(
 
 /** 备注输入框。 */
 @Composable
-private fun EditNoteField(
+internal fun EditNoteField(
     note: String,
     onNoteChange: (String) -> Unit,
 ) {
@@ -210,7 +210,7 @@ private fun EditNoteField(
 
 /** 标签选择行：已选标签以选中态 chip 展示（再次点击取消），「更多」展开标签树选择层。 */
 @Composable
-private fun EditTagChipsRow(
+internal fun EditTagChipsRow(
     selectedTagId: Long?,
     selectedTagName: String?,
     onSelectTag: (Long) -> Unit,
@@ -238,7 +238,7 @@ private fun EditTagChipsRow(
 
 /** 账户选择横向 chips：首位固定「未指定」+ 各账户，单选互斥；账户列表为空时整行不渲染。 */
 @Composable
-private fun EditAccountChipsRow(
+internal fun EditAccountChipsRow(
     accounts: List<Account>,
     selectedAccountId: Long?,
     onSelect: (Long?) -> Unit,
@@ -268,7 +268,7 @@ private fun EditAccountChipsRow(
 
 /** 保存 / 取消操作行。 */
 @Composable
-private fun EditActionsRow(
+internal fun EditActionsRow(
     saving: Boolean,
     onSave: () -> Unit,
     onCancel: () -> Unit,
@@ -301,7 +301,7 @@ private fun EditActionsRow(
 /** 标签选择层：按根分组折叠展示子标签（仅子类可选，父类仅作分组头），点选即选中并关闭。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun EditTagPickerSheet(
+internal fun EditTagPickerSheet(
     allTagsByRoot: Map<Tag, List<Tag>>,
     selectedTagId: Long?,
     onSelect: (Long) -> Unit,

@@ -55,7 +55,7 @@ class ApiNlParser(
         /** 连接超时（毫秒）。 */
         private const val CONNECT_TIMEOUT_MILLIS = 10_000
 
-        /** 读取超时（毫秒，NL 解析真正上界）。 */
-        private const val READ_TIMEOUT_MILLIS = 15_000
+        /** 读取超时（毫秒，NL 解析真正上界）。mimo 等慢模型需要更长超时。 */
+        private const val READ_TIMEOUT_MILLIS = 45_000
     }
 }

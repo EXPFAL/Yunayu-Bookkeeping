@@ -78,6 +78,16 @@ fun TransactionManageScreen(
         return
     }
 
+    // 编辑记录改为全屏页面，解决 ModalBottomSheet 键盘遮挡问题
+    editingTransactionId?.let { id ->
+        EditTransactionScreen(
+            transactionId = id,
+            onBack = { editingTransactionId = null },
+            onSaved = { editingTransactionId = null },
+        )
+        return
+    }
+
     BackHandler(onBack = onBack)
 
     LaunchedEffect(viewModel) {
@@ -132,9 +142,7 @@ fun TransactionManageScreen(
         uiState = uiState,
         viewModel = viewModel,
         showTagSheet = showTagSheet,
-        editingTransactionId = editingTransactionId,
         onDismissTagSheet = { showTagSheet = false },
-        onDismissEdit = { editingTransactionId = null },
     )
 }
 
@@ -179,15 +187,13 @@ private fun ManageTabContent(
     }
 }
 
-/** 弹窗挂载：标签筛选层 + 两侧删除确认弹窗（按 Tab 匹配）+ 编辑弹层。 */
+/** 弹窗挂载：标签筛选层 + 两侧删除确认弹窗（按 Tab 匹配）。 */
 @Composable
 private fun ManageDialogs(
     uiState: TransactionManageUiState,
     viewModel: TransactionManageViewModel,
     showTagSheet: Boolean,
-    editingTransactionId: Long?,
     onDismissTagSheet: () -> Unit,
-    onDismissEdit: () -> Unit,
 ) {
     if (showTagSheet) {
         TagFilterSheet(
@@ -213,13 +219,6 @@ private fun ManageDialogs(
                 onDismiss = viewModel::cancelDeleteTransfer,
             )
         }
-    }
-    editingTransactionId?.let { id ->
-        EditTransactionSheet(
-            transactionId = id,
-            onDismissRequest = onDismissEdit,
-            onSaved = onDismissEdit,
-        )
     }
 }
 
