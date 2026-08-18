@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -43,6 +42,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.domain.model.AccountBalance
 import com.expfal.yunayu.ui.screen.accountmanage.AccountManageScreen
 import com.expfal.yunayu.ui.screen.apiconfig.ApiSettingsScreen
 import com.expfal.yunayu.ui.screen.budget.BudgetCard
@@ -54,6 +54,12 @@ import com.expfal.yunayu.ui.screen.report.ReportScreen
 import com.expfal.yunayu.ui.screen.tagmanage.TagManageScreen
 import com.expfal.yunayu.ui.screen.transactionmanage.TransactionManageScreen
 import kotlinx.coroutines.launch
+
+/** FAB 上边框与持有资金卡片下边框的间距。 */
+private val FAB_GAP_DP = 8.dp
+
+/** 最近记录区域上移距离，使标题与 FAB 中心对齐（FAB 中心 = FAB_GAP_DP + FAB_SIZE_DP / 2）。 */
+private val RECORD_SHIFT_DP = 28.dp
 
 /** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告 / 收支管理 / 账户管理 / 记一笔，七态互斥。 */
 private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS, REPORT, TRANSACTIONS, ACCOUNT_MANAGE, QUICK_ADD }
@@ -199,51 +205,76 @@ private fun HomeContent(
             onSetup = onShowBudgetSetup,
         )
         Spacer(modifier = Modifier.height(6.dp))
-        // 持有资金卡片与 FAB 右边框对齐
-        Box {
-            val density = LocalDensity.current
-            var cardHeightPx by remember { mutableIntStateOf(0) }
-            HeldFundsCard(
-                heldCents = homeState.heldCents,
-                heldByAccount = homeState.heldByAccount,
-                modifier = Modifier.onGloballyPositioned { coordinates ->
-                    cardHeightPx = coordinates.size.height
-                },
-            )
-            // FAB 上边框在持有资金下边框以下 8dp，右边框对齐
-            FloatingActionButton(
-                onClick = onShowQuickAdd,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = with(density) { cardHeightPx.toDp() } + 8.dp),
-            ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
-            }
-        }
+        HeldFundsCardWithFab(
+            heldCents = homeState.heldCents,
+            heldByAccount = homeState.heldByAccount,
+            onShowQuickAdd = onShowQuickAdd,
+        )
         if (!homeState.loading && homeState.recent.isEmpty()) {
             FirstRunHint()
             Spacer(modifier = Modifier.height(6.dp))
         }
-        // 标题与记录列表整体上移，使标题与FAB中心对齐，同时扩展底部空间
-        Column(modifier = Modifier
-            .layout { measurable, constraints ->
-                val placeable = measurable.measure(constraints.copy(maxHeight = constraints.maxHeight + 28.dp.roundToPx()))
-                layout(placeable.width, placeable.height - 28.dp.roundToPx()) {
-                    placeable.place(0, -28.dp.roundToPx())
-                }
-            }
+        RecentTransactionsSection(
+            homeState = homeState,
+            listState = listState,
+        )
+    }
+}
+
+/** 持有资金卡片与 FAB 组合：FAB 右边框对齐卡片，上边框在卡片下边框以下 [FAB_GAP_DP]dp。 */
+@Composable
+private fun HeldFundsCardWithFab(
+    heldCents: Long,
+    heldByAccount: List<AccountBalance>,
+    onShowQuickAdd: () -> Unit,
+) {
+    Box {
+        val density = LocalDensity.current
+        var cardHeightPx by remember { mutableIntStateOf(0) }
+        HeldFundsCard(
+            heldCents = heldCents,
+            heldByAccount = heldByAccount,
+            modifier = Modifier.onGloballyPositioned { coordinates ->
+                cardHeightPx = coordinates.size.height
+            },
+        )
+        FloatingActionButton(
+            onClick = onShowQuickAdd,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = with(density) { cardHeightPx.toDp() } + FAB_GAP_DP),
         ) {
-            Text(
-                "最近记录",
-                style = MaterialTheme.typography.titleMedium,
-            )
-            Spacer(Modifier.height(4.dp))
-            RecentTransactionsCard(
-                uiState = homeState,
-                modifier = Modifier.weight(1f),
-                listState = listState,
-            )
+            Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
         }
+    }
+}
+
+/** 最近记录区域：标题与列表整体上移 [RECORD_SHIFT_DP]dp，使标题与 FAB 中心对齐。 */
+@Composable
+private fun RecentTransactionsSection(
+    homeState: HomeUiState,
+    listState: LazyListState,
+) {
+    Column(
+        modifier = Modifier.layout { measurable, constraints ->
+            val shiftPx = RECORD_SHIFT_DP.roundToPx()
+            val expandedConstraints = constraints.copy(maxHeight = constraints.maxHeight + shiftPx)
+            val placeable = measurable.measure(expandedConstraints)
+            layout(placeable.width, placeable.height - shiftPx) {
+                placeable.place(0, -shiftPx)
+            }
+        },
+    ) {
+        Text(
+            "最近记录",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(4.dp))
+        RecentTransactionsCard(
+            uiState = homeState,
+            modifier = Modifier.weight(1f),
+            listState = listState,
+        )
     }
 }
 
