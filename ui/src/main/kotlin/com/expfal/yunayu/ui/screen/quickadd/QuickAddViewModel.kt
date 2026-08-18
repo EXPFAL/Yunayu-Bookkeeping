@@ -68,6 +68,8 @@ data class QuickAddUiState(
     val transferError: String? = null,
     /** 数字模式收支的可选手动备注；转账模式忽略（转账有独立 [transferNote]）。 */
     val manualNote: String = "",
+    /** 数据是否已就绪（账户+标签+根名映射全部加载完成），用于避免三段式渲染。 */
+    val isReady: Boolean = false,
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -137,7 +139,8 @@ class QuickAddViewModel @Inject constructor(
 
     /**
      * 弹层每次打开时重置所有陈旧输入与 NL 状态，避免跨开闭存活导致上次内容残留；
-     * 建议分类的刷新由调用方随后执行 [refreshSuggestedTags] 完成。
+     * 同时启动账户、标签、根名映射的并行加载，全部完成后设置 [QuickAddUiState.isReady]，
+     * 避免三段式渲染。
      */
     fun resetForOpen() {
         nlConfirmPending = false
@@ -159,9 +162,17 @@ class QuickAddViewModel @Inject constructor(
                 transferNote = "",
                 transferError = null,
                 manualNote = "",
+                isReady = false,
             )
         }
-        reloadAccounts()
+        // 并行加载账户、标签、根名映射，全部完成后一次性更新 UI
+        viewModelScope.launch {
+            val accountsDeferred = launch { reloadAccounts() }
+            val tagsDeferred = launch { refreshSuggestedTagsInternal() }
+            accountsDeferred.join()
+            tagsDeferred.join()
+            _uiState.update { it.copy(isReady = true) }
+        }
     }
 
     /**
@@ -169,23 +180,21 @@ class QuickAddViewModel @Inject constructor(
      * 否则回退「未指定账户」（防止账户被删除后残留失效选中）。账户加载失败降级空列表、
      * 记忆读取失败降级未预选，均记日志且 [kotlinx.coroutines.CancellationException] 直接重抛。
      */
-    private fun reloadAccounts() {
-        viewModelScope.launch {
-            val accounts = runCatching { accountRepository.getAccounts() }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to load accounts", throwable)
-                }
-                .getOrDefault(emptyList())
-            val rememberedId = runCatching { accountRepository.observeLastUsedAccountId().first() }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to read last used account id", throwable)
-                }
-                .getOrNull()
-            val preselect = rememberedId?.takeIf { id -> accounts.any { it.id == id } }
-            _uiState.update { it.copy(accounts = accounts, selectedAccountId = preselect) }
-        }
+    private suspend fun reloadAccounts() {
+        val accounts = runCatching { accountRepository.getAccounts() }
+            .onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
+                Log.w(TAG, "Failed to load accounts", throwable)
+            }
+            .getOrDefault(emptyList())
+        val rememberedId = runCatching { accountRepository.observeLastUsedAccountId().first() }
+            .onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
+                Log.w(TAG, "Failed to read last used account id", throwable)
+            }
+            .getOrNull()
+        val preselect = rememberedId?.takeIf { id -> accounts.any { it.id == id } }
+        _uiState.update { it.copy(accounts = accounts, selectedAccountId = preselect) }
     }
 
     /**
@@ -197,21 +206,28 @@ class QuickAddViewModel @Inject constructor(
     fun refreshSuggestedTags(preselectTagId: Long? = null) {
         suggestedTagsJob?.cancel()
         suggestedTagsJob = viewModelScope.launch {
-            val tags = loadSuggestedTags()
-            val rootNameById = loadRootNames()
-            _uiState.update { state ->
-                if (state.nlMode) {
-                    state.copy(
-                        suggestedTags = tags,
-                        rootNameById = rootNameById,
-                    )
-                } else {
-                    state.copy(
-                        suggestedTags = tags,
-                        selectedTagId = preselectTagId ?: tags.firstOrNull()?.id,
-                        rootNameById = rootNameById,
-                    )
-                }
+            refreshSuggestedTagsInternal(preselectTagId)
+        }
+    }
+
+    /**
+     * 内部刷新建议分类与根名映射的实现，供 [resetForOpen] 和 [refreshSuggestedTags] 共用。
+     */
+    private suspend fun refreshSuggestedTagsInternal(preselectTagId: Long? = null) {
+        val tags = loadSuggestedTags()
+        val rootNameById = loadRootNames()
+        _uiState.update { state ->
+            if (state.nlMode) {
+                state.copy(
+                    suggestedTags = tags,
+                    rootNameById = rootNameById,
+                )
+            } else {
+                state.copy(
+                    suggestedTags = tags,
+                    selectedTagId = preselectTagId ?: tags.firstOrNull()?.id,
+                    rootNameById = rootNameById,
+                )
             }
         }
     }

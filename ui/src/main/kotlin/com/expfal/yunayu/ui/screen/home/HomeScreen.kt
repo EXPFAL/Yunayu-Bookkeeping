@@ -37,7 +37,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -200,16 +199,21 @@ private fun HomeContent(
         Spacer(modifier = Modifier.height(6.dp))
         // 持有资金卡片与 FAB 右边框对齐
         Box {
+            val density = LocalDensity.current
+            var cardHeightPx by remember { mutableIntStateOf(0) }
             HeldFundsCard(
                 heldCents = homeState.heldCents,
                 heldByAccount = homeState.heldByAccount,
+                modifier = Modifier.onGloballyPositioned { coordinates ->
+                    cardHeightPx = coordinates.size.height
+                },
             )
-            // FAB 位于持有资金卡片右下角，上边框与持有资金下边框相距适当距离
+            // FAB 上边框在持有资金下边框以下 4dp，右边框对齐
             FloatingActionButton(
                 onClick = onShowQuickAdd,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = 60.dp),
+                    .padding(top = with(density) { cardHeightPx.toDp() } + 4.dp),
             ) {
                 Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
             }
