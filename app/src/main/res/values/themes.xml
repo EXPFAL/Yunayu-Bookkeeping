@@ -9,10 +9,8 @@
         <item name="windowSplashScreenBackground">@color/splash_background</item>
         <!-- 图标背景色：与窗口背景色一致，消除图标周围分割线 -->
         <item name="windowSplashScreenIconBackgroundColor">@color/splash_background</item>
-        <!-- 启动图标：使用非 adaptive 的 ic_launcher 避免 foreground 黑色背景产生边框 -->
+        <!-- 启动图标 -->
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
-        <!-- 图标大小缩放：较小的缩放比例减少边框可见性 -->
-        <item name="windowSplashScreenIconSize">72dp</item>
         <!-- 启动后回退到应用主题 -->
         <item name="postSplashScreenTheme">@style/Theme.Yunayu</item>
     </style>
