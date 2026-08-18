@@ -230,21 +230,29 @@ private fun HeldFundsCardWithFab(
 ) {
     Box {
         val density = LocalDensity.current
+        // 保存上次高度，避免从记一笔返回时首帧为0导致错位
         var cardHeightPx by remember { mutableIntStateOf(0) }
+        var lastValidHeightPx by remember { mutableIntStateOf(0) }
         HeldFundsCard(
             heldCents = heldCents,
             heldByAccount = heldByAccount,
             modifier = Modifier.onGloballyPositioned { coordinates ->
-                cardHeightPx = coordinates.size.height
+                val height = coordinates.size.height
+                cardHeightPx = height
+                if (height > 0) lastValidHeightPx = height
             },
         )
-        FloatingActionButton(
-            onClick = onShowQuickAdd,
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = with(density) { cardHeightPx.toDp() } + FAB_GAP_DP),
-        ) {
-            Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
+        // 使用有效高度计算 FAB 位置
+        val effectiveHeightPx = if (cardHeightPx > 0) cardHeightPx else lastValidHeightPx
+        if (effectiveHeightPx > 0) {
+            FloatingActionButton(
+                onClick = onShowQuickAdd,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = with(density) { effectiveHeightPx.toDp() } + FAB_GAP_DP),
+            ) {
+                Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
+            }
         }
     }
 }
