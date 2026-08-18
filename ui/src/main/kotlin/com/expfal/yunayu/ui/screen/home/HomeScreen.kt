@@ -218,7 +218,6 @@ private fun HomeContent(
                 Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
             }
         }
-        Spacer(modifier = Modifier.height(0.dp))
         if (!homeState.loading && homeState.recent.isEmpty()) {
             FirstRunHint()
             Spacer(modifier = Modifier.height(6.dp))
@@ -226,6 +225,7 @@ private fun HomeContent(
         Text(
             "最近记录",
             style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.offset(y = (-12).dp),
         )
         Spacer(Modifier.height(4.dp))
         RecentTransactionsCard(
