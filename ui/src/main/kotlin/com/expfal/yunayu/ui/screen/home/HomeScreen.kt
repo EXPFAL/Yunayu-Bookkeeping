@@ -2,14 +2,10 @@ package com.expfal.yunayu.ui.screen.home
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -178,7 +174,7 @@ private fun HomeMainContent(
     }
 }
 
-/** 首页主内容区：预算卡片 + 最近记录 + FAB，FAB 与「最近记录」平行且下端对齐。 */
+/** 首页主内容区：预算卡片 + 持有资金 + FAB + 最近记录。 */
 @Composable
 private fun HomeContent(
     modifier: Modifier,
@@ -188,59 +184,50 @@ private fun HomeContent(
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
 ) {
-    Box(modifier = modifier) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 8.dp),
-        ) {
-            BudgetCard(
-                loading = budgetState.loading,
-                budgetCents = budgetState.budgetCents,
-                snapshot = budgetState.snapshot,
-                onEdit = onShowBudgetSetup,
-                onSetup = onShowBudgetSetup,
-            )
-            Spacer(modifier = Modifier.height(6.dp))
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 24.dp, vertical = 8.dp),
+    ) {
+        BudgetCard(
+            loading = budgetState.loading,
+            budgetCents = budgetState.budgetCents,
+            snapshot = budgetState.snapshot,
+            onEdit = onShowBudgetSetup,
+            onSetup = onShowBudgetSetup,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        // 持有资金卡片与 FAB 右边框对齐
+        Box {
             HeldFundsCard(
                 heldCents = homeState.heldCents,
                 heldByAccount = homeState.heldByAccount,
             )
-            Spacer(modifier = Modifier.height(6.dp))
-            if (!homeState.loading && homeState.recent.isEmpty()) {
-                FirstRunHint()
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-            // 最近记录标题与 FAB 并排
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
+            // FAB 位于持有资金卡片右下角，上边框与持有资金下边框相距适当距离
+            FloatingActionButton(
+                onClick = onShowQuickAdd,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 60.dp),
             ) {
-                Text(
-                    "最近记录",
-                    style = MaterialTheme.typography.titleMedium,
-                    modifier = Modifier.weight(1f),
-                )
-                // FAB 占位，与标题平行
-                Box(modifier = Modifier.size(56.dp))
+                Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
             }
-            Spacer(Modifier.height(4.dp))
-            RecentTransactionsCard(
-                uiState = homeState,
-                modifier = Modifier.weight(1f),
-                listState = listState,
-            )
         }
-
-        // FAB 浮动在右下角，与「最近记录」标题下端对齐
-        FloatingActionButton(
-            onClick = onShowQuickAdd,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 24.dp, bottom = 16.dp),
-        ) {
-            Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
+        Spacer(modifier = Modifier.height(8.dp))
+        if (!homeState.loading && homeState.recent.isEmpty()) {
+            FirstRunHint()
+            Spacer(modifier = Modifier.height(6.dp))
         }
+        Text(
+            "最近记录",
+            style = MaterialTheme.typography.titleMedium,
+        )
+        Spacer(Modifier.height(4.dp))
+        RecentTransactionsCard(
+            uiState = homeState,
+            modifier = Modifier.weight(1f),
+            listState = listState,
+        )
     }
 }
 

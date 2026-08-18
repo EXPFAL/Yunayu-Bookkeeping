@@ -116,7 +116,7 @@ class QuickAddViewModel @Inject constructor(
     val events: Flow<QuickAddEvent> = _events.asSharedFlow()
 
     init {
-        // 预先加载账户和标签数据，避免首次打开时的空状态闪烁
+        // 预先加载账户数据，避免首次打开时的空状态闪烁
         viewModelScope.launch {
             val accounts = runCatching { accountRepository.getAccounts() }
                 .onFailure { throwable ->
@@ -132,18 +132,6 @@ class QuickAddViewModel @Inject constructor(
                 .getOrNull()
             val preselect = rememberedId?.takeIf { id -> accounts.any { it.id == id } }
             _uiState.update { it.copy(accounts = accounts, selectedAccountId = preselect) }
-        }
-        // 预加载建议标签，避免首帧仅显示"更多"
-        viewModelScope.launch {
-            val tags = loadSuggestedTags()
-            val rootNameById = loadRootNames()
-            _uiState.update { state ->
-                state.copy(
-                    suggestedTags = tags,
-                    selectedTagId = tags.firstOrNull()?.id,
-                    rootNameById = rootNameById,
-                )
-            }
         }
     }
 
