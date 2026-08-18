@@ -104,7 +104,6 @@ fun QuickAddScreen(
     ConfirmDialogIfNeeded(uiState = uiState, viewModel = viewModel)
 
     Scaffold(
-        modifier = Modifier.statusBarsPadding(),
         topBar = {
             TopAppBar(
                 title = { Text("记一笔") },

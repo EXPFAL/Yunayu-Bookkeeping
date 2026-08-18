@@ -1,13 +1,14 @@
 package com.expfal.yunayu.ui.screen.home
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -177,7 +178,7 @@ private fun HomeMainContent(
     }
 }
 
-/** 首页主内容区：预算卡片 + 最近记录 + FAB，FAB 底部与「最近记录」标题底部对齐。 */
+/** 首页主内容区：预算卡片 + 最近记录 + FAB，FAB 与「最近记录」平行且下端对齐。 */
 @Composable
 private fun HomeContent(
     modifier: Modifier,
@@ -187,16 +188,11 @@ private fun HomeContent(
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
 ) {
-    var titleBottomPx by remember { mutableIntStateOf(0) }
-
-    BoxWithConstraints(modifier = modifier) {
-        // 使用 BoxWithConstraints 直接获取容器高度，避免首帧为 0 的问题
-        val containerHeightPx = with(LocalDensity.current) { maxHeight.roundToPx() }
-
+    Box(modifier = modifier) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp, vertical = 12.dp),
+                .padding(horizontal = 24.dp, vertical = 8.dp),
         ) {
             BudgetCard(
                 loading = budgetState.loading,
@@ -205,24 +201,30 @@ private fun HomeContent(
                 onEdit = onShowBudgetSetup,
                 onSetup = onShowBudgetSetup,
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             HeldFundsCard(
                 heldCents = homeState.heldCents,
                 heldByAccount = homeState.heldByAccount,
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
             if (!homeState.loading && homeState.recent.isEmpty()) {
                 FirstRunHint()
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(6.dp))
             }
-            Text(
-                "最近记录",
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.onGloballyPositioned {
-                    titleBottomPx = it.positionInRoot().y.toInt() + it.size.height
-                },
-            )
-            Spacer(Modifier.height(8.dp))
+            // 最近记录标题与 FAB 并排
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    "最近记录",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.weight(1f),
+                )
+                // FAB 占位，与标题平行
+                Box(modifier = Modifier.size(56.dp))
+            }
+            Spacer(Modifier.height(4.dp))
             RecentTransactionsCard(
                 uiState = homeState,
                 modifier = Modifier.weight(1f),
@@ -230,20 +232,12 @@ private fun HomeContent(
             )
         }
 
-        // 计算 FAB 底部内边距：使 FAB 与「最近记录」标题底部对齐
-        val bottomPadding = if (titleBottomPx > 0) {
-            with(LocalDensity.current) {
-                (containerHeightPx - titleBottomPx).toDp().coerceAtLeast(0.dp)
-            }
-        } else {
-            // 首帧 titleBottomPx 为 0 时，使用默认内边距避免闪现错误位置
-            180.dp
-        }
+        // FAB 浮动在右下角，与「最近记录」标题下端对齐
         FloatingActionButton(
             onClick = onShowQuickAdd,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 16.dp, bottom = bottomPadding),
+                .padding(end = 24.dp, bottom = 16.dp),
         ) {
             Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
         }
