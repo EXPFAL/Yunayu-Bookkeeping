@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -222,17 +223,19 @@ private fun HomeContent(
             FirstRunHint()
             Spacer(modifier = Modifier.height(6.dp))
         }
-        Text(
-            "最近记录",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.offset(y = (-12).dp),
-        )
-        Spacer(Modifier.height(4.dp))
-        RecentTransactionsCard(
-            uiState = homeState,
-            modifier = Modifier.weight(1f),
-            listState = listState,
-        )
+        // 标题与记录列表整体上移，使标题与FAB中心对齐
+        Column(modifier = Modifier.offset(y = (-28).dp)) {
+            Text(
+                "最近记录",
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Spacer(Modifier.height(4.dp))
+            RecentTransactionsCard(
+                uiState = homeState,
+                modifier = Modifier.weight(1f),
+                listState = listState,
+            )
+        }
     }
 }
 
