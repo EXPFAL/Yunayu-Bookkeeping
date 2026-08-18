@@ -37,6 +37,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -223,8 +224,15 @@ private fun HomeContent(
             FirstRunHint()
             Spacer(modifier = Modifier.height(6.dp))
         }
-        // 标题与记录列表整体上移，使标题与FAB中心对齐
-        Column(modifier = Modifier.offset(y = (-28).dp)) {
+        // 标题与记录列表整体上移，使标题与FAB中心对齐，同时扩展底部空间
+        Column(modifier = Modifier
+            .layout { measurable, constraints ->
+                val placeable = measurable.measure(constraints.copy(maxHeight = constraints.maxHeight + 28.dp.roundToPx()))
+                layout(placeable.width, placeable.height - 28.dp.roundToPx()) {
+                    placeable.place(0, -28.dp.roundToPx())
+                }
+            }
+        ) {
             Text(
                 "最近记录",
                 style = MaterialTheme.typography.titleMedium,
