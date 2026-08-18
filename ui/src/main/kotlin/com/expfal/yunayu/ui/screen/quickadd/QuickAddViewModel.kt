@@ -132,7 +132,7 @@ class QuickAddViewModel @Inject constructor(
                 saveFailed = false,
                 nlTagId = null,
                 transactionType = TransactionType.EXPENSE,
-                accounts = emptyList(),
+                // 保留旧 accounts 直到新数据加载完成，避免首帧闪烁
                 selectedAccountId = null,
                 transferMode = false,
                 fromAccountId = null,
