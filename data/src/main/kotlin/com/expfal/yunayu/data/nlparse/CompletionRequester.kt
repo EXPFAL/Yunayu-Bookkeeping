@@ -25,6 +25,8 @@ internal class CompletionRequester(
 
     /** 发起一次请求并抽取 `choices[0].message.content`；任何异常降级为 `null`。失败路径输出诊断日志。 */
     fun request(config: NlApiConfig, systemInstruction: String, userText: String): String? {
+        val url = "${config.baseUrl.trimEnd('/')}$CHAT_COMPLETIONS_PATH"
+        Log.d(TAG, "Requesting: $url with model: ${config.model}")
         val connection = try {
             openConnection(config, systemInstruction, userText)
         } catch (e: CancellationException) {
@@ -67,7 +69,9 @@ internal class CompletionRequester(
             connection.connectTimeout = connectTimeoutMillis
             connection.readTimeout = readTimeoutMillis
             connection.doOutput = true
+            // 设置认证头：同时支持 Authorization: Bearer 和 api-key 两种格式，兼容不同 API 提供商
             connection.setRequestProperty("Authorization", "Bearer ${config.apiKey}")
+            connection.setRequestProperty("api-key", config.apiKey)
             connection.setRequestProperty("Content-Type", "application/json")
             connection.outputStream.use {
                 it.write(buildRequest(config, systemInstruction, userText).toByteArray(Charsets.UTF_8))
@@ -96,6 +100,7 @@ internal class CompletionRequester(
             .put("model", config.model)
             .put("messages", messages)
             .put("temperature", TEMPERATURE)
+            .put("max_completion_tokens", MAX_COMPLETION_TOKENS)
             .toString()
     }
 
@@ -133,6 +138,9 @@ internal class CompletionRequester(
 
         /** 低温采样，保证输出稳定。 */
         private const val TEMPERATURE = 0.1
+
+        /** 最大补全 token 数，部分 API（如 MiMo）需要此参数。 */
+        private const val MAX_COMPLETION_TOKENS = 1024
 
         /**
          * 逐字段解析生效配置：保存值 trim 后非空白则优先采用，否则回退对应默认值。

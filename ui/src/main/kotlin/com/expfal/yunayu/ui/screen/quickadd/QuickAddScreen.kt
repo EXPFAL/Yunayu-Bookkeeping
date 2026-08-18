@@ -201,10 +201,10 @@ private fun QuickAddScreenContent(
     }
 }
 
-/** 标准布局：上部内容区 + 下部固定输入区。
+/** 标准布局：固定头部 + 可滚动内容区 + 固定底部。
  *
- * 手动记模式：上部可滚动（类型切换/金额/标签/账户/备注），下部固定数字键盘。
- * 自动记模式：上部不滚动（模式切换/标签/账户/NL输入框 + 下方空白），下部无固定区。
+ * 手动记模式：固定头部（类型切换/金额/标签/账户/备注），固定底部（数字键盘）。
+ * 自动记模式：固定头部（模式切换/标签/账户），可滚动内容区（NL输入框），无固定底部。
  * 键盘弹出时 imePadding 收缩下方空白，仅覆盖空白、不遮挡输入框。
  */
 @Composable
@@ -214,11 +214,9 @@ private fun StandardLayout(
     onShowTagPicker: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
+        // 固定头部：选项区域，不随滚动移动
         Column(
             modifier = Modifier
-                .weight(1f)
-                // 自动记模式不走 verticalScroll，避免键盘弹出时 bringIntoView 滚动
-                .then(if (uiState.nlMode) Modifier else Modifier.verticalScroll(rememberScrollState()))
                 .padding(horizontal = 24.dp),
         ) {
             QuickAddFormContent(
@@ -226,8 +224,16 @@ private fun StandardLayout(
                 viewModel = viewModel,
                 onShowTagPicker = onShowTagPicker,
             )
-            // 自动记模式：NL 输入框+解析按钮上移至页面中部，下方空白供 imePadding 收缩
-            if (uiState.nlMode) {
+        }
+
+        // 可滚动内容区：自动记模式的 NL 输入框
+        if (uiState.nlMode) {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp),
+            ) {
                 NlParseSection(
                     inputText = uiState.nlInputText,
                     parsing = uiState.nlParsing,
@@ -246,7 +252,8 @@ private fun StandardLayout(
                 Spacer(modifier = Modifier.weight(1f))
             }
         }
-        // 手动记模式：下部固定数字键盘+保存按钮；自动记模式无固定区
+
+        // 固定底部：手动记模式的数字键盘+保存按钮
         if (!uiState.nlMode) {
             FixedInputSection(
                 uiState = uiState,
@@ -280,7 +287,7 @@ private fun CompactLayout(
             viewModel = viewModel,
             onShowTagPicker = onShowTagPicker,
         )
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(8.dp))
         // 自动记模式：NL 输入框+解析按钮紧随内容
         if (uiState.nlMode) {
             NlParseSection(
@@ -322,7 +329,7 @@ private fun QuickAddFormContent(
         nlMode = uiState.nlMode,
         onModeChange = viewModel::setNlMode,
     )
-    Spacer(modifier = Modifier.height(16.dp))
+    Spacer(modifier = Modifier.height(8.dp))
     if (!uiState.nlMode) {
         TypeToggle(
             transactionType = uiState.transactionType,
@@ -331,9 +338,9 @@ private fun QuickAddFormContent(
             onTransfer = viewModel::setTransferMode,
         )
         // 优化项 1：金额上下间距统一 24dp
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         AmountDisplay(amountText = uiState.amountText)
-        Spacer(modifier = Modifier.height(24.dp))
+        Spacer(modifier = Modifier.height(12.dp))
     }
     if (!uiState.nlMode && uiState.transferMode) {
         TransferFormBranch(
@@ -394,7 +401,7 @@ private fun ManualNoteField(
         singleLine = true,
         modifier = Modifier.fillMaxWidth(),
     )
-    Spacer(modifier = Modifier.height(12.dp))
+    Spacer(modifier = Modifier.height(8.dp))
 }
 
 /** 数字模式三段式切换控件：支出 / 收入 / 转账。 */
@@ -448,7 +455,7 @@ private fun TransferFormBranch(
         onSelectTo = onSelectTo,
         onNoteChange = onNoteChange,
     )
-    Spacer(modifier = Modifier.height(20.dp))
+    Spacer(modifier = Modifier.height(8.dp))
 }
 
 /** 收支表单分支块：最近分类 chips + 账户选择。 */
@@ -499,7 +506,7 @@ private fun ExpenseFormBranch(
         onSelect = onSelectAccount,
         modifier = Modifier.padding(top = 12.dp),
     )
-    Spacer(modifier = Modifier.height(20.dp))
+    Spacer(modifier = Modifier.height(8.dp))
 }
 
 /**
