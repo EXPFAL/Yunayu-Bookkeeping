@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -146,7 +147,7 @@ private fun HomeMainContent(
         },
     ) {
         Scaffold(
-            modifier = modifier,
+            modifier = modifier.statusBarsPadding(),
             topBar = {
                 TopAppBar(
                     title = { Text("首页") },
@@ -192,7 +193,7 @@ private fun HomeContent(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(horizontal = 24.dp, vertical = 12.dp),
         ) {
             BudgetCard(
                 loading = budgetState.loading,
@@ -201,15 +202,15 @@ private fun HomeContent(
                 onEdit = onShowBudgetSetup,
                 onSetup = onShowBudgetSetup,
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             HeldFundsCard(
                 heldCents = homeState.heldCents,
                 heldByAccount = homeState.heldByAccount,
             )
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             if (!homeState.loading && homeState.recent.isEmpty()) {
                 FirstRunHint()
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(8.dp))
             }
             Text(
                 "最近记录",
