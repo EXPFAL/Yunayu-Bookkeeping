@@ -208,17 +208,17 @@ private fun HomeContent(
                     cardHeightPx = coordinates.size.height
                 },
             )
-            // FAB 上边框在持有资金下边框以下 4dp，右边框对齐
+            // FAB 上边框在持有资金下边框以下 8dp，右边框对齐
             FloatingActionButton(
                 onClick = onShowQuickAdd,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(top = with(density) { cardHeightPx.toDp() } + 4.dp),
+                    .padding(top = with(density) { cardHeightPx.toDp() } + 8.dp),
             ) {
                 Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
             }
         }
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(4.dp))
         if (!homeState.loading && homeState.recent.isEmpty()) {
             FirstRunHint()
             Spacer(modifier = Modifier.height(6.dp))
