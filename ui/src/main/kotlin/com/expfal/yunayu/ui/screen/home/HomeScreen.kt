@@ -36,6 +36,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -262,9 +263,16 @@ private fun RecentTransactionsSection(
     homeState: HomeUiState,
     listState: LazyListState,
 ) {
-    Column {
-        // 负 Spacer 实现上移，比 Modifier.layout 更稳定
-        Spacer(Modifier.height(-RECORD_SHIFT_DP))
+    Column(
+        modifier = Modifier.layout { measurable, constraints ->
+            val shiftPx = RECORD_SHIFT_DP.roundToPx()
+            val expandedConstraints = constraints.copy(maxHeight = constraints.maxHeight + shiftPx)
+            val placeable = measurable.measure(expandedConstraints)
+            layout(placeable.width, placeable.height - shiftPx) {
+                placeable.place(0, -shiftPx)
+            }
+        },
+    ) {
         Text(
             "最近记录",
             style = MaterialTheme.typography.titleMedium,
