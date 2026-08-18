@@ -5,8 +5,11 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AssistChip
@@ -74,22 +77,27 @@ fun EditTransactionSheet(
         }
     }
 
-    ModalBottomSheet(onDismissRequest = { if (!uiState.saving) onDismissRequest() }) {
-        when {
-            uiState.loading -> EditPlaceholder("加载中…")
-            uiState.loadFailed -> EditPlaceholder("加载失败，请重试")
-            else -> EditContent(
-                uiState = uiState,
-                onTypeChange = viewModel::setType,
-                onDigit = viewModel::onDigit,
-                onDelete = viewModel::onDelete,
-                onNoteChange = viewModel::onNoteChange,
-                onSelectTag = viewModel::onSelectTag,
-                onOpenTagPicker = { showTagPicker = true },
-                onSelectAccount = viewModel::onSelectAccount,
-                onSave = viewModel::onSave,
-                onCancel = onDismissRequest,
-            )
+    ModalBottomSheet(
+        onDismissRequest = { if (!uiState.saving) onDismissRequest() },
+        windowInsets = WindowInsets(0),
+    ) {
+        Column(Modifier.imePadding()) {
+            when {
+                uiState.loading -> EditPlaceholder("加载中…")
+                uiState.loadFailed -> EditPlaceholder("加载失败，请重试")
+                else -> EditContent(
+                    uiState = uiState,
+                    onTypeChange = viewModel::setType,
+                    onDigit = viewModel::onDigit,
+                    onDelete = viewModel::onDelete,
+                    onNoteChange = viewModel::onNoteChange,
+                    onSelectTag = viewModel::onSelectTag,
+                    onOpenTagPicker = { showTagPicker = true },
+                    onSelectAccount = viewModel::onSelectAccount,
+                    onSave = viewModel::onSave,
+                    onCancel = onDismissRequest,
+                )
+            }
         }
     }
 
