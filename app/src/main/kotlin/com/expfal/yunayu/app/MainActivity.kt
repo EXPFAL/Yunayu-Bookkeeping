@@ -3,6 +3,7 @@ package com.expfal.yunayu.app
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.expfal.yunayu.ui.screen.home.HomeScreen
 import com.expfal.yunayu.ui.theme.YunayuTheme
@@ -15,6 +16,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
         setContent {
             YunayuTheme {
                 HomeScreen()

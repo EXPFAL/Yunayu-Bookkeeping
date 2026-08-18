@@ -147,7 +147,7 @@ private fun HomeMainContent(
         },
     ) {
         Scaffold(
-            modifier = modifier.statusBarsPadding(),
+            modifier = modifier,
             topBar = {
                 TopAppBar(
                     title = { Text("首页") },
@@ -163,7 +163,10 @@ private fun HomeMainContent(
             },
         ) { innerPadding ->
             HomeContent(
-                modifier = Modifier.fillMaxSize().padding(innerPadding),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(top = 4.dp),
                 homeState = homeState,
                 budgetState = budgetState,
                 listState = listState,
