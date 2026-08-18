@@ -115,6 +115,26 @@ class QuickAddViewModel @Inject constructor(
     )
     val events: Flow<QuickAddEvent> = _events.asSharedFlow()
 
+    init {
+        // 预先加载账户数据，避免首次打开时的空状态闪烁
+        viewModelScope.launch {
+            val accounts = runCatching { accountRepository.getAccounts() }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to preload accounts", throwable)
+                }
+                .getOrDefault(emptyList())
+            val rememberedId = runCatching { accountRepository.observeLastUsedAccountId().first() }
+                .onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(TAG, "Failed to read last used account id", throwable)
+                }
+                .getOrNull()
+            val preselect = rememberedId?.takeIf { id -> accounts.any { it.id == id } }
+            _uiState.update { it.copy(accounts = accounts, selectedAccountId = preselect) }
+        }
+    }
+
     /**
      * 弹层每次打开时重置所有陈旧输入与 NL 状态，避免跨开闭存活导致上次内容残留；
      * 建议分类的刷新由调用方随后执行 [refreshSuggestedTags] 完成。
