@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -92,12 +91,22 @@ fun EditTransactionScreen(
         ) {
             when {
                 uiState.loading -> {
-                    Column(
-                        modifier = Modifier.fillMaxSize(),
-                        verticalArrangement = Arrangement.Center,
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        CircularProgressIndicator()
+                    // 加载中显示空表单骨架，避免闪烁
+                    Column(modifier = Modifier.padding(horizontal = 24.dp)) {
+                        EditTypeToggle(
+                            transactionType = uiState.transactionType,
+                            onTypeChange = viewModel::setType,
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        Text(
+                            text = "¥ 0",
+                            style = MaterialTheme.typography.displayLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Spacer(Modifier.height(16.dp))
+                        EditNoteField(note = "", onNoteChange = {})
                     }
                 }
                 uiState.loadFailed -> {

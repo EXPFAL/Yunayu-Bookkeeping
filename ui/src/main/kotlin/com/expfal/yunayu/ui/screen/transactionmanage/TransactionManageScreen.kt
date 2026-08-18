@@ -1,6 +1,8 @@
 package com.expfal.yunayu.ui.screen.transactionmanage
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -73,77 +75,32 @@ fun TransactionManageScreen(
     var showOrganize by remember { mutableStateOf(false) }
     var editingTransactionId by remember { mutableStateOf<Long?>(null) }
 
-    if (showOrganize) {
-        OrganizeScreen(onBack = { showOrganize = false })
-        return
-    }
-
-    // 编辑记录改为全屏页面，解决 ModalBottomSheet 键盘遮挡问题
-    editingTransactionId?.let { id ->
-        EditTransactionScreen(
-            transactionId = id,
-            onBack = { editingTransactionId = null },
-            onSaved = { editingTransactionId = null },
-        )
-        return
-    }
-
-    BackHandler(onBack = onBack)
-
-    LaunchedEffect(viewModel) {
-        viewModel.events.collect { event ->
-            when (event) {
-                TransactionManageEvent.Deleted -> snackbarHostState.showSnackbar("已删除")
-                TransactionManageEvent.Failed -> snackbarHostState.showSnackbar("删除失败，请重试")
-            }
-        }
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("收支管理") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = {
-                    OrganizeAction(
-                        count = uiState.uncategorizedCount,
-                        onClick = { showOrganize = true },
-                    )
-                },
+    Crossfade(
+        targetState = editingTransactionId,
+        modifier = Modifier.background(MaterialTheme.colorScheme.surface),
+    ) { targetId ->
+        if (targetId != null) {
+            EditTransactionScreen(
+                transactionId = targetId,
+                onBack = { editingTransactionId = null },
+                onSaved = { editingTransactionId = null },
             )
-        },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-    ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 24.dp),
-        ) {
-            ManageTabRow(
-                selected = uiState.tab,
-                onSelect = viewModel::selectTab,
-            )
-            Spacer(Modifier.height(12.dp))
-            ManageTabContent(
+        } else if (showOrganize) {
+            OrganizeScreen(onBack = { showOrganize = false })
+        } else {
+            TransactionManageContent(
                 uiState = uiState,
                 viewModel = viewModel,
+                snackbarHostState = snackbarHostState,
+                showTagSheet = showTagSheet,
+                onBack = onBack,
+                onShowOrganize = { showOrganize = true },
                 onOpenTagSheet = { showTagSheet = true },
+                onDismissTagSheet = { showTagSheet = false },
                 onEditTransaction = { editingTransactionId = it },
             )
         }
     }
-
-    ManageDialogs(
-        uiState = uiState,
-        viewModel = viewModel,
-        showTagSheet = showTagSheet,
-        onDismissTagSheet = { showTagSheet = false },
-    )
 }
 
 /** 「收支 / 转账」Tab 分支内容：转账列表，或收支筛选区 + 交易列表。 */
@@ -185,6 +142,78 @@ private fun ManageTabContent(
             )
         }
     }
+}
+
+/** 收支管理主内容：Scaffold + 筛选区 + 列表 + 弹窗。 */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TransactionManageContent(
+    uiState: TransactionManageUiState,
+    viewModel: TransactionManageViewModel,
+    snackbarHostState: SnackbarHostState,
+    showTagSheet: Boolean,
+    onBack: () -> Unit,
+    onShowOrganize: () -> Unit,
+    onOpenTagSheet: () -> Unit,
+    onDismissTagSheet: () -> Unit,
+    onEditTransaction: (Long) -> Unit,
+) {
+    BackHandler(onBack = onBack)
+
+    LaunchedEffect(viewModel) {
+        viewModel.events.collect { event ->
+            when (event) {
+                TransactionManageEvent.Deleted -> snackbarHostState.showSnackbar("已删除")
+                TransactionManageEvent.Failed -> snackbarHostState.showSnackbar("删除失败，请重试")
+            }
+        }
+    }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = { Text("收支管理") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    OrganizeAction(
+                        count = uiState.uncategorizedCount,
+                        onClick = onShowOrganize,
+                    )
+                },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { innerPadding ->
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(innerPadding)
+                .padding(horizontal = 24.dp),
+        ) {
+            ManageTabRow(
+                selected = uiState.tab,
+                onSelect = viewModel::selectTab,
+            )
+            Spacer(Modifier.height(12.dp))
+            ManageTabContent(
+                uiState = uiState,
+                viewModel = viewModel,
+                onOpenTagSheet = onOpenTagSheet,
+                onEditTransaction = onEditTransaction,
+            )
+        }
+    }
+
+    ManageDialogs(
+        uiState = uiState,
+        viewModel = viewModel,
+        showTagSheet = showTagSheet,
+        onDismissTagSheet = onDismissTagSheet,
+    )
 }
 
 /** 弹窗挂载：标签筛选层 + 两侧删除确认弹窗（按 Tab 匹配）。 */
