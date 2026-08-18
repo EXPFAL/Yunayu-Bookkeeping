@@ -1,6 +1,7 @@
 package com.expfal.yunayu.ui.screen.home
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -182,17 +183,12 @@ private fun HomeContent(
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
 ) {
-    var containerHeightPx by remember { mutableIntStateOf(0) }
-    var containerTopPx by remember { mutableIntStateOf(0) }
     var titleBottomPx by remember { mutableIntStateOf(0) }
 
-    Box(
-        modifier = modifier
-            .onGloballyPositioned {
-                containerHeightPx = it.size.height
-                containerTopPx = it.positionInRoot().y.toInt()
-            },
-    ) {
+    BoxWithConstraints(modifier = modifier) {
+        // 使用 BoxWithConstraints 直接获取容器高度，避免首帧为 0 的问题
+        val containerHeightPx = with(LocalDensity.current) { maxHeight.roundToPx() }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -230,13 +226,14 @@ private fun HomeContent(
             )
         }
 
-        // 测量初值为 0 时 FAB 可能闪现错误位置，接受首帧微调
-        val bottomPadding = if (containerHeightPx > 0 && titleBottomPx > 0) {
+        // 计算 FAB 底部内边距：使 FAB 与「最近记录」标题底部对齐
+        val bottomPadding = if (titleBottomPx > 0) {
             with(LocalDensity.current) {
-                (containerHeightPx - (titleBottomPx - containerTopPx)).toDp().coerceAtLeast(0.dp)
+                (containerHeightPx - titleBottomPx).toDp().coerceAtLeast(0.dp)
             }
         } else {
-            0.dp
+            // 首帧 titleBottomPx 为 0 时，使用默认内边距避免闪现错误位置
+            180.dp
         }
         FloatingActionButton(
             onClick = onShowQuickAdd,
