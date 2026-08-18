@@ -218,7 +218,7 @@ private fun HomeContent(
                 Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
             }
         }
-        Spacer(modifier = Modifier.height(4.dp))
+        Spacer(modifier = Modifier.height(0.dp))
         if (!homeState.loading && homeState.recent.isEmpty()) {
             FirstRunHint()
             Spacer(modifier = Modifier.height(6.dp))
