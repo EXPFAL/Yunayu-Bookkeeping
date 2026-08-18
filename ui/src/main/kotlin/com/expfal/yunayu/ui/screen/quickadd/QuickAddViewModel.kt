@@ -68,8 +68,6 @@ data class QuickAddUiState(
     val transferError: String? = null,
     /** 数字模式收支的可选手动备注；转账模式忽略（转账有独立 [transferNote]）。 */
     val manualNote: String = "",
-    /** 数据是否已就绪（账户+标签+根名映射全部加载完成），用于避免三段式渲染。 */
-    val isReady: Boolean = false,
 )
 
 /** 快捷录入对外暴露的一次性事件。 */
@@ -139,8 +137,7 @@ class QuickAddViewModel @Inject constructor(
 
     /**
      * 弹层每次打开时重置所有陈旧输入与 NL 状态，避免跨开闭存活导致上次内容残留；
-     * 同时启动账户、标签、根名映射的并行加载，全部完成后设置 [QuickAddUiState.isReady]，
-     * 避免三段式渲染。
+     * 同时并行加载账户、标签、根名映射，数据异步填充 UI，避免三段式渲染。
      */
     fun resetForOpen() {
         nlConfirmPending = false
@@ -162,16 +159,12 @@ class QuickAddViewModel @Inject constructor(
                 transferNote = "",
                 transferError = null,
                 manualNote = "",
-                isReady = false,
             )
         }
-        // 并行加载账户、标签、根名映射，全部完成后一次性更新 UI
+        // 并行加载账户、标签、根名映射
         viewModelScope.launch {
-            val accountsDeferred = launch { reloadAccounts() }
-            val tagsDeferred = launch { refreshSuggestedTagsInternal() }
-            accountsDeferred.join()
-            tagsDeferred.join()
-            _uiState.update { it.copy(isReady = true) }
+            launch { reloadAccounts() }
+            launch { refreshSuggestedTagsInternal() }
         }
     }
 
