@@ -137,10 +137,10 @@ internal class CompletionRequester(
         private const val CHAT_COMPLETIONS_PATH = "/chat/completions"
 
         /** 低温采样，保证输出稳定。 */
-        private const val TEMPERATURE = 0.1
+        private const val TEMPERATURE = 0.0
 
-        /** 最大补全 token 数，部分 API（如 MiMo）需要此参数。 */
-        private const val MAX_COMPLETION_TOKENS = 1024
+        /** 最大补全 token 数，记账解析只需短 JSON，限制到 256 加速响应。 */
+        private const val MAX_COMPLETION_TOKENS = 256
 
         /**
          * 逐字段解析生效配置：保存值 trim 后非空白则优先采用，否则回退对应默认值。

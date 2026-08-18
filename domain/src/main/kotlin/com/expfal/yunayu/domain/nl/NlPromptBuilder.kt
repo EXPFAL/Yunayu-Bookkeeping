@@ -14,28 +14,16 @@ object NlPromptBuilder {
     }
 
     private const val SYSTEM_ROLE =
-        "你是记账应用的意图解析器。把用户的中文记账描述解析为一个 JSON 对象，只输出 JSON，不要输出任何其它说明文字。\n\n"
+        "解析中文记账为JSON，只输出JSON。\n"
 
     private const val SCHEMA_SECTION =
-        "JSON 字段：\n" +
-            "- \"amount\"：金额，纯数字字符串，单位元（如 \"20\"、\"35.5\"）\n" +
-            "- \"type\"：\"expense\" 或 \"income\"，缺省 expense\n" +
-            "- \"tag\"：标签短语，只能从下方候选标签中选一个，没有把握就省略\n" +
-            "- \"note\"：必须从原句提取 2~8 字核心短语作为 note，不含金额与日期，不可省略\n" +
-            "- \"date\"：\"今天\"、\"昨天\"、\"前天\" 或 \"YYYY-MM-DD\"，缺省当作今天\n\n"
+        "字段：amount(元字符串)、type(expense/income默认expense)、tag(从候选选一个可省略)、note(2-8字核心短语必填)、date(今天/昨天/前天/YYYY-MM-DD默认今天)\n"
 
-    private const val TAG_PREFIX = "候选标签："
+    private const val TAG_PREFIX = "候选："
 
     private const val NO_TAGS = "无"
 
     private const val EXAMPLES_SECTION =
-        "示例：\n" +
-            "输入：午饭花了20块\n" +
-            "输出：{\"amount\":\"20\",\"type\":\"expense\",\"tag\":\"生活·餐饮\",\"note\":\"午饭\",\"date\":\"今天\"}\n" +
-            "输入：昨天买教材35.5\n" +
-            "输出：{\"amount\":\"35.5\",\"type\":\"expense\",\"tag\":\"学习\",\"note\":\"买教材\",\"date\":\"昨天\"}\n" +
-            "输入：收到奖学金2000\n" +
-            "输出：{\"amount\":\"2000\",\"type\":\"income\",\"tag\":\"学习\",\"note\":\"奖学金\",\"date\":\"今天\"}\n" +
-            "输入：打车12\n" +
-            "输出：{\"amount\":\"12\",\"type\":\"expense\",\"tag\":\"生活·交通\",\"note\":\"打车\",\"date\":\"今天\"}"
+        "午饭花了20块→{\"amount\":\"20\",\"type\":\"expense\",\"tag\":\"生活·餐饮\",\"note\":\"午饭\",\"date\":\"今天\"}\n" +
+            "收到奖学金2000→{\"amount\":\"2000\",\"type\":\"income\",\"tag\":\"学习\",\"note\":\"奖学金\",\"date\":\"今天\"}"
 }
