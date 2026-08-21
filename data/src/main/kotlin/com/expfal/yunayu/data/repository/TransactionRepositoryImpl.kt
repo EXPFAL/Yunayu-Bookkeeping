@@ -103,6 +103,7 @@ class TransactionRepositoryImpl @Inject constructor(
             tagName = tagName,
             occurredAt = transaction.occurredAt,
             note = transaction.note,
+            accountName = accountName,
         )
 
     override fun observeUncategorizedCount(): Flow<Int> =

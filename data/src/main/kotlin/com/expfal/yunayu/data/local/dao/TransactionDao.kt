@@ -34,11 +34,12 @@ interface TransactionDao {
         @ColumnInfo(name = "usage_count") val usageCount: Long,
     )
 
-    /** 最近交易行：交易实体 + 左连接标签名与图标。 */
+    /** 最近交易行：交易实体 + 左连接标签名/图标与账户名。 */
     data class RecentTransactionRow(
         @Embedded val transaction: TransactionEntity,
         @ColumnInfo(name = "tag_name") val tagName: String?,
         @ColumnInfo(name = "tag_icon") val tagIcon: String?,
+        @ColumnInfo(name = "account_name") val accountName: String?,
     )
 
     /** 时间窗收支聚合行：单次查询的窗口收入 / 支出总额（分）。 */
@@ -138,21 +139,23 @@ interface TransactionDao {
         endExclusiveMs: Long,
     ): List<CategoryExpenseRow>
 
-    /** 观察最近 [limit] 笔交易（含标签名与图标），按发生时间倒序。 */
+    /** 观察最近 [limit] 笔交易（含标签名、图标与账户名），按发生时间倒序。 */
     @Query(
-        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon, acc.name AS account_name " +
             "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "LEFT JOIN accounts acc ON acc.id = t.account_id " +
             "ORDER BY t.occurred_at DESC, t.id DESC LIMIT :limit",
     )
     fun observeRecent(limit: Int): Flow<List<RecentTransactionRow>>
 
     /**
-     * 观察满足时间窗、账户、备注关键字过滤的交易（含标签名与图标，不做标签过滤），按发生时间倒序。
+     * 观察满足时间窗、账户、备注关键字过滤的交易（含标签名、图标与账户名，不做标签过滤），按发生时间倒序。
      * 时间参数为 null 表示不设对应边界；关键字为 null 表示不按备注过滤；`accountMode` 语义见 companion。
      */
     @Query(
-        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon, acc.name AS account_name " +
             "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "LEFT JOIN accounts acc ON acc.id = t.account_id " +
             "WHERE (:startInclusiveMs IS NULL OR t.occurred_at >= :startInclusiveMs) " +
             "AND (:endExclusiveMs IS NULL OR t.occurred_at < :endExclusiveMs) " +
             "AND (:noteKeyword IS NULL OR t.note LIKE '%' || :noteKeyword || '%' ESCAPE '\\') " +
@@ -169,12 +172,13 @@ interface TransactionDao {
     ): Flow<List<RecentTransactionRow>>
 
     /**
-     * 观察满足时间窗、账户、备注关键字与标签集合过滤的交易（含标签名与图标），按发生时间倒序。
+     * 观察满足时间窗、账户、备注关键字与标签集合过滤的交易（含标签名、图标与账户名），按发生时间倒序。
      * 时间参数为 null 表示不设对应边界；关键字为 null 表示不按备注过滤；`accountMode` 语义见 companion。
      */
     @Query(
-        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon, acc.name AS account_name " +
             "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "LEFT JOIN accounts acc ON acc.id = t.account_id " +
             "WHERE (:startInclusiveMs IS NULL OR t.occurred_at >= :startInclusiveMs) " +
             "AND (:endExclusiveMs IS NULL OR t.occurred_at < :endExclusiveMs) " +
             "AND (:noteKeyword IS NULL OR t.note LIKE '%' || :noteKeyword || '%' ESCAPE '\\') " +
@@ -200,10 +204,11 @@ interface TransactionDao {
     @Query("SELECT COUNT(*) FROM transactions WHERE tag_id IS NULL")
     fun observeUncategorizedCount(): Flow<Int>
 
-    /** 一次性获取未分类交易快照（含标签名与图标，未分类恒为 null），按发生时间倒序。 */
+    /** 一次性获取未分类交易快照（含标签名、图标与账户名，未分类恒为 null），按发生时间倒序。 */
     @Query(
-        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon " +
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon, acc.name AS account_name " +
             "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "LEFT JOIN accounts acc ON acc.id = t.account_id " +
             "WHERE t.tag_id IS NULL " +
             "ORDER BY t.occurred_at DESC, t.id DESC",
     )

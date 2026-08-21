@@ -116,6 +116,7 @@ class TransactionRepositoryImplTest {
                         ),
                         tagName = null,
                         tagIcon = null,
+                        accountName = "微信",
                     ),
                 ),
             )
@@ -132,6 +133,7 @@ class TransactionRepositoryImplTest {
         assertNull(row.tagName)
         assertEquals(900L, row.occurredAt)
         assertEquals("买书", row.note)
+        assertEquals("微信", row.accountName)
         assertEquals(listOf(5), dao.recentCalls)
     }
 
@@ -240,6 +242,7 @@ class TransactionRepositoryImplTest {
                     ),
                     tagName = null,
                     tagIcon = null,
+                    accountName = null,
                 ),
             )
         }
@@ -251,6 +254,7 @@ class TransactionRepositoryImplTest {
         assertEquals(9L, rows.single().id)
         assertEquals("未分类买书", rows.single().note)
         assertNull(rows.single().tagName)
+        assertNull(rows.single().accountName)
     }
 
     @Test
