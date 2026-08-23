@@ -6,6 +6,7 @@ import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.nl.NLTransactionParser
+import com.expfal.yunayu.domain.repository.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
@@ -202,12 +203,27 @@ class FindMergeCandidatesUseCaseTest {
     private fun tag(id: Long, name: String, parentId: Long?) = Tag(id = id, name = name, parentId = parentId)
 
     /** [TagRepository] 手写 fake：按 parentId 返回预置子节点，按 tagId 返回影响面。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         val childrenByParent = mutableMapOf<Long?, List<Tag>>()
         val impactByTagId = mutableMapOf<Long, TagDeleteImpact>()
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())
+
+        override suspend fun getAllTags(): List<Tag> {
+            val result = mutableListOf<Tag>()
+            fun walk(parentId: Long?) {
+                childrenByParent[parentId]?.forEach { tag ->
+                    result += tag
+                    walk(tag.id)
+                }
+            }
+            walk(null)
+            return result
+        }
+
+        override suspend fun countTransactionsByTagId(tagId: Long): Int =
+            impactByTagId[tagId]?.affectedTransactionCount ?: 0
 
         override suspend fun getChildren(parentId: Long?): List<Tag> =
             childrenByParent[parentId] ?: emptyList()

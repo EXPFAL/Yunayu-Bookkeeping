@@ -3,7 +3,9 @@ package com.expfal.yunayu.domain.usecase
 import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TagTree
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.repository.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -197,7 +199,7 @@ class GetRecentCategoriesUseCaseTest {
     )
 
     /** [TagRepository] 手写 fake：记录聚合查询入参，返回预置结果，可注入查询异常模拟降级。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         var recentTags: List<Tag> = emptyList()
         var rootTags: List<Tag> = emptyList()
@@ -207,6 +209,14 @@ class GetRecentCategoriesUseCaseTest {
         var lastSince: Long? = null
         var lastType: TransactionType? = null
         var lastLimit: Int? = null
+
+        override suspend fun getTagTree(): TagTree {
+            rootError?.let { throw it }
+            if (childError != null && rootTags.any { childrenByParent.containsKey(it.id) }) {
+                throw childError!!
+            }
+            return TagTree(rootTags, childrenByParent)
+        }
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())
 

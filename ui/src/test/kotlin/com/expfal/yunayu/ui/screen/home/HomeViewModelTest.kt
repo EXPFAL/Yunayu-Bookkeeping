@@ -87,9 +87,14 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun `combines held cents into state`() = runTest {
-        val repo = FakeTransactionRepository().apply { heldCentsFlow.value = 7_500L }
-        val viewModel = createViewModel(transactionRepository = repo)
+    fun `derives held cents from account balances`() = runTest {
+        val accountRepo = FakeAccountRepository().apply {
+            balancesFlow.value = listOf(
+                AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 5_000L),
+                AccountBalance(accountId = 2L, accountName = "支付宝", balanceCents = 2_500L),
+            )
+        }
+        val viewModel = createViewModel(accountRepository = accountRepo)
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
@@ -100,9 +105,11 @@ class HomeViewModelTest {
     fun `held failure does not clear recent`() = runTest {
         val repo = FakeTransactionRepository().apply {
             recentFlow.value = listOf(recent(id = 1L, tagName = "学习"))
-            heldCentsOverride = flow { error("held down") }
         }
-        val viewModel = createViewModel(transactionRepository = repo)
+        val accountRepo = FakeAccountRepository().apply {
+            balancesOverride = flow { error("balances down") }
+        }
+        val viewModel = createViewModel(transactionRepository = repo, accountRepository = accountRepo)
 
         val state = viewModel.uiState.value
         assertFalse(state.loading)
@@ -124,19 +131,19 @@ class HomeViewModelTest {
         assertEquals(2, state.heldByAccount.size)
         assertEquals("微信", state.heldByAccount.first().accountName)
         assertEquals(5_000L, state.heldByAccount.first().balanceCents)
+        assertEquals(6_000L, state.heldCents)
     }
 
     @Test
-    fun `balances failure degrades to empty without clearing heldCents`() = runTest {
-        val transactionRepo = FakeTransactionRepository().apply { heldCentsFlow.value = 7_500L }
+    fun `balances failure degrades to empty held funds`() = runTest {
         val accountRepo = FakeAccountRepository().apply {
             balancesOverride = flow { error("balances down") }
         }
-        val viewModel = createViewModel(transactionRepository = transactionRepo, accountRepository = accountRepo)
+        val viewModel = createViewModel(accountRepository = accountRepo)
 
         val state = viewModel.uiState.value
         assertTrue(state.heldByAccount.isEmpty())
-        assertEquals(7_500L, state.heldCents)
+        assertEquals(0L, state.heldCents)
     }
 
     @Test
@@ -150,11 +157,11 @@ class HomeViewModelTest {
         assertEquals(1, state.heldByAccount.size)
         assertNull(state.heldByAccount.single().accountId)
         assertEquals(-500L, state.heldByAccount.single().balanceCents)
+        assertEquals(-500L, state.heldCents)
     }
 
     @Test
-    fun `held cents equals sum of account balances including initial balance`() = runTest {
-        val transactionRepo = FakeTransactionRepository().apply { heldCentsFlow.value = 15_000L }
+    fun `held cents equals sum of account balances`() = runTest {
         val accountRepo = FakeAccountRepository().apply {
             balancesFlow.value = listOf(
                 AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 11_000L),
@@ -162,27 +169,22 @@ class HomeViewModelTest {
                 AccountBalance(accountId = null, accountName = null, balanceCents = -2_000L),
             )
         }
-        val viewModel = createViewModel(transactionRepository = transactionRepo, accountRepository = accountRepo)
+        val viewModel = createViewModel(accountRepository = accountRepo)
 
         val state = viewModel.uiState.value
         assertEquals(15_000L, state.heldCents)
-        // 恒等式：总资金 = Σ账户余额 + 未指定净额（含期初口径下仍自一致）
         assertEquals(state.heldCents, state.heldByAccount.sumOf { it.balanceCents })
     }
 
     @Test
-    fun `initial balance change re-emits held funds and account breakdown`() = runTest {
-        val transactionRepo = FakeTransactionRepository()
+    fun `balance change re-emits held funds and account breakdown`() = runTest {
         val accountRepo = FakeAccountRepository()
-        val viewModel = createViewModel(transactionRepository = transactionRepo, accountRepository = accountRepo)
+        val viewModel = createViewModel(accountRepository = accountRepo)
 
-        transactionRepo.heldCentsFlow.value = 5_000L
         accountRepo.balancesFlow.value = listOf(AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 5_000L))
         assertEquals(5_000L, viewModel.uiState.value.heldCents)
         assertEquals(5_000L, viewModel.uiState.value.heldByAccount.single().balanceCents)
 
-        // 修改期初后两条观察链重新发射，持有资金与账户分组同步刷新
-        transactionRepo.heldCentsFlow.value = 12_000L
         accountRepo.balancesFlow.value = listOf(AccountBalance(accountId = 1L, accountName = "微信", balanceCents = 12_000L))
         assertEquals(12_000L, viewModel.uiState.value.heldCents)
         assertEquals(12_000L, viewModel.uiState.value.heldByAccount.single().balanceCents)

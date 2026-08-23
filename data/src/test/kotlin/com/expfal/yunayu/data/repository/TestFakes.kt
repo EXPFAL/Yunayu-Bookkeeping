@@ -65,6 +65,7 @@ class FakeTagDao : TagDao {
 
     var childrenByParent: Map<Long?, List<TagEntity>> = emptyMap()
     var allTags: List<TagEntity> = emptyList()
+    var observeAllFlow: Flow<List<TagEntity>> = flowOf(emptyList())
     var countByNameResult: Int = 0
     val countByNameCalls = mutableListOf<Pair<Long, String>>()
     var nextSortOrderByParent: Map<Long, Int> = emptyMap()
@@ -73,6 +74,8 @@ class FakeTagDao : TagDao {
     val renameCalls = mutableListOf<Triple<Long, String, Long>>()
     var renameResult: Int = 1
     val deleteCalls = mutableListOf<Long>()
+
+    override fun observeAll(): Flow<List<TagEntity>> = observeAllFlow
 
     override fun observeChildren(parentId: Long?): Flow<List<TagEntity>> =
         flowOf(childrenByParent[parentId] ?: emptyList())
@@ -202,6 +205,7 @@ class FakeTransactionDao : TransactionDao {
         noteKeyword: String?,
         accountMode: Int,
         accountId: Long?,
+        limit: Int,
     ): Flow<List<TransactionDao.RecentTransactionRow>> {
         filteredCalls += FilterCall(startInclusiveMs, endExclusiveMs, noteKeyword, accountMode, accountId)
         return filteredRowsFlow
@@ -214,6 +218,7 @@ class FakeTransactionDao : TransactionDao {
         tagIds: List<Long>,
         accountMode: Int,
         accountId: Long?,
+        limit: Int,
     ): Flow<List<TransactionDao.RecentTransactionRow>> {
         filteredByTagsCalls += FilterByTagsCall(startInclusiveMs, endExclusiveMs, noteKeyword, tagIds, accountMode, accountId)
         return filteredByTagsRowsFlow

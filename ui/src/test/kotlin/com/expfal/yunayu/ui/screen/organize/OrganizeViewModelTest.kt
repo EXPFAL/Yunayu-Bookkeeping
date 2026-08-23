@@ -15,6 +15,7 @@ import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
+import com.expfal.yunayu.ui.testutil.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.ApplyOrganizeUseCase
 import com.expfal.yunayu.domain.usecase.FindMergeCandidatesUseCase
@@ -358,7 +359,7 @@ class OrganizeViewModelTest {
     }
 
     /** [TagRepository] 手写 fake：返回预置根 / 子标签。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         var roots: List<Tag> = emptyList()
         var childrenByParent: Map<Long, List<Tag>> = emptyMap()

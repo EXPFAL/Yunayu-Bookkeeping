@@ -257,20 +257,19 @@ class QuickAddViewModel @Inject constructor(
         }
     }
 
+    /** 加载全量标签（单次查询），再按收支方向过滤根与子标签。 */
     private suspend fun loadAllTagsByRoot(type: TransactionType): Map<Tag, List<Tag>> {
-        val roots = tagRepository.getChildren(parentId = null)
+        val tree = runCatching { tagRepository.getTagTree() }
+            .onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
+                Log.w(TAG, "Failed to load tag tree", throwable)
+            }
+            .getOrDefault(com.expfal.yunayu.domain.model.TagTree(emptyList(), emptyMap()))
         val filteredRoots = when (type) {
-            TransactionType.INCOME -> roots.filter { it.name == IncomeTags.INCOME_ROOT_NAME }
-            TransactionType.EXPENSE -> roots.filter { it.name != IncomeTags.INCOME_ROOT_NAME }
+            TransactionType.INCOME -> tree.roots.filter { it.name == IncomeTags.INCOME_ROOT_NAME }
+            TransactionType.EXPENSE -> tree.roots.filter { it.name != IncomeTags.INCOME_ROOT_NAME }
         }
-        return filteredRoots.associateWith { root ->
-            runCatching { tagRepository.getChildren(parentId = root.id) }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to load children for root ${root.id}", throwable)
-                }
-                .getOrDefault(emptyList())
-        }
+        return filteredRoots.associateWith { root -> tree.childrenByRoot[root.id].orEmpty() }
     }
 
     /** 加载建议分类；useCase 失败时回退根标签（按当前收支方向过滤），仍失败则保持空列表。 */

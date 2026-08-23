@@ -22,6 +22,7 @@ import com.expfal.yunayu.domain.repository.AccountRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -84,7 +85,7 @@ class AccountRepositoryImpl @Inject constructor(
             AccountBalance(accountId = null, accountName = null, balanceCents = it.balanceCents)
         }
         namedBalances + listOfNotNull(unspecified)
-    }
+    }.distinctUntilChanged()
 
     override suspend fun addAccount(name: String): Long {
         val trimmed = name.trim()

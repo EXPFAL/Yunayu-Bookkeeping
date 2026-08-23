@@ -16,6 +16,7 @@ import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
+import com.expfal.yunayu.ui.testutil.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.UpdateTransactionUseCase
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
@@ -327,7 +328,7 @@ class EditTransactionViewModelTest {
     }
 
     /** [TagRepository] 手写 fake：按 parentId 返回预置根 / 子标签。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         var rootTags: List<Tag> = emptyList()
         var childrenByParent: Map<Long, List<Tag>> = emptyMap()

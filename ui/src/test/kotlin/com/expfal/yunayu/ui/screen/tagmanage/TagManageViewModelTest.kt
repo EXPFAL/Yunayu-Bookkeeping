@@ -7,6 +7,7 @@ import com.expfal.yunayu.domain.model.MergeDecision
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TagTree
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.WindowTotals
@@ -15,6 +16,7 @@ import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
+import com.expfal.yunayu.ui.testutil.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.FindMergeCandidatesUseCase
 import com.expfal.yunayu.domain.usecase.MergeTagsUseCase
@@ -23,7 +25,10 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
@@ -380,7 +385,7 @@ class TagManageViewModelTest {
     private fun tag(id: Long, name: String, parentId: Long? = null) = Tag(id = id, name = name, parentId = parentId)
 
     /** [TagRepository] 手写 fake：以 MutableStateFlow 驱动树观察，记录变更入参并可配置异常/挂起。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         val rootsFlow = MutableStateFlow<List<Tag>>(emptyList())
         val childrenFlows = mutableMapOf<Long, MutableStateFlow<List<Tag>>>()
@@ -402,11 +407,31 @@ class TagManageViewModelTest {
         var lookupChildren: Map<Long, List<Tag>> = emptyMap()
         var impactByTagId: Map<Long, TagDeleteImpact> = emptyMap()
 
+        @OptIn(ExperimentalCoroutinesApi::class)
+        override fun observeTagTree(): Flow<TagTree> =
+            rootsFlow.flatMapLatest { roots ->
+                if (roots.isEmpty()) {
+                    flowOf(TagTree(emptyList(), emptyMap()))
+                } else {
+                    val childFlows = roots.map { root ->
+                        childrenFlows.getOrPut(root.id) { MutableStateFlow(lookupChildren[root.id] ?: emptyList()) }
+                            .map { children -> root.id to children }
+                    }
+                    combine(childFlows) { pairs -> TagTree(roots, pairs.toMap()) }
+                }
+            }
+
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> =
             if (parentId == null) rootsFlow else childrenFlows.getOrPut(parentId) { MutableStateFlow(emptyList()) }
 
         override suspend fun getChildren(parentId: Long?): List<Tag> =
             if (parentId == null) lookupRoots else lookupChildren[parentId] ?: emptyList()
+
+        override suspend fun getAllTags(): List<Tag> =
+            lookupRoots + lookupChildren.values.flatten()
+
+        override suspend fun countTransactionsByTagId(tagId: Long): Int =
+            (impactByTagId[tagId] ?: impactResult).affectedTransactionCount
 
         override suspend fun getRecentUsedTags(sinceEpochMillis: Long, type: TransactionType, limit: Int): List<Tag> = emptyList()
 

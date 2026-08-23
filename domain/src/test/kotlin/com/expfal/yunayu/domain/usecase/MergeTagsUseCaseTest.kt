@@ -11,6 +11,7 @@ import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.repository.ReportRepository
+import com.expfal.yunayu.domain.repository.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import kotlinx.coroutines.flow.Flow
@@ -70,7 +71,7 @@ class MergeTagsUseCaseTest {
     }
 
     /** [TagRepository] 手写 fake：记录 mergeTags 入参，可配置合并异常。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         val mergeCalls = mutableListOf<Pair<Long, Long>>()
         var mergeError: Throwable? = null

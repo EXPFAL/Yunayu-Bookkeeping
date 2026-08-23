@@ -61,7 +61,7 @@ class TransactionDaoTest {
         dao.insert(transaction(amountCents = 200L, type = "EXPENSE", note = "午", occurredAt = 2_000L))
         dao.insert(transaction(amountCents = 300L, type = "EXPENSE", note = "晚", occurredAt = 3_000L))
 
-        val rows = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val rows = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
 
         // 参数全 null：不过滤，按 occurred_at 倒序返回全量
         assertEquals(3, rows.size)
@@ -76,18 +76,18 @@ class TransactionDaoTest {
         dao.insert(transaction(amountCents = 400L, type = "EXPENSE", note = "外卖", occurredAt = 4_000L))
 
         // 半开区间 [1_000, 3_000)：start 边界含 1_000、2_000；end 边界 3_000 排除
-        val windowed = dao.observeFiltered(1_000L, 3_000L, null, TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val windowed = dao.observeFiltered(1_000L, 3_000L, null, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
         assertEquals(listOf(2_000L, 1_000L), windowed.map { it.transaction.occurredAt })
 
         // 时间窗 + 关键词组合：窗口内仅「食堂晚餐」命中
-        val combined = dao.observeFiltered(1_000L, 3_000L, "晚餐", TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val combined = dao.observeFiltered(1_000L, 3_000L, "晚餐", TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
         assertEquals(listOf(2_000L), combined.map { it.transaction.occurredAt })
 
         // 关键词无命中：窗口不变时返回空
-        assertEquals(0, dao.observeFiltered(1_000L, 3_000L, "不存在的词", TransactionDao.ACCOUNT_MODE_ALL, null).first().size)
+        assertEquals(0, dao.observeFiltered(1_000L, 3_000L, "不存在的词", TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first().size)
 
         // start 边界（含）与 end 边界（不含）单独验证
-        val startBoundary = dao.observeFiltered(1_000L, 2_000L, null, TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val startBoundary = dao.observeFiltered(1_000L, 2_000L, null, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
         assertEquals(listOf(1_000L), startBoundary.map { it.transaction.occurredAt })
     }
 
@@ -101,7 +101,7 @@ class TransactionDaoTest {
         // 转义产物形态与 TransactionRepositoryImpl.escapeLikeKeyword 一致：
         // \ → \\、% → \% 、_ → \_，DAO 层直接传已转义串（SQL 侧 ESCAPE '\'）
         val escaped = "100\\%\\_"
-        val rows = dao.observeFiltered(null, null, escaped, TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val rows = dao.observeFiltered(null, null, escaped, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
 
         // 精确匹配字面 "100%_"：仅命中两处字面串，通配干扰项（100%完成 / 100a完成）不命中
         assertEquals(2, rows.size)
@@ -111,7 +111,7 @@ class TransactionDaoTest {
         )
 
         // 未转义关键词会触发 %/_ 通配命中全部 4 条，佐证转义必要性
-        assertEquals(4, dao.observeFiltered(null, null, "100%_", TransactionDao.ACCOUNT_MODE_ALL, null).first().size)
+        assertEquals(4, dao.observeFiltered(null, null, "100%_", TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first().size)
     }
 
     @Test
@@ -127,15 +127,15 @@ class TransactionDaoTest {
         dao.insert(transaction(amountCents = 40L, type = "EXPENSE", note = "未分类", occurredAt = 4_000L, tagId = null))
 
         // 多标签 IN（跨餐饮/书本）：命中两笔，未分类与游戏标签行被排除
-        val byTags = dao.observeFilteredByTags(null, null, null, listOf(foodId, bookId), TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val byTags = dao.observeFilteredByTags(null, null, null, listOf(foodId, bookId), TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
         assertEquals(setOf(1_000L, 2_000L), byTags.map { it.transaction.occurredAt }.toSet())
 
         // 与时间窗组合：窗口 [2_000, MAX) 内仅剩书本那笔
-        val windowed = dao.observeFilteredByTags(2_000L, Long.MAX_VALUE, null, listOf(foodId, bookId), TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val windowed = dao.observeFilteredByTags(2_000L, Long.MAX_VALUE, null, listOf(foodId, bookId), TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
         assertEquals(listOf(2_000L), windowed.map { it.transaction.occurredAt })
 
         // 与关键词组合：三标签全选时关键词「食堂」命中餐饮与游戏两笔
-        val keyword = dao.observeFilteredByTags(null, null, "食堂", listOf(foodId, bookId, gameId), TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val keyword = dao.observeFilteredByTags(null, null, "食堂", listOf(foodId, bookId, gameId), TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
         assertEquals(setOf(1_000L, 3_000L), keyword.map { it.transaction.occurredAt }.toSet())
     }
 
@@ -150,24 +150,24 @@ class TransactionDaoTest {
         dao.insert(transaction(amountCents = 30L, type = "EXPENSE", note = "晚", accountId = null, occurredAt = 3_000L))
 
         // 全部账户：不过滤，返回全量
-        assertEquals(3, dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null).first().size)
+        assertEquals(3, dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first().size)
 
         // 仅未指定账户：仅 account_id IS NULL 那笔
-        val unspecified = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_UNSPECIFIED, null).first()
+        val unspecified = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_UNSPECIFIED, null, 10_000).first()
         assertEquals(listOf(3_000L), unspecified.map { it.transaction.occurredAt })
 
         // 指定账户：仅微信那笔
-        val specific = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_SPECIFIC, wechatId).first()
+        val specific = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_SPECIFIC, wechatId, 10_000).first()
         assertEquals(listOf(1_000L), specific.map { it.transaction.occurredAt })
 
         // 指定账户 + 时间窗组合：窗口 [2_000, MAX) 内微信无命中
         assertEquals(
             0,
-            dao.observeFiltered(2_000L, Long.MAX_VALUE, null, TransactionDao.ACCOUNT_MODE_SPECIFIC, wechatId).first().size,
+            dao.observeFiltered(2_000L, Long.MAX_VALUE, null, TransactionDao.ACCOUNT_MODE_SPECIFIC, wechatId, 10_000).first().size,
         )
 
         // 全部 + 关键词组合：命中「午」
-        val keyword = dao.observeFiltered(null, null, "午", TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val keyword = dao.observeFiltered(null, null, "午", TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
         assertEquals(listOf(2_000L), keyword.map { it.transaction.occurredAt })
     }
 
@@ -182,11 +182,11 @@ class TransactionDaoTest {
         dao.insert(transaction(amountCents = 20L, type = "EXPENSE", note = "食堂", accountId = null, tagId = foodId, occurredAt = 2_000L))
 
         // 标签 + 指定账户：仅微信那笔
-        val specific = dao.observeFilteredByTags(null, null, null, listOf(foodId), TransactionDao.ACCOUNT_MODE_SPECIFIC, wechatId).first()
+        val specific = dao.observeFilteredByTags(null, null, null, listOf(foodId), TransactionDao.ACCOUNT_MODE_SPECIFIC, wechatId, 10_000).first()
         assertEquals(listOf(1_000L), specific.map { it.transaction.occurredAt })
 
         // 标签 + 仅未指定：仅 account_id IS NULL 那笔
-        val unspecified = dao.observeFilteredByTags(null, null, null, listOf(foodId), TransactionDao.ACCOUNT_MODE_UNSPECIFIED, null).first()
+        val unspecified = dao.observeFilteredByTags(null, null, null, listOf(foodId), TransactionDao.ACCOUNT_MODE_UNSPECIFIED, null, 10_000).first()
         assertEquals(listOf(2_000L), unspecified.map { it.transaction.occurredAt })
     }
 
@@ -220,13 +220,13 @@ class TransactionDaoTest {
         val keepId = dao.insert(transaction(amountCents = 100L, type = "EXPENSE", note = "保留", occurredAt = 1_000L))
         dao.insert(transaction(amountCents = 200L, type = "EXPENSE", note = "待删", occurredAt = 2_000L))
 
-        assertEquals(2, dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null).first().size)
+        assertEquals(2, dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first().size)
         assertEquals(2, dao.observeRecent(10).first().size)
 
         dao.deleteById(keepId)
 
         // observeFiltered 重发且不再含被删记录
-        val filteredAfter = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null)
+        val filteredAfter = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000)
             .first { rows -> rows.none { it.transaction.id == keepId } }
         assertEquals(1, filteredAfter.size)
         assertEquals(2_000L, filteredAfter.single().transaction.occurredAt)
@@ -273,7 +273,7 @@ class TransactionDaoTest {
 
         dao.updateTagIds(listOf(id1, id2), tagId)
 
-        val rows = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val rows = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
         assertEquals(setOf(tagId), rows.map { it.transaction.tagId }.toSet())
     }
 
@@ -288,7 +288,7 @@ class TransactionDaoTest {
 
         dao.applyTagAssignments(mapOf(foodId to listOf(id1, id2), bookId to listOf(id3)))
 
-        val tagIdByTransactionId = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null).first()
+        val tagIdByTransactionId = dao.observeFiltered(null, null, null, TransactionDao.ACCOUNT_MODE_ALL, null, 10_000).first()
             .associate { it.transaction.id to it.transaction.tagId }
         assertEquals(foodId, tagIdByTransactionId[id1])
         assertEquals(foodId, tagIdByTransactionId[id2])

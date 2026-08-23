@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expfal.yunayu.domain.model.AccountBalance
+import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.ui.screen.accountmanage.AccountManageScreen
 import com.expfal.yunayu.ui.screen.apiconfig.ApiSettingsScreen
 import com.expfal.yunayu.ui.screen.budget.BudgetCard
@@ -52,6 +53,7 @@ import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetViewModel
 import com.expfal.yunayu.ui.screen.quickadd.QuickAddScreen
 import com.expfal.yunayu.ui.screen.report.ReportScreen
 import com.expfal.yunayu.ui.screen.tagmanage.TagManageScreen
+import com.expfal.yunayu.ui.screen.tagmanage.TagManageViewModel
 import com.expfal.yunayu.ui.screen.transactionmanage.TransactionManageScreen
 import kotlinx.coroutines.launch
 
@@ -74,6 +76,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val budgetState by budgetViewModel.uiState.collectAsStateWithLifecycle()
     val homeViewModel: HomeViewModel = viewModel()
     val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
+    // 标签管理 ViewModel 提升到首页级：进入首页即开始观察标签树，避免首次打开标签管理才冷启动
+    val tagManageViewModel: TagManageViewModel = viewModel()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     // F3 修复：提升 listState 到 when 分发之外，跨全屏切换存活，避免返回时滚动位置丢失
@@ -92,7 +96,10 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     }
 
     when (fullScreen) {
-        FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
+        FullScreen.TAG_MANAGE -> TagManageScreen(
+            onBack = { fullScreen = FullScreen.NONE },
+            viewModel = tagManageViewModel,
+        )
         FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.REPORT -> ReportScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.TRANSACTIONS -> TransactionManageScreen(onBack = { fullScreen = FullScreen.NONE })
@@ -108,7 +115,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         )
         FullScreen.NONE -> HomeMainContent(
             modifier = modifier,
-            homeViewModel = homeViewModel,
             homeState = homeState,
             budgetState = budgetState,
             drawerState = drawerState,
@@ -134,7 +140,6 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 @Composable
 private fun HomeMainContent(
     modifier: Modifier,
-    homeViewModel: HomeViewModel,
     homeState: HomeUiState,
     budgetState: MonthlyBudgetUiState,
     drawerState: androidx.compose.material3.DrawerState,
@@ -198,6 +203,8 @@ private fun HomeContent(
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
 ) {
+    val recentLoading = homeState.loading
+    val recent = homeState.recent
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -216,12 +223,13 @@ private fun HomeContent(
             heldByAccount = homeState.heldByAccount,
             onShowQuickAdd = onShowQuickAdd,
         )
-        if (!homeState.loading && homeState.recent.isEmpty()) {
+        if (!recentLoading && recent.isEmpty()) {
             FirstRunHint()
             Spacer(modifier = Modifier.height(6.dp))
         }
         RecentTransactionsSection(
-            homeState = homeState,
+            recentLoading = recentLoading,
+            recent = recent,
             listState = listState,
         )
     }
@@ -266,7 +274,8 @@ private fun HeldFundsCardWithFab(
 /** 最近记录区域：标题与列表整体上移 [RECORD_SHIFT_DP]dp，使标题与 FAB 中心对齐。 */
 @Composable
 private fun RecentTransactionsSection(
-    homeState: HomeUiState,
+    recentLoading: Boolean,
+    recent: List<RecentTransaction>,
     listState: LazyListState,
 ) {
     Column(
@@ -285,7 +294,8 @@ private fun RecentTransactionsSection(
         )
         Spacer(Modifier.height(4.dp))
         RecentTransactionsCard(
-            uiState = homeState,
+            loading = recentLoading,
+            recent = recent,
             modifier = Modifier.weight(1f),
             listState = listState,
         )

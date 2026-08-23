@@ -11,6 +11,10 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TagDao {
 
+    /** 观察全量标签（单次 Room 订阅，供标签树组装）。 */
+    @Query("SELECT * FROM tags ORDER BY parent_id ASC, sort_order ASC")
+    fun observeAll(): Flow<List<TagEntity>>
+
     /** 按 parentId 查子节点；根节点查询传 `parentId = null`，按 sortOrder 升序。 */
     @Query("SELECT * FROM tags WHERE parent_id IS :parentId ORDER BY sort_order ASC")
     fun observeChildren(parentId: Long?): Flow<List<TagEntity>>

@@ -3,11 +3,25 @@ package com.expfal.yunayu.domain.repository
 import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TagTree
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.model.toTagTree
 import kotlinx.coroutines.flow.Flow
 
 /** 学业关联标签仓储接口，由 :data 模块实现。 */
 interface TagRepository {
+
+    /** 观察全量标签树（单次订阅，避免按根 N+1 观察）。 */
+    fun observeTagTree(): Flow<TagTree>
+
+    /** 一次性加载全量标签。 */
+    suspend fun getAllTags(): List<Tag>
+
+    /** 一次性加载并分组为标签树。 */
+    suspend fun getTagTree(): TagTree = getAllTags().toTagTree()
+
+    /** 统计挂在指定标签下的交易数（叶子标签整合检测等场景）。 */
+    suspend fun countTransactionsByTagId(tagId: Long): Int
 
     /** 观察指定父节点下的子标签（根节点传 `null`），按 sortOrder 升序。 */
     fun observeChildren(parentId: Long?): Flow<List<Tag>>

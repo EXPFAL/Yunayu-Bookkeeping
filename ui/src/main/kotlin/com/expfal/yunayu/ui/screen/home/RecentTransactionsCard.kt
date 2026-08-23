@@ -10,29 +10,37 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.ui.component.TransactionRow
+
+private const val CONTENT_TYPE_TRANSACTION = 0
 
 /** 首页「最近记录」卡片：最近交易列表，空态仅保留简短占位语；金额收入「+金额」主色 / 支出「-金额」常规色。 */
 @Composable
 fun RecentTransactionsCard(
-    uiState: HomeUiState,
+    loading: Boolean,
+    recent: List<RecentTransaction>,
     modifier: Modifier = Modifier,
     listState: LazyListState = rememberLazyListState(),
 ) {
     Column(modifier.fillMaxWidth()) {
         when {
-            uiState.loading -> Text(
+            loading -> Text(
                 "加载中…",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            uiState.recent.isEmpty() -> Text(
+            recent.isEmpty() -> Text(
                 "暂无记录",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             else -> LazyColumn(state = listState, modifier = Modifier.fillMaxWidth()) {
-                items(uiState.recent, key = { it.id }) { transaction ->
+                items(
+                    items = recent,
+                    key = { it.id },
+                    contentType = { CONTENT_TYPE_TRANSACTION },
+                ) { transaction ->
                     TransactionRow(transaction)
                 }
             }

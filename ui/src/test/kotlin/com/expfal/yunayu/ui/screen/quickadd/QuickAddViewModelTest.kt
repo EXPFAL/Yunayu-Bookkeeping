@@ -19,6 +19,7 @@ import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
+import com.expfal.yunayu.ui.testutil.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.repository.TransferRepository
 import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
@@ -1169,7 +1170,7 @@ class QuickAddViewModelTest {
     private fun account(id: Long, name: String) = Account(id = id, name = name)
 
     /** [TagRepository] 手写 fake：返回预置的最近/根标签，可配置异常模拟加载失败。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         var recentTags: List<Tag> = emptyList()
         var rootTags: List<Tag> = emptyList()

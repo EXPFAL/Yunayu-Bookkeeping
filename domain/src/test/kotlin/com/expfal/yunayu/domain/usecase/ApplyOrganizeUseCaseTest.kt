@@ -13,6 +13,7 @@ import com.expfal.yunayu.domain.nl.model.Action
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.repository.ReportRepository
+import com.expfal.yunayu.domain.repository.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.ApplyOrganizeUseCase.ConfirmedItem
@@ -387,7 +388,7 @@ class ApplyOrganizeUseCaseTest {
     }
 
     /** [TagRepository] 手写 fake：预置根 / 子标签，记录 addSubTag 入参。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         val rootTags = mutableListOf<Tag>()
         val childrenByParent = mutableMapOf<Long, MutableList<Tag>>()

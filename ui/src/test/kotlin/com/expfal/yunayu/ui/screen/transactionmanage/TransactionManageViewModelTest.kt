@@ -8,6 +8,7 @@ import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TagTree
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.Transfer
@@ -17,6 +18,7 @@ import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
+import com.expfal.yunayu.ui.testutil.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.repository.TransferRepository
 import com.expfal.yunayu.domain.usecase.DeleteTransactionUseCase
@@ -382,6 +384,7 @@ class TransactionManageViewModelTest {
             transfer(1L, from = 7L, to = 8L, amount = 5_000L, note = "调账", occurredAt = 123L),
         )
         val vm = viewModel(txRepo, accountRepo = accountRepo, transferRepo = transferRepo)
+        vm.selectTab(ManageTab.TRANSFERS)
         settle()
 
         val row = vm.uiState.value.transfers.single()
@@ -402,6 +405,7 @@ class TransactionManageViewModelTest {
         }
         transferRepo.transfersFlow.value = listOf(transfer(1L, from = 7L, to = 99L))
         val vm = viewModel(txRepo, accountRepo = accountRepo, transferRepo = transferRepo)
+        vm.selectTab(ManageTab.TRANSFERS)
         settle()
 
         val row = vm.uiState.value.transfers.single()
@@ -615,10 +619,16 @@ class TransactionManageViewModelTest {
     }
 
     /** [TagRepository] 手写 fake：返回预置根 / 子标签。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         var rootTags: List<Tag> = emptyList()
         var childrenByParent: Map<Long, List<Tag>> = emptyMap()
+
+        override fun observeTagTree(): Flow<TagTree> =
+            flowOf(TagTree(roots = rootTags, childrenByRoot = childrenByParent))
+
+        override suspend fun getTagTree(): TagTree =
+            TagTree(roots = rootTags, childrenByRoot = childrenByParent)
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())
 

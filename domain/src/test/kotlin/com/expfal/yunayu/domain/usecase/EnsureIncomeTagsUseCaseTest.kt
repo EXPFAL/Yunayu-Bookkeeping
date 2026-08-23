@@ -5,6 +5,7 @@ import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.repository.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -106,7 +107,7 @@ class EnsureIncomeTagsUseCaseTest {
     )
 
     /** [TagRepository] 手写 fake：维护根/子标签状态，记录新增入参并可注入竞态重名异常。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
 
         private val roots = mutableListOf<Tag>()
         private val childrenByParent = mutableMapOf<Long, MutableList<Tag>>()

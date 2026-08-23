@@ -28,13 +28,13 @@ import com.expfal.yunayu.domain.model.MergeCandidate
 /**
  * 「标签整合」底部弹层：展示疑似重复标签对，供用户逐对选择整合方向并确认合并。
  *
- * 检测中显示 loading，候选为空按 [TagManageUiState.mergeDetectFailed] 区分「检测不可用」与
+ * 检测中显示 loading，候选为空按 [TagMergeUiState.mergeDetectFailed] 区分「检测不可用」与
  * 「未发现重复」；候选列表每对提供三选（A 并入 B / B 并入 A / 各自保留）与单对「合并」按钮。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TagMergeSheet(
-    uiState: TagManageUiState,
+    mergeState: TagMergeUiState,
     onChoiceSelected: (MergeCandidate, MergeChoice) -> Unit,
     onMerge: (MergeCandidate) -> Unit,
     onRetryDetect: () -> Unit,
@@ -57,9 +57,9 @@ fun TagMergeSheet(
             )
             Spacer(Modifier.height(8.dp))
             when {
-                uiState.mergeDetecting -> MergeDetectingContent()
-                uiState.mergeCandidates.isEmpty() -> MergeEmptyContent(
-                    message = if (uiState.mergeDetectFailed) {
+                mergeState.mergeDetecting -> MergeDetectingContent()
+                mergeState.mergeCandidates.isEmpty() -> MergeEmptyContent(
+                    message = if (mergeState.mergeDetectFailed) {
                         "未配置 API，检测不可用"
                     } else {
                         "未发现疑似重复标签"
@@ -67,9 +67,9 @@ fun TagMergeSheet(
                     onRetryDetect = onRetryDetect,
                 )
                 else -> MergeCandidateList(
-                    candidates = uiState.mergeCandidates,
-                    choices = uiState.mergeChoices,
-                    merging = uiState.merging,
+                    candidates = mergeState.mergeCandidates,
+                    choices = mergeState.mergeChoices,
+                    merging = mergeState.merging,
                     onChoiceSelected = onChoiceSelected,
                     onMerge = onMerge,
                 )

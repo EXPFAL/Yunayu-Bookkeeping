@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -38,6 +40,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,6 +60,10 @@ import com.expfal.yunayu.ui.screen.organize.OrganizeScreen
 import com.expfal.yunayu.ui.util.formatCents
 import com.expfal.yunayu.ui.util.formatTime
 
+private const val CONTENT_TYPE_TRANSACTION = 0
+private const val CONTENT_TYPE_TRANSFER = 1
+private const val CONTENT_TYPE_LOAD_MORE = 2
+
 /**
  * 「收支管理」全屏：顶部时间 / 账户 / 标签 / 备注四组筛选，下方交易列表，行尾删除入口。
  *
@@ -74,6 +81,7 @@ fun TransactionManageScreen(
     var showTagSheet by remember { mutableStateOf(false) }
     var showOrganize by remember { mutableStateOf(false) }
     var editingTransactionId by remember { mutableStateOf<Long?>(null) }
+    val listState = rememberLazyListState()
 
     Crossfade(
         targetState = editingTransactionId,
@@ -93,6 +101,7 @@ fun TransactionManageScreen(
                 viewModel = viewModel,
                 snackbarHostState = snackbarHostState,
                 showTagSheet = showTagSheet,
+                listState = listState,
                 onBack = onBack,
                 onShowOrganize = { showOrganize = true },
                 onOpenTagSheet = { showTagSheet = true },
@@ -108,22 +117,26 @@ fun TransactionManageScreen(
 private fun ManageTabContent(
     uiState: TransactionManageUiState,
     viewModel: TransactionManageViewModel,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
     onOpenTagSheet: () -> Unit,
     onEditTransaction: (Long) -> Unit,
 ) {
     if (uiState.tab == ManageTab.TRANSFERS) {
         when {
-            uiState.transfers.isEmpty() -> EmptyTransferState()
+            uiState.transfers.isEmpty() -> EmptyTransferState(modifier)
             else -> TransferList(
                 transfers = uiState.transfers,
+                listState = listState,
+                modifier = modifier,
                 onDeleteRequest = viewModel::requestDeleteTransfer,
             )
         }
     } else {
-        FilterSection(
+        Column(modifier) {
+            FilterSection(
             timeRange = uiState.timeRange,
             selectedTagIds = uiState.selectedTagIds,
-            keyword = uiState.keyword,
             accounts = uiState.accounts,
             accountFilter = uiState.accountFilter,
             onTimeRangeSelect = viewModel::selectTimeRange,
@@ -131,15 +144,23 @@ private fun ManageTabContent(
             onOpenTagSheet = onOpenTagSheet,
             onKeywordChange = viewModel::onKeywordChange,
         )
-        Spacer(Modifier.height(12.dp))
-        when {
-            uiState.loading -> LoadingState()
-            uiState.transactions.isEmpty() -> EmptyState(hasActiveFilter = hasActiveFilter(uiState))
-            else -> TransactionList(
-                transactions = uiState.transactions,
-                onDeleteRequest = viewModel::requestDelete,
-                onEditRequest = { onEditTransaction(it.id) },
-            )
+            Spacer(Modifier.height(12.dp))
+            when {
+                uiState.loading -> LoadingState(Modifier.weight(1f))
+                uiState.transactions.isEmpty() -> EmptyState(
+                    hasActiveFilter = hasActiveFilter(uiState),
+                    modifier = Modifier.weight(1f),
+                )
+                else -> TransactionList(
+                    transactions = uiState.transactions,
+                    hasMore = uiState.hasMore,
+                    listState = listState,
+                    modifier = Modifier.weight(1f),
+                    onDeleteRequest = viewModel::requestDelete,
+                    onEditRequest = { onEditTransaction(it.id) },
+                    onLoadMore = viewModel::loadMore,
+                )
+            }
         }
     }
 }
@@ -152,6 +173,7 @@ private fun TransactionManageContent(
     viewModel: TransactionManageViewModel,
     snackbarHostState: SnackbarHostState,
     showTagSheet: Boolean,
+    listState: LazyListState,
     onBack: () -> Unit,
     onShowOrganize: () -> Unit,
     onOpenTagSheet: () -> Unit,
@@ -202,6 +224,8 @@ private fun TransactionManageContent(
             ManageTabContent(
                 uiState = uiState,
                 viewModel = viewModel,
+                listState = listState,
+                modifier = Modifier.weight(1f),
                 onOpenTagSheet = onOpenTagSheet,
                 onEditTransaction = onEditTransaction,
             )
@@ -225,8 +249,13 @@ private fun ManageDialogs(
     onDismissTagSheet: () -> Unit,
 ) {
     if (showTagSheet) {
+        val allTagsByRoot = remember(uiState.tagFilterRoots, uiState.tagFilterChildrenByRoot) {
+            uiState.tagFilterRoots.associateWith { root ->
+                uiState.tagFilterChildrenByRoot[root.id].orEmpty()
+            }
+        }
         TagFilterSheet(
-            allTagsByRoot = uiState.allTagsByRoot,
+            allTagsByRoot = allTagsByRoot,
             selectedIds = uiState.selectedTagIds,
             onToggleSelect = viewModel::toggleTagSelection,
             onClear = viewModel::clearTagSelection,
@@ -267,7 +296,6 @@ private fun OrganizeAction(
 private fun FilterSection(
     timeRange: TimeFilter,
     selectedTagIds: Set<Long>,
-    keyword: String,
     accounts: List<Account>,
     accountFilter: AccountFilter,
     onTimeRangeSelect: (TimeFilter) -> Unit,
@@ -275,6 +303,7 @@ private fun FilterSection(
     onOpenTagSheet: () -> Unit,
     onKeywordChange: (String) -> Unit,
 ) {
+    var keyword by remember { mutableStateOf("") }
     Column(Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier
@@ -305,7 +334,10 @@ private fun FilterSection(
         Spacer(Modifier.height(8.dp))
         OutlinedTextField(
             value = keyword,
-            onValueChange = onKeywordChange,
+            onValueChange = {
+                keyword = it
+                onKeywordChange(it)
+            },
             placeholder = { Text("搜索备注关键词") },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
@@ -401,11 +433,19 @@ private fun TagFilterSheet(
 @Composable
 private fun TransactionList(
     transactions: List<RecentTransaction>,
+    hasMore: Boolean,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
     onDeleteRequest: (RecentTransaction) -> Unit,
     onEditRequest: (RecentTransaction) -> Unit,
+    onLoadMore: () -> Unit,
 ) {
-    LazyColumn(Modifier.fillMaxSize()) {
-        items(transactions, key = { it.id }) { transaction ->
+    LazyColumn(state = listState, modifier = modifier.fillMaxWidth()) {
+        items(
+            items = transactions,
+            key = { it.id },
+            contentType = { CONTENT_TYPE_TRANSACTION },
+        ) { transaction ->
             TransactionRow(
                 transaction = transaction,
                 modifier = Modifier.clickable { onEditRequest(transaction) },
@@ -419,6 +459,16 @@ private fun TransactionList(
                     }
                 },
             )
+        }
+        if (hasMore) {
+            item(key = "load-more", contentType = CONTENT_TYPE_LOAD_MORE) {
+                TextButton(
+                    onClick = onLoadMore,
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+                ) {
+                    Text("加载更多")
+                }
+            }
         }
     }
 }
@@ -466,10 +516,16 @@ private fun ManageTabRow(
 @Composable
 private fun TransferList(
     transfers: List<TransferRow>,
+    listState: LazyListState,
+    modifier: Modifier = Modifier,
     onDeleteRequest: (TransferRow) -> Unit,
 ) {
-    LazyColumn(Modifier.fillMaxSize()) {
-        items(transfers, key = { it.id }) { transfer ->
+    LazyColumn(state = listState, modifier = modifier.fillMaxWidth()) {
+        items(
+            items = transfers,
+            key = { it.id },
+            contentType = { CONTENT_TYPE_TRANSFER },
+        ) { transfer ->
             TransferRowItem(
                 transfer = transfer,
                 onDelete = { onDeleteRequest(transfer) },
@@ -484,6 +540,8 @@ private fun TransferRowItem(
     transfer: TransferRow,
     onDelete: () -> Unit,
 ) {
+    val timeLabel = remember(transfer.occurredAt) { formatTime(transfer.occurredAt) }
+    val amountLabel = remember(transfer.amountCents) { formatCents(transfer.amountCents) }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -494,7 +552,7 @@ private fun TransferRowItem(
                 style = MaterialTheme.typography.bodyMedium,
             )
             Text(
-                formatTime(transfer.occurredAt),
+                timeLabel,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -510,7 +568,7 @@ private fun TransferRowItem(
             }
         }
         Text(
-            text = formatCents(transfer.amountCents),
+            text = amountLabel,
             style = MaterialTheme.typography.bodyMedium,
         )
         IconButton(onClick = onDelete) {
@@ -544,9 +602,9 @@ private fun DeleteTransferDialog(
 
 /** 转账空列表占位。 */
 @Composable
-private fun EmptyTransferState() {
+private fun EmptyTransferState(modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -560,9 +618,9 @@ private fun EmptyTransferState() {
 
 /** 加载态占位。 */
 @Composable
-private fun LoadingState() {
+private fun LoadingState(modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -572,9 +630,9 @@ private fun LoadingState() {
 
 /** 空列表占位：区分「全部无记录」与「筛选后无结果」。 */
 @Composable
-private fun EmptyState(hasActiveFilter: Boolean) {
+private fun EmptyState(hasActiveFilter: Boolean, modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.Center,
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -591,7 +649,7 @@ private fun EmptyState(hasActiveFilter: Boolean) {
 private fun hasActiveFilter(uiState: TransactionManageUiState): Boolean =
     uiState.timeRange != TimeFilter.ALL ||
         uiState.selectedTagIds.isNotEmpty() ||
-        uiState.keyword.isNotBlank() ||
+        uiState.appliedKeyword.isNotBlank() ||
         uiState.accountFilter != AccountFilter.All
 
 /** 时间筛选维度展示文案。 */

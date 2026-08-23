@@ -217,15 +217,13 @@ class EditTransactionViewModel @Inject constructor(
             .getOrDefault(emptyMap())
 
     private suspend fun loadAllTagsByRoot(): Map<Tag, List<Tag>> {
-        val roots = tagRepository.getChildren(parentId = null)
-        return roots.associateWith { root ->
-            runCatching { tagRepository.getChildren(parentId = root.id) }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to load children for root ${root.id}", throwable)
-                }
-                .getOrDefault(emptyList())
-        }
+        val tree = runCatching { tagRepository.getTagTree() }
+            .onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
+                Log.w(TAG, "Failed to load tag tree", throwable)
+            }
+            .getOrDefault(com.expfal.yunayu.domain.model.TagTree(emptyList(), emptyMap()))
+        return tree.roots.associateWith { root -> tree.childrenByRoot[root.id].orEmpty() }
     }
 
     companion object {

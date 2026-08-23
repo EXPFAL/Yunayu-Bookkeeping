@@ -6,6 +6,7 @@ import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.nl.model.NlParseResult
 import com.expfal.yunayu.domain.nl.model.NlTransactionDraft
+import com.expfal.yunayu.domain.repository.FakeTagRepositoryDefaults
 import com.expfal.yunayu.domain.repository.TagRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -183,7 +184,7 @@ class ParseNaturalLanguageTransactionUseCaseTest {
     }
 
     /** [TagRepository] 手写 fake：按 parentId 返回预置子节点。 */
-    private class FakeTagRepository : TagRepository {
+    private class FakeTagRepository : FakeTagRepositoryDefaults() {
         val childrenByParent = mutableMapOf<Long?, List<Tag>>()
 
         override fun observeChildren(parentId: Long?): Flow<List<Tag>> = flowOf(emptyList())

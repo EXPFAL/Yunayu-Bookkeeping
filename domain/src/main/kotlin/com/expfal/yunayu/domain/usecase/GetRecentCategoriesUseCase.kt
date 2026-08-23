@@ -33,17 +33,12 @@ class GetRecentCategoriesUseCase(
             limit = DEFAULT_LIMIT,
         )
 
-        val roots = runCatching { tagRepository.getChildren(parentId = null) }
+        val tree = runCatching { tagRepository.getTagTree() }
             .onFailure { if (it is CancellationException) throw it }
             .getOrNull() ?: return recent.take(DEFAULT_LIMIT)
 
-        val childrenByRootId = mutableMapOf<Long, List<Tag>>()
-        for (root in roots) {
-            val children = runCatching { tagRepository.getChildren(parentId = root.id) }
-                .onFailure { if (it is CancellationException) throw it }
-                .getOrNull() ?: return recent.take(DEFAULT_LIMIT)
-            childrenByRootId[root.id] = children
-        }
+        val roots = tree.roots
+        val childrenByRootId = tree.childrenByRoot
 
         val parentIdsWithChildren = childrenByRootId.filterValues { it.isNotEmpty() }.keys
         val recentLeaves = recent.filter { it.id !in parentIdsWithChildren }

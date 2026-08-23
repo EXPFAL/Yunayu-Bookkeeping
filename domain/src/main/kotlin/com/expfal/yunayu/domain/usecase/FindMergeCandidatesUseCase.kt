@@ -13,10 +13,9 @@ import kotlinx.coroutines.CancellationException
 /**
  * 找出可合并的语义重复标签对候选。
  *
- * 编排链路：加载全量标签 → 排除根类与带子级者（仅保留叶子）→ 经 [TagRepository.getDeleteImpact]
- * 取每叶子的直接交易记录数（叶子无子树，`affectedTransactionCount` 即其记录数）→ 预筛
- * `countA + countB > 3` 的标签对 → 同根优先排序取上限 [MAX_PAIRS] 对 → 引擎不可用返回空 →
- * 每 [BATCH_SIZE] 对为一批调用引擎 → 解析并过滤 [MergeDecision.KEEP_BOTH] 后返回合并类候选。
+ * 编排链路：加载全量标签 → 排除根类与带子级者（仅保留叶子）→ 经 [TagRepository.countTransactionsByTagId]
+ * 取每叶子的直接交易记录数 → 预筛 `countA + countB > 3` 的标签对 → 同根优先排序取上限 [MAX_PAIRS] 对 →
+ * 引擎不可用返回空 → 每 [BATCH_SIZE] 对为一批调用引擎 → 解析并过滤 [MergeDecision.KEEP_BOTH] 后返回合并类候选。
  *
  * 降级语义：引擎不可用、[NLTransactionParser.generate] 返回 `null`、标签加载失败或解析阶段
  * 发生任何非取消异常，均返回空列表；[kotlinx.coroutines.CancellationException] 直接重抛。
@@ -70,27 +69,14 @@ class FindMergeCandidatesUseCase(
         return results.distinctBy { it.tagA.id to it.tagB.id }
     }
 
-    /** 广度遍历加载全量标签（根 → 逐层子节点），失败向上抛交由外层降级。 */
-    private suspend fun loadAllTags(): List<Tag> {
-        val result = mutableListOf<Tag>()
-        val queue = ArrayDeque<Tag>()
-        queue.addAll(tagRepository.getChildren(parentId = null))
-        while (queue.isNotEmpty()) {
-            val current = queue.removeFirst()
-            result += current
-            queue.addAll(tagRepository.getChildren(current.id))
-        }
-        return result
-    }
-
     /** 加载叶子标签及其直接交易记录数（排除根类与带子级者）。 */
     private suspend fun loadLeaves(): List<LeafInfo> {
-        val all = loadAllTags()
+        val all = tagRepository.getAllTags()
         val leaves = all.filter { tag ->
             tag.parentId != null && all.none { it.parentId == tag.id }
         }
         return leaves.map { tag ->
-            LeafInfo(tag = tag, count = tagRepository.getDeleteImpact(tag.id).affectedTransactionCount)
+            LeafInfo(tag = tag, count = tagRepository.countTransactionsByTagId(tag.id))
         }
     }
 

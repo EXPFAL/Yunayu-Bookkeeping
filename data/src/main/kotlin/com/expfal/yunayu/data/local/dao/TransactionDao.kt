@@ -161,7 +161,7 @@ interface TransactionDao {
             "AND (:noteKeyword IS NULL OR t.note LIKE '%' || :noteKeyword || '%' ESCAPE '\\') " +
             "AND (:accountMode = 0 OR (:accountMode = 1 AND t.account_id IS NULL) " +
             "OR (:accountMode = 2 AND t.account_id = :accountId)) " +
-            "ORDER BY t.occurred_at DESC, t.id DESC",
+            "ORDER BY t.occurred_at DESC, t.id DESC LIMIT :limit",
     )
     fun observeFiltered(
         startInclusiveMs: Long?,
@@ -169,6 +169,7 @@ interface TransactionDao {
         noteKeyword: String?,
         accountMode: Int,
         accountId: Long?,
+        limit: Int,
     ): Flow<List<RecentTransactionRow>>
 
     /**
@@ -185,7 +186,7 @@ interface TransactionDao {
             "AND (:accountMode = 0 OR (:accountMode = 1 AND t.account_id IS NULL) " +
             "OR (:accountMode = 2 AND t.account_id = :accountId)) " +
             "AND t.tag_id IN (:tagIds) " +
-            "ORDER BY t.occurred_at DESC, t.id DESC",
+            "ORDER BY t.occurred_at DESC, t.id DESC LIMIT :limit",
     )
     fun observeFilteredByTags(
         startInclusiveMs: Long?,
@@ -194,6 +195,7 @@ interface TransactionDao {
         tagIds: List<Long>,
         accountMode: Int,
         accountId: Long?,
+        limit: Int,
     ): Flow<List<RecentTransactionRow>>
 
     /** 统计挂在一组标签下的交易数（删除影响面提示）。 */

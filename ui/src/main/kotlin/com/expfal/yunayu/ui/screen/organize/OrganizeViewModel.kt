@@ -375,17 +375,12 @@ class OrganizeViewModel @Inject constructor(
 
     /** 根名 + 逐根「根·子」全名组成候选清单（收入体系自然包含），并保留根分组映射。 */
     private suspend fun loadCatalog(): TagCatalog {
-        val roots = tagRepository.getChildren(parentId = null)
+        val tree = tagRepository.getTagTree()
         val candidates = mutableListOf<String>()
         val allTagsByRoot = linkedMapOf<Tag, List<Tag>>()
-        roots.forEach { root ->
+        tree.roots.forEach { root ->
             candidates += root.name
-            val children = runCatching { tagRepository.getChildren(parentId = root.id) }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to load children for root ${root.id}", throwable)
-                }
-                .getOrDefault(emptyList())
+            val children = tree.childrenByRoot[root.id].orEmpty()
             allTagsByRoot[root] = children
             children.forEach { child -> candidates += "${root.name}·${child.name}" }
         }

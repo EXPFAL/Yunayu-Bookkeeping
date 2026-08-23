@@ -9,10 +9,20 @@ import com.expfal.yunayu.domain.model.DuplicateTagNameException
 import com.expfal.yunayu.domain.model.IncomeTags
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagDeleteImpact
+import com.expfal.yunayu.domain.model.TagTree
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.model.toTagTree
 import com.expfal.yunayu.domain.repository.TagRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.shareIn
+import kotlinx.coroutines.flow.SharingStarted
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -24,8 +34,30 @@ class TagRepositoryImpl @Inject constructor(
     private val tagMergeExecutor: TagMergeExecutor,
 ) : TagRepository {
 
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val sharedTagTree by lazy {
+        tagDao.observeAll()
+            .map { entities -> entities.map { it.toDomain() }.toTagTree() }
+            .distinctUntilChanged()
+            .flowOn(Dispatchers.Default)
+            .shareIn(repositoryScope, SharingStarted.WhileSubscribed(5_000), replay = 1)
+    }
+
+    override fun observeTagTree(): Flow<TagTree> = sharedTagTree
+
+    override suspend fun getTagTree(): TagTree = sharedTagTree.first()
+
+    override suspend fun getAllTags(): List<Tag> =
+        tagDao.getAll().map { it.toDomain() }
+
+    override suspend fun countTransactionsByTagId(tagId: Long): Int =
+        transactionDao.countByTagIds(listOf(tagId))
+
     override fun observeChildren(parentId: Long?): Flow<List<Tag>> =
-        tagDao.observeChildren(parentId).map { entities -> entities.map { it.toDomain() } }
+        tagDao.observeChildren(parentId)
+            .map { entities -> entities.map { it.toDomain() } }
+            .distinctUntilChanged()
 
     override suspend fun getChildren(parentId: Long?): List<Tag> =
         tagDao.getChildren(parentId).map { it.toDomain() }

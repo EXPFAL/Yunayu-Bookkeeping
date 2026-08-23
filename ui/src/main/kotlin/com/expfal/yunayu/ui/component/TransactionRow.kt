@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -30,6 +31,10 @@ fun TransactionRow(
     trailing: (@Composable () -> Unit)? = null,
 ) {
     val isIncome = transaction.type == TransactionType.INCOME
+    val timeLabel = remember(transaction.occurredAt) { formatTime(transaction.occurredAt) }
+    val amountLabel = remember(transaction.amountCents, transaction.type) {
+        formatSignedCents(transaction.amountCents, transaction.type)
+    }
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier.fillMaxWidth().padding(vertical = 8.dp),
@@ -37,7 +42,7 @@ fun TransactionRow(
         Column(Modifier.weight(1f)) {
             Text(transaction.tagName ?: "未分类", style = MaterialTheme.typography.bodyMedium)
             Text(
-                "${formatTime(transaction.occurredAt)} · ${transaction.accountName ?: "未指定"}",
+                "$timeLabel · ${transaction.accountName ?: "未指定"}",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -53,7 +58,7 @@ fun TransactionRow(
             }
         }
         Text(
-            text = formatSignedCents(transaction.amountCents, transaction.type),
+            text = amountLabel,
             style = MaterialTheme.typography.bodyMedium,
             color = if (isIncome) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
         )

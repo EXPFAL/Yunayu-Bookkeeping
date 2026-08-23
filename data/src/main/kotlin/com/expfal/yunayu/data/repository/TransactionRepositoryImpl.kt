@@ -11,9 +11,11 @@ import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -55,6 +57,7 @@ class TransactionRepositoryImpl @Inject constructor(
         transactionDao.observeHeldCents(),
         accountDao.observeInitialBalanceSum(),
     ) { netCents, initialBalanceSum -> netCents + initialBalanceSum }
+        .distinctUntilChanged()
 
     override suspend fun getWindowTotals(
         startInclusiveMs: Long,
@@ -72,6 +75,7 @@ class TransactionRepositoryImpl @Inject constructor(
     override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
         transactionDao.observeRecent(limit)
             .map { rows -> rows.map { it.toRecentDomain() } }
+            .flowOn(Dispatchers.Default)
             .distinctUntilChanged()
 
     override fun observeFiltered(
@@ -85,11 +89,12 @@ class TransactionRepositoryImpl @Inject constructor(
         val (mode, id) = accountFilter.toModeAndId()
         val rows: Flow<List<TransactionDao.RecentTransactionRow>> =
             if (tagIds.isEmpty()) {
-                transactionDao.observeFiltered(startInclusiveMs, endExclusiveMs, keyword, mode, id)
+                transactionDao.observeFiltered(startInclusiveMs, endExclusiveMs, keyword, mode, id, FILTERED_LIMIT)
             } else {
-                transactionDao.observeFilteredByTags(startInclusiveMs, endExclusiveMs, keyword, tagIds, mode, id)
+                transactionDao.observeFilteredByTags(startInclusiveMs, endExclusiveMs, keyword, tagIds, mode, id, FILTERED_LIMIT)
             }
         return rows.map { list -> list.map { it.toRecentDomain() } }
+            .flowOn(Dispatchers.Default)
             .distinctUntilChanged()
     }
 
@@ -145,6 +150,7 @@ class TransactionRepositoryImpl @Inject constructor(
 
     private companion object {
         const val TAG = "TransactionRepo"
+        const val FILTERED_LIMIT = 200
 
         /**
          * 转义 LIKE 关键字中的特殊字符，使关键字按字面量匹配。
