@@ -27,7 +27,10 @@ class PostSubscriptionChargeUseCase(
     private val addTransactionUseCase: AddTransactionUseCase,
 ) {
 
-    suspend operator fun invoke(subscriptionId: Long): PostSubscriptionChargeResult {
+    suspend operator fun invoke(
+        subscriptionId: Long,
+        accountId: Long? = null,
+    ): PostSubscriptionChargeResult {
         val subscription = subscriptionRepository.getById(subscriptionId) ?: return PostSubscriptionChargeResult.NotFound
         val chargeDueAt = subscription.pendingChargeDueAt() ?: return PostSubscriptionChargeResult.NothingToPost
         val occurredAt = min(chargeDueAt, System.currentTimeMillis())
@@ -38,6 +41,7 @@ class PostSubscriptionChargeUseCase(
             tagId = tagId,
             occurredAt = occurredAt,
             type = TransactionType.EXPENSE,
+            accountId = accountId,
             note = note,
         )
         subscriptionRepository.update(

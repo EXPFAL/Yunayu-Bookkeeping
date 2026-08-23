@@ -42,10 +42,11 @@ class PostSubscriptionChargeUseCaseTest {
         val transactionRepo = FakeTransactionRepository()
         val useCase = PostSubscriptionChargeUseCase(subscriptionRepo, tagRepo, AddTransactionUseCase(transactionRepo))
 
-        val result = useCase(1L)
+        val result = useCase(1L, accountId = 9L)
 
         assertTrue(result is PostSubscriptionChargeResult.Success)
         val tx = transactionRepo.added.single()
+        assertEquals(9L, tx.accountId)
         assertEquals(3_000L, tx.amountCents)
         assertEquals(11L, tx.tagId)
         assertEquals(TransactionType.EXPENSE, tx.type)

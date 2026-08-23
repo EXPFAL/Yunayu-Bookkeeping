@@ -2,6 +2,9 @@ package com.expfal.yunayu.app
 
 import android.app.Application
 import android.util.Log
+import androidx.hilt.work.HiltWorkerFactory
+import androidx.work.Configuration
+import com.expfal.yunayu.app.notification.NotificationScheduler
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.usecase.EnsureAccountsUseCase
@@ -16,7 +19,7 @@ import javax.inject.Inject
 
 /** Hilt 入口。启动时触发一次 Room 建表 + 查询，验证数据库真实初始化。 */
 @HiltAndroidApp
-class YunayuApplication : Application() {
+class YunayuApplication : Application(), Configuration.Provider {
 
     @Inject
     lateinit var tagRepository: TagRepository
@@ -30,7 +33,15 @@ class YunayuApplication : Application() {
     @Inject
     lateinit var ensureAccountsUseCase: EnsureAccountsUseCase
 
+    @Inject
+    lateinit var workerFactory: HiltWorkerFactory
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    override val workManagerConfiguration: Configuration
+        get() = Configuration.Builder()
+            .setWorkerFactory(workerFactory)
+            .build()
 
     override fun onCreate() {
         super.onCreate()
@@ -38,6 +49,7 @@ class YunayuApplication : Application() {
         ensureReports()
         ensureIncomeTags()
         ensureAccounts()
+        NotificationScheduler.schedule(this)
     }
 
     /** 查询种子化根标签，经 Logcat（tag: YunayuDB）确认 Room 初始化成功。 */

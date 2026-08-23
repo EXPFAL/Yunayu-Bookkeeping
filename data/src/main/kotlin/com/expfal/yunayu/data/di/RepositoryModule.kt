@@ -1,6 +1,7 @@
 package com.expfal.yunayu.data.di
 
 import com.expfal.yunayu.data.repository.AccountRepositoryImpl
+import com.expfal.yunayu.data.repository.NotificationPreferencesRepositoryImpl
 import com.expfal.yunayu.data.repository.MonthlyBudgetRepositoryImpl
 import com.expfal.yunayu.data.repository.NlApiConfigRepositoryImpl
 import com.expfal.yunayu.data.repository.ReportRepositoryImpl
@@ -11,6 +12,7 @@ import com.expfal.yunayu.data.repository.TagRepositoryImpl
 import com.expfal.yunayu.data.repository.TransactionRepositoryImpl
 import com.expfal.yunayu.data.repository.TransferRepositoryImpl
 import com.expfal.yunayu.domain.repository.AccountRepository
+import com.expfal.yunayu.domain.repository.NotificationPreferencesRepository
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.NlApiConfigRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
@@ -48,6 +50,12 @@ abstract class RepositoryModule {
     @Binds
     @Singleton
     abstract fun bindTransferRepository(impl: TransferRepositoryImpl): TransferRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindNotificationPreferencesRepository(
+        impl: NotificationPreferencesRepositoryImpl,
+    ): NotificationPreferencesRepository
 
     @Binds
     @Singleton

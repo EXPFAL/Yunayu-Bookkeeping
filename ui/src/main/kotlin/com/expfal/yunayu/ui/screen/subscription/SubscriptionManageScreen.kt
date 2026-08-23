@@ -50,6 +50,7 @@ import com.expfal.yunayu.domain.model.SubscriptionBillingCycle
 import com.expfal.yunayu.domain.model.displayLabel
 import com.expfal.yunayu.domain.model.initialBillingStartAt
 import com.expfal.yunayu.domain.model.monthlyAmortizedCents
+import com.expfal.yunayu.ui.screen.transactionmanage.EditAccountChipsRow
 import com.expfal.yunayu.ui.util.centsToInitialBalanceText
 import com.expfal.yunayu.ui.util.filterBudgetInput
 import com.expfal.yunayu.ui.util.formatCents
@@ -133,6 +134,7 @@ fun SubscriptionManageScreen(
                 onDelete = viewModel::requestDelete,
                 onPostCharge = viewModel::postCharge,
                 onPostAllDue = viewModel::postAllDue,
+                onSelectAccount = viewModel::onSelectAccount,
             )
         }
     }
@@ -200,11 +202,30 @@ private fun SubscriptionContent(
     onDelete: (Subscription) -> Unit,
     onPostCharge: (Long) -> Unit,
     onPostAllDue: () -> Unit,
+    onSelectAccount: (Long?) -> Unit,
 ) {
     LazyColumn(
         modifier = modifier.padding(horizontal = 24.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        if (uiState.accounts.isNotEmpty()) {
+            item(key = "account") {
+                Column {
+                    Text(
+                        "记一笔账户",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    EditAccountChipsRow(
+                        accounts = uiState.accounts,
+                        selectedAccountId = uiState.selectedAccountId,
+                        onSelect = onSelectAccount,
+                    )
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+        }
         item(key = "summary") {
             SubscriptionSummaryCard(
                 totalMonthlyCents = uiState.totalMonthlyCents,

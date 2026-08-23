@@ -3,9 +3,11 @@ package com.expfal.yunayu.ui.screen.subscription
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.expfal.yunayu.domain.model.Account
 import com.expfal.yunayu.domain.model.SUBSCRIPTION_DUE_WINDOW_DAYS
 import com.expfal.yunayu.domain.model.Subscription
 import com.expfal.yunayu.domain.model.SubscriptionBillingCycle
+import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.SubscriptionRepository
 import com.expfal.yunayu.domain.usecase.PostSubscriptionChargeResult
 import com.expfal.yunayu.domain.usecase.PostSubscriptionChargeUseCase
@@ -19,6 +21,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -31,6 +34,8 @@ data class SubscriptionManageUiState(
     val activeCount: Int = 0,
     val dueCount: Int = 0,
     val dueSubscriptions: List<Subscription> = emptyList(),
+    val accounts: List<Account> = emptyList(),
+    val selectedAccountId: Long? = null,
     val busy: Boolean = false,
     val errorMessage: String? = null,
     val editingSubscription: Subscription? = null,
@@ -58,6 +63,7 @@ sealed interface SubscriptionManageEvent {
 @HiltViewModel
 class SubscriptionManageViewModel @Inject constructor(
     private val subscriptionRepository: SubscriptionRepository,
+    private val accountRepository: AccountRepository,
     private val postSubscriptionChargeUseCase: PostSubscriptionChargeUseCase,
 ) : ViewModel() {
 
@@ -71,6 +77,7 @@ class SubscriptionManageViewModel @Inject constructor(
     val events: Flow<SubscriptionManageEvent> = _events.asSharedFlow()
 
     init {
+        loadAccounts()
         viewModelScope.launch {
             subscriptionRepository.observeAll()
                 .catch { throwable ->
@@ -93,6 +100,28 @@ class SubscriptionManageViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    fun onSelectAccount(accountId: Long?) {
+        _uiState.update { it.copy(selectedAccountId = accountId) }
+    }
+
+    private fun loadAccounts() {
+        viewModelScope.launch {
+            runCatching {
+                val accounts = accountRepository.getAccounts()
+                val lastUsed = accountRepository.observeLastUsedAccountId().first()
+                val selected = lastUsed?.takeIf { id -> accounts.any { it.id == id } }
+                _uiState.update { it.copy(accounts = accounts, selectedAccountId = selected) }
+            }.onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
+                Log.e(TAG, "Failed to load accounts", throwable)
+            }
+        }
+    }
+
+    private suspend fun rememberLastUsedAccount() {
+        accountRepository.saveLastUsedAccountId(_uiState.value.selectedAccountId)
     }
 
     fun addSubscription(
@@ -190,10 +219,12 @@ class SubscriptionManageViewModel @Inject constructor(
         if (_uiState.value.busy) return
         _uiState.update { it.copy(busy = true, errorMessage = null) }
         viewModelScope.launch {
-            runCatching { postSubscriptionChargeUseCase(subscriptionId) }
+            val accountId = _uiState.value.selectedAccountId
+            runCatching { postSubscriptionChargeUseCase(subscriptionId, accountId) }
                 .onSuccess { result ->
                     when (result) {
                         is PostSubscriptionChargeResult.Success -> {
+                            rememberLastUsedAccount()
                             _events.tryEmit(SubscriptionManageEvent.Posted(result.subscriptionName))
                             _uiState.update { it.copy(busy = false) }
                         }
@@ -221,10 +252,11 @@ class SubscriptionManageViewModel @Inject constructor(
         if (due.isEmpty() || _uiState.value.busy) return
         _uiState.update { it.copy(busy = true, errorMessage = null) }
         viewModelScope.launch {
+            val accountId = _uiState.value.selectedAccountId
             var posted = 0
             runCatching {
                 due.forEach { subscription ->
-                    when (postSubscriptionChargeUseCase(subscription.id)) {
+                    when (postSubscriptionChargeUseCase(subscription.id, accountId)) {
                         is PostSubscriptionChargeResult.Success -> posted++
                         PostSubscriptionChargeResult.NotFound,
                         PostSubscriptionChargeResult.NothingToPost,
@@ -234,6 +266,7 @@ class SubscriptionManageViewModel @Inject constructor(
             }
                 .onSuccess {
                     if (posted > 0) {
+                        rememberLastUsedAccount()
                         _events.tryEmit(SubscriptionManageEvent.PostedAll(posted))
                     } else {
                         _events.tryEmit(SubscriptionManageEvent.Failed("没有可记的订阅"))

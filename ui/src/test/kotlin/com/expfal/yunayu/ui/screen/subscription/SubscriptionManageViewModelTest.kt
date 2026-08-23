@@ -1,11 +1,15 @@
 package com.expfal.yunayu.ui.screen.subscription
 
+import com.expfal.yunayu.domain.model.Account
+import com.expfal.yunayu.domain.model.AccountDeleteImpact
+import com.expfal.yunayu.domain.model.AccountBalance
 import com.expfal.yunayu.domain.model.Subscription
 import com.expfal.yunayu.domain.model.SubscriptionBillingCycle
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TagTree
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
+import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.SubscriptionRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
@@ -41,7 +45,7 @@ class SubscriptionManageViewModelTest {
                 sub(3L, "C", 12_000L, SubscriptionBillingCycle.YEARLY, active = false),
             )
         }
-        val viewModel = SubscriptionManageViewModel(repo, noopPostChargeUseCase())
+        val viewModel = SubscriptionManageViewModel(repo, FakeAccountRepository(), noopPostChargeUseCase())
         runCurrent()
 
         val state = viewModel.uiState.value
@@ -66,7 +70,7 @@ class SubscriptionManageViewModelTest {
                 ),
             )
         }
-        val viewModel = SubscriptionManageViewModel(repo, noopPostChargeUseCase())
+        val viewModel = SubscriptionManageViewModel(repo, FakeAccountRepository(), noopPostChargeUseCase())
         runCurrent()
 
         assertEquals(1, viewModel.uiState.value.dueCount)
@@ -138,6 +142,21 @@ class SubscriptionManageViewModelTest {
             },
         ),
     )
+
+    private class FakeAccountRepository : AccountRepository {
+        override fun observeAccounts(): Flow<List<Account>> = flowOf(emptyList())
+        override suspend fun getAccounts(): List<Account> = emptyList()
+        override fun observeBalances(): Flow<List<AccountBalance>> = flowOf(emptyList())
+        override suspend fun addAccount(name: String): Long = 0L
+        override suspend fun addAccount(name: String, initialBalanceCents: Long): Long = 0L
+        override suspend fun renameAccount(id: Long, newName: String) = Unit
+        override suspend fun updateAccount(id: Long, newName: String, initialBalanceCents: Long) = Unit
+        override suspend fun getDeleteImpact(id: Long): AccountDeleteImpact = AccountDeleteImpact(0)
+        override suspend fun deleteAccount(id: Long) = Unit
+        override fun observeLastUsedAccountId(): Flow<Long?> = flowOf(null)
+        override suspend fun saveLastUsedAccountId(id: Long?) = Unit
+        override suspend fun updateInitialBalance(accountId: Long, cents: Long) = Unit
+    }
 
     private class FakeSubscriptionRepository : SubscriptionRepository {
         val flow = MutableStateFlow<List<Subscription>>(emptyList())

@@ -71,3 +71,6 @@ data class Subscription(
 
 /** 订阅到期提醒默认窗口（天）。 */
 const val SUBSCRIPTION_DUE_WINDOW_DAYS = 7L
+
+/** 订阅扣费提前提醒天数（本地通知）。 */
+const val SUBSCRIPTION_REMINDER_DAYS_BEFORE = 3L
