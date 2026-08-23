@@ -221,6 +221,62 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate6To7_createsSubscriptionsTable() {
+        helper.createDatabase(TEST_DB, 6).apply { close() }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 7, true, YunayuDatabase.MIGRATION_6_7)
+
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subscriptions'")
+            .use { cursor -> assertTrue(cursor.moveToFirst()) }
+
+        db.query("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'index_subscriptions_is_active'")
+            .use { cursor -> assertTrue(cursor.moveToFirst()) }
+    }
+
+    @Test
+    fun migrate7To8_addsDueDateColumns() {
+        val createdAt = 1_700_000_000_000L
+        helper.createDatabase(TEST_DB, 7).apply {
+            execSQL(
+                "INSERT INTO subscriptions (name, amount_cents, billing_cycle, note, is_active, created_at, updated_at) " +
+                    "VALUES ('Test', 1000, 'MONTHLY', NULL, 1, $createdAt, $createdAt)",
+            )
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 8, true, YunayuDatabase.MIGRATION_7_8)
+
+        db.query("SELECT next_due_at, last_posted_at FROM subscriptions WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(createdAt, cursor.getLong(0))
+            assertTrue(cursor.isNull(1))
+        }
+    }
+
+    @Test
+    fun migrate8To9_renamesStartDateColumn() {
+        val createdAt = 1_700_000_000_000L
+        helper.createDatabase(TEST_DB, 8).apply {
+            execSQL(
+                "INSERT INTO subscriptions (name, amount_cents, billing_cycle, note, is_active, next_due_at, last_posted_at, created_at, updated_at) " +
+                    "VALUES ('Test', 1000, 'MONTHLY', NULL, 1, $createdAt, NULL, $createdAt, $createdAt)",
+            )
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 9, true, YunayuDatabase.MIGRATION_8_9)
+
+        db.query("SELECT billing_start_at, last_posted_due_at FROM subscriptions WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals(createdAt, cursor.getLong(0))
+            assertTrue(cursor.isNull(1))
+        }
+    }
+
     private companion object {
         const val TEST_DB = "migration-test.db"
     }

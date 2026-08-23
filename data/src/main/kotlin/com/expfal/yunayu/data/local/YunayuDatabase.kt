@@ -6,18 +6,20 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.ReportDao
+import com.expfal.yunayu.data.local.dao.SubscriptionDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.dao.TransferDao
 import com.expfal.yunayu.data.local.entity.AccountEntity
 import com.expfal.yunayu.data.local.entity.ReportEntity
+import com.expfal.yunayu.data.local.entity.SubscriptionEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import com.expfal.yunayu.data.local.entity.TransferEntity
 import com.expfal.yunayu.domain.model.AccountPresets
 
 /**
- * Yunayu 数据库。包含 accounts / tags / transactions / transfers / reports 五张表（月度预算经 DataStore 存储，不落库）。
+ * Yunayu 数据库。包含 accounts / tags / transactions / transfers / reports / subscriptions 六张表（月度预算经 DataStore 存储，不落库）。
  *
  * Schema 变更策略：version 递增 + 显式 Migration，禁止 fallbackToDestructiveMigration
  * （用户数据不可丢失）；schema 经 exportSchema 输出至 data/schemas。
@@ -29,8 +31,9 @@ import com.expfal.yunayu.domain.model.AccountPresets
         TransactionEntity::class,
         TransferEntity::class,
         ReportEntity::class,
+        SubscriptionEntity::class,
     ],
-    version = 6,
+    version = 9,
     exportSchema = true,
 )
 abstract class YunayuDatabase : RoomDatabase() {
@@ -44,6 +47,8 @@ abstract class YunayuDatabase : RoomDatabase() {
     abstract fun transferDao(): TransferDao
 
     abstract fun reportDao(): ReportDao
+
+    abstract fun subscriptionDao(): SubscriptionDao
 
     companion object {
         const val NAME = "yunayu.db"
@@ -347,6 +352,71 @@ abstract class YunayuDatabase : RoomDatabase() {
                     )
                     db.execSQL(
                         "CREATE INDEX IF NOT EXISTS `index_transfers_to_account_id` ON `transfers` (`to_account_id`)",
+                    )
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /** Schema v8 → v9：next_due_at 更名为 billing_start_at，并新增 last_posted_due_at。 */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    db.execSQL(
+                        "ALTER TABLE subscriptions RENAME COLUMN next_due_at TO billing_start_at",
+                    )
+                    db.execSQL(
+                        "ALTER TABLE subscriptions ADD COLUMN last_posted_due_at INTEGER",
+                    )
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /** Schema v7 → v8：subscriptions 新增扣费日与最近记账时间（v9 起扣费日列更名为 billing_start_at）。 */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    db.execSQL(
+                        "ALTER TABLE subscriptions ADD COLUMN next_due_at INTEGER NOT NULL DEFAULT 0",
+                    )
+                    db.execSQL(
+                        "ALTER TABLE subscriptions ADD COLUMN last_posted_at INTEGER",
+                    )
+                    db.execSQL(
+                        "UPDATE subscriptions SET next_due_at = created_at WHERE next_due_at = 0",
+                    )
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /** Schema v6 → v7：新增 subscriptions 表（长期订阅开支与月均摊）。 */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    db.execSQL(
+                        "CREATE TABLE IF NOT EXISTS `subscriptions` (" +
+                            "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`name` TEXT NOT NULL, " +
+                            "`amount_cents` INTEGER NOT NULL, " +
+                            "`billing_cycle` TEXT NOT NULL, " +
+                            "`note` TEXT, " +
+                            "`is_active` INTEGER NOT NULL DEFAULT 1, " +
+                            "`created_at` INTEGER NOT NULL, " +
+                            "`updated_at` INTEGER NOT NULL)",
+                    )
+                    db.execSQL(
+                        "CREATE INDEX IF NOT EXISTS `index_subscriptions_is_active` ON `subscriptions` (`is_active`)",
                     )
                     db.setTransactionSuccessful()
                 } finally {

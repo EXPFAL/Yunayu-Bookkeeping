@@ -8,6 +8,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import com.expfal.yunayu.data.local.YunayuDatabase
 import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.ReportDao
+import com.expfal.yunayu.data.local.dao.SubscriptionDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.dao.TransferDao
@@ -35,6 +36,9 @@ object DatabaseModule {
                 YunayuDatabase.MIGRATION_3_4,
                 YunayuDatabase.MIGRATION_4_5,
                 YunayuDatabase.MIGRATION_5_6,
+                YunayuDatabase.MIGRATION_6_7,
+                YunayuDatabase.MIGRATION_7_8,
+                YunayuDatabase.MIGRATION_8_9,
             )
             .build()
 
@@ -96,4 +100,8 @@ object DatabaseModule {
     @Provides
     @Singleton
     fun provideReportDao(database: YunayuDatabase): ReportDao = database.reportDao()
+
+    @Provides
+    @Singleton
+    fun provideSubscriptionDao(database: YunayuDatabase): SubscriptionDao = database.subscriptionDao()
 }
