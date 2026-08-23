@@ -1,7 +1,6 @@
 package com.expfal.yunayu.ui.screen.tagmanage
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Box
@@ -14,7 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -35,7 +34,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -57,13 +55,26 @@ import com.expfal.yunayu.ui.util.reorderTargetIndex
 /** 标签行固定高度，拖拽换算目标索引与 [Modifier.height] 使用同一常量，保证行高口径一致。 */
 private val rowHeight = 56.dp
 
+/** 扁平化列表项：根分区头或子标签行，供单个 [LazyColumn.items] 渲染以降低滑动重组开销。 */
+private sealed interface TagListEntry {
+    val key: Any
+
+    data class Header(val root: Tag) : TagListEntry {
+        override val key: Any get() = "header-${root.id}"
+    }
+
+    data class Child(val rootId: Long, val tag: Tag, val index: Int) : TagListEntry {
+        override val key: Any get() = tag.id
+    }
+}
+
 /**
  * 「学业关联标签」管理全屏：根标签只读分区，子标签支持增/改/删与同分区长按拖拽排序。
  *
  * 内容为单个 [LazyColumn]（根头 + 子标签平铺），拖拽期间以本地 [dragList] 门控
  * 观察链重发射覆盖，结束后经 [TagManageViewModel.onReorder] 乐观提交并在失败时回滚。
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TagManageScreen(
     onBack: () -> Unit,
@@ -77,6 +88,7 @@ fun TagManageScreen(
     var draggingItemId by remember { mutableStateOf<Long?>(null) }
     var dragList by remember { mutableStateOf<List<Tag>>(emptyList()) }
     var dragStartIndex by remember { mutableStateOf(0) }
+    var dragCurrentIndex by remember { mutableStateOf(0) }
     var dragOffsetY by remember { mutableStateOf(0f) }
 
     var addRoot by remember { mutableStateOf<Tag?>(null) }
@@ -116,7 +128,24 @@ fun TagManageScreen(
         draggingItemId = null
         dragList = emptyList()
         dragStartIndex = 0
+        dragCurrentIndex = 0
         dragOffsetY = 0f
+    }
+
+    val entries = remember(uiState.roots, uiState.childrenByRoot, draggingParentId, dragList) {
+        buildList {
+            uiState.roots.forEach { root ->
+                add(TagListEntry.Header(root))
+                val children = if (draggingParentId == root.id) {
+                    dragList
+                } else {
+                    uiState.childrenByRoot[root.id].orEmpty()
+                }
+                children.forEachIndexed { index, tag ->
+                    add(TagListEntry.Child(root.id, tag, index))
+                }
+            }
+        }
     }
 
     Scaffold(
@@ -151,58 +180,46 @@ fun TagManageScreen(
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(innerPadding)) {
-                uiState.roots.forEach { root ->
-                    item(key = "header-${root.id}") {
-                        RootHeader(
-                            root,
+                items(entries, key = { it.key }) { entry ->
+                    when (entry) {
+                        is TagListEntry.Header -> RootHeader(
+                            entry.root,
                             onAdd = {
-                                addRoot = root
+                                addRoot = entry.root
                                 addSubmitted = false
                                 viewModel.clearError()
                             },
                         )
-                    }
-                    val children = if (draggingParentId == root.id) {
-                        dragList
-                    } else {
-                        uiState.childrenByRoot[root.id].orEmpty()
-                    }
-                    itemsIndexed(children, key = { _, tag -> tag.id }) { index, tag ->
-                        val isDragging by remember(draggingItemId, tag.id) {
-                            derivedStateOf { draggingItemId == tag.id }
-                        }
-                        val itemModifier = remember(draggingParentId, root.id) {
-                            if (draggingParentId == root.id) Modifier else Modifier.animateItemPlacement()
-                        }
-                        val onRename = remember(tag) { { viewModel.requestRename(tag) } }
-                        val onDelete = remember(tag) { { viewModel.requestDelete(tag) } }
-                        TagRow(
-                            tag = tag,
-                            isDragging = isDragging,
-                            modifier = itemModifier,
+                        is TagListEntry.Child -> TagRow(
+                            tag = entry.tag,
+                            isDragging = draggingItemId == entry.tag.id,
                             onDragStart = {
-                                draggingParentId = root.id
-                                draggingItemId = tag.id
+                                val children = uiState.childrenByRoot[entry.rootId].orEmpty()
+                                draggingParentId = entry.rootId
+                                draggingItemId = entry.tag.id
                                 dragList = children
-                                dragStartIndex = index
+                                dragStartIndex = entry.index
+                                dragCurrentIndex = entry.index
                                 dragOffsetY = 0f
                             },
                             onDrag = { amount ->
                                 dragOffsetY += amount
                                 val delta = reorderTargetIndex(dragList.size, itemHeightPx, dragOffsetY)
                                 val target = (dragStartIndex + delta).coerceIn(0, dragList.lastIndex)
-                                val current = dragList.indexOfFirst { it.id == tag.id }
-                                if (current != target) dragList = moveItem(dragList, current, target)
+                                if (dragCurrentIndex != target) {
+                                    dragList = moveItem(dragList, dragCurrentIndex, target)
+                                    dragCurrentIndex = target
+                                }
                             },
                             onDragEnd = {
-                                if (dragList != uiState.childrenByRoot[root.id].orEmpty()) {
-                                    viewModel.onReorder(root.id, dragList)
+                                if (dragList != uiState.childrenByRoot[entry.rootId].orEmpty()) {
+                                    viewModel.onReorder(entry.rootId, dragList)
                                 }
                                 clearDrag()
                             },
                             onDragCancel = { clearDrag() },
-                            onRename = onRename,
-                            onDelete = onDelete,
+                            onRename = { viewModel.requestRename(entry.tag) },
+                            onDelete = { viewModel.requestDelete(entry.tag) },
                         )
                     }
                 }
@@ -282,7 +299,6 @@ private fun RootHeader(root: Tag, onAdd: () -> Unit) {
 private fun TagRow(
     tag: Tag,
     isDragging: Boolean,
-    modifier: Modifier = Modifier,
     onDragStart: () -> Unit,
     onDrag: (Float) -> Unit,
     onDragEnd: () -> Unit,
@@ -291,7 +307,7 @@ private fun TagRow(
     onDelete: () -> Unit,
 ) {
     Row(
-        modifier = modifier
+        modifier = Modifier
             .fillMaxWidth()
             .height(rowHeight)
             .background(if (isDragging) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface)

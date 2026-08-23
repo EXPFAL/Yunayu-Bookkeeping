@@ -78,6 +78,18 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     val scope = rememberCoroutineScope()
     // F3 修复：提升 listState 到 when 分发之外，跨全屏切换存活，避免返回时滚动位置丢失
     val listState = rememberLazyListState()
+    var pendingSaveScroll by remember { mutableStateOf(false) }
+    var recentIdsAtSave by remember { mutableStateOf<List<Long>?>(null) }
+
+    LaunchedEffect(pendingSaveScroll, homeState.recent, fullScreen) {
+        if (!pendingSaveScroll || fullScreen != FullScreen.NONE || homeState.loading) return@LaunchedEffect
+        val snapshot = recentIdsAtSave ?: return@LaunchedEffect
+        if (homeState.recent.map { it.id } != snapshot) {
+            listState.animateScrollToItem(0)
+            pendingSaveScroll = false
+            recentIdsAtSave = null
+        }
+    }
 
     when (fullScreen) {
         FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
@@ -88,6 +100,8 @@ fun HomeScreen(modifier: Modifier = Modifier) {
         FullScreen.QUICK_ADD -> QuickAddScreen(
             onBack = { fullScreen = FullScreen.NONE },
             onSaved = {
+                recentIdsAtSave = homeState.recent.map { it.id }
+                pendingSaveScroll = true
                 fullScreen = FullScreen.NONE
                 homeViewModel.notifySaved()
             },
@@ -131,14 +145,6 @@ private fun HomeMainContent(
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
 ) {
-    LaunchedEffect(homeViewModel) {
-        homeViewModel.events.collect { event ->
-            when (event) {
-                HomeEvent.Saved -> listState.animateScrollToItem(0)
-            }
-        }
-    }
-
     ModalNavigationDrawer(
         drawerState = drawerState,
         drawerContent = {
