@@ -24,11 +24,16 @@ internal class CompletionRequester(
 ) {
 
     /** 发起一次请求并抽取 `choices[0].message.content`；任何异常降级为 `null`。失败路径输出诊断日志。 */
-    fun request(config: NlApiConfig, systemInstruction: String, userText: String): String? {
+    fun request(
+        config: NlApiConfig,
+        systemInstruction: String,
+        userText: String,
+        maxCompletionTokens: Int = DEFAULT_MAX_COMPLETION_TOKENS,
+    ): String? {
         val url = "${config.baseUrl.trimEnd('/')}$CHAT_COMPLETIONS_PATH"
         Log.d(TAG, "Requesting: $url with model: ${config.model}")
         val connection = try {
-            openConnection(config, systemInstruction, userText)
+            openConnection(config, systemInstruction, userText, maxCompletionTokens)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -61,6 +66,7 @@ internal class CompletionRequester(
         config: NlApiConfig,
         systemInstruction: String,
         userText: String,
+        maxCompletionTokens: Int,
     ): HttpURLConnection {
         val connection = URL("${config.baseUrl.trimEnd('/')}$CHAT_COMPLETIONS_PATH")
             .openConnection() as HttpURLConnection
@@ -74,7 +80,10 @@ internal class CompletionRequester(
             connection.setRequestProperty("api-key", config.apiKey)
             connection.setRequestProperty("Content-Type", "application/json")
             connection.outputStream.use {
-                it.write(buildRequest(config, systemInstruction, userText).toByteArray(Charsets.UTF_8))
+                it.write(
+                    buildRequest(config, systemInstruction, userText, maxCompletionTokens)
+                        .toByteArray(Charsets.UTF_8),
+                )
             }
         } catch (e: Exception) {
             connection.disconnect()
@@ -84,7 +93,12 @@ internal class CompletionRequester(
     }
 
     /** 用 org.json 组装 chat/completions 请求体。 */
-    private fun buildRequest(config: NlApiConfig, systemInstruction: String, userText: String): String {
+    private fun buildRequest(
+        config: NlApiConfig,
+        systemInstruction: String,
+        userText: String,
+        maxCompletionTokens: Int,
+    ): String {
         val messages = JSONArray()
             .put(
                 JSONObject()
@@ -100,7 +114,7 @@ internal class CompletionRequester(
             .put("model", config.model)
             .put("messages", messages)
             .put("temperature", TEMPERATURE)
-            .put("max_completion_tokens", MAX_COMPLETION_TOKENS)
+            .put("max_completion_tokens", maxCompletionTokens)
             .toString()
     }
 
@@ -139,8 +153,8 @@ internal class CompletionRequester(
         /** 低温采样，保证输出稳定。 */
         private const val TEMPERATURE = 0.0
 
-        /** 最大补全 token 数，记账解析只需短 JSON，限制到 256 加速响应。 */
-        private const val MAX_COMPLETION_TOKENS = 256
+        /** 默认最大补全 token 数（记账解析短 JSON）。 */
+        private const val DEFAULT_MAX_COMPLETION_TOKENS = 256
 
         /**
          * 逐字段解析生效配置：保存值 trim 后非空白则优先采用，否则回退对应默认值。

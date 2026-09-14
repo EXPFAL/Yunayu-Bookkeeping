@@ -12,6 +12,8 @@ import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.repository.TransferRepository
 import com.expfal.yunayu.domain.usecase.DeleteTransactionUseCase
+import com.expfal.yunayu.domain.usecase.DeleteTransferUseCase
+import com.expfal.yunayu.domain.util.TagTreeLoader
 import com.expfal.yunayu.domain.util.TimeWindows
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
@@ -108,6 +110,7 @@ class TransactionManageViewModel @Inject constructor(
     private val accountRepository: AccountRepository,
     private val tagRepository: TagRepository,
     private val deleteTransactionUseCase: DeleteTransactionUseCase,
+    private val deleteTransferUseCase: DeleteTransferUseCase,
     private val transferRepository: TransferRepository,
 ) : ViewModel() {
 
@@ -216,7 +219,7 @@ class TransactionManageViewModel @Inject constructor(
         if (_uiState.value.busy) return
         _uiState.update { it.copy(busy = true) }
         viewModelScope.launch {
-            runCatching { transferRepository.deleteById(pending.id) }
+            runCatching { deleteTransferUseCase(pending.id) }
                 .onSuccess {
                     _events.tryEmit(TransactionManageEvent.Deleted)
                     _uiState.update { it.copy(busy = false, pendingTransferDelete = null) }
@@ -348,26 +351,20 @@ class TransactionManageViewModel @Inject constructor(
     /** 加载全部标签并按根分组，供标签筛选弹层展示；失败降级为空映射。 */
     private fun loadAllTags() {
         viewModelScope.launch {
-            val mapping = runCatching { loadAllTagsByRoot() }
+            val mapping = runCatching {
+                TagTreeLoader.loadByRoot(
+                    tagRepository = tagRepository,
+                    onChildFailure = { rootId, throwable ->
+                        Log.w(TAG, "Failed to load children for root $rootId", throwable)
+                    },
+                )
+            }
                 .onFailure { throwable ->
                     if (throwable is CancellationException) throw throwable
                     Log.w(TAG, "Failed to load all tags", throwable)
                 }
                 .getOrDefault(emptyMap())
             _uiState.update { it.copy(allTagsByRoot = mapping) }
-        }
-    }
-
-    /** 根列表经 `getChildren(null)` 获取，再逐根拉子标签；任一失败降级为空列表。 */
-    private suspend fun loadAllTagsByRoot(): Map<Tag, List<Tag>> {
-        val roots = tagRepository.getChildren(parentId = null)
-        return roots.associateWith { root ->
-            runCatching { tagRepository.getChildren(parentId = root.id) }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to load children for root ${root.id}", throwable)
-                }
-                .getOrDefault(emptyList())
         }
     }
 

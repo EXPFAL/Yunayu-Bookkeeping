@@ -33,7 +33,7 @@ class ApiReportAnalyzer(
         withContext(Dispatchers.IO) {
             val config = effectiveConfig()
             if (config.apiKey.isBlank()) return@withContext null
-            requester.request(config, systemInstruction, dataText)
+            requester.request(config, systemInstruction, dataText, maxCompletionTokens = REPORT_MAX_COMPLETION_TOKENS)
         }
 
     /** 读取运行期配置并与 BuildConfig 默认逐字段回退，产出本次调用生效配置。 */
@@ -51,5 +51,8 @@ class ApiReportAnalyzer(
 
         /** 读取超时（毫秒，报告分析真正上界）。 */
         private const val READ_TIMEOUT_MILLIS = 30_000
+
+        /** 报告分析需要更长补全，覆盖默认的记账短 JSON 限额。 */
+        private const val REPORT_MAX_COMPLETION_TOKENS = 1024
     }
 }

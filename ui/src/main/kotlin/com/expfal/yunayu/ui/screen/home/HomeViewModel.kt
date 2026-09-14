@@ -69,6 +69,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             transactionRepository.observeRecent(RECENT_LIMIT)
                 .catch { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     Log.e(TAG, "Failed to observe recent transactions", throwable)
                     _uiState.update { it.copy(loading = false) }
                 }
@@ -83,6 +84,7 @@ class HomeViewModel @Inject constructor(
         viewModelScope.launch {
             transactionRepository.observeHeldCents()
                 .catch { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     Log.e(TAG, "Failed to observe held cents", throwable)
                 }
                 .collect { heldCents ->

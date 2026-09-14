@@ -21,11 +21,8 @@ import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.nl.model.NlTransactionDraft
 import com.expfal.yunayu.ui.util.formatCents
+import com.expfal.yunayu.ui.util.formatTime
 import com.expfal.yunayu.ui.util.tagDisplayName
-import java.time.Instant
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
-import java.util.Locale
 
 /** 将解析失败原因映射为可读中文提示。 */
 fun nlFailureMessage(failure: NlParseFailure): String = when (failure) {
@@ -177,7 +174,7 @@ private fun NlDraftPreview(
             Spacer(Modifier.height(12.dp))
             PreviewRow(label = "分类", value = tagDisplayName ?: draft.tagPhrase ?: "未分类")
             draft.note?.takeIf { it.isNotBlank() }?.let { PreviewRow(label = "备注", value = it) }
-            PreviewRow(label = "时间", value = formatNlTime(draft.occurredAtEpochMillis))
+            PreviewRow(label = "时间", value = formatTime(draft.occurredAtEpochMillis))
         }
     }
     if (draft.tagId == null && !draft.tagPhrase.isNullOrBlank()) {
@@ -233,9 +230,3 @@ private fun PreviewRow(label: String, value: String) {
         )
     }
 }
-
-/** 毫秒 → 「MM-dd HH:mm」本地时间文本（固定 Locale.US 保证跨设备一致）。 */
-private fun formatNlTime(millis: Long): String =
-    Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).format(NL_TIME_FORMAT)
-
-private val NL_TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("MM-dd HH:mm", Locale.US)

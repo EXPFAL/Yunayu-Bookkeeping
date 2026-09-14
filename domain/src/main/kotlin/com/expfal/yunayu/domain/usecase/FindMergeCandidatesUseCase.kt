@@ -8,7 +8,6 @@ import com.expfal.yunayu.domain.nl.MergeCandidatePromptBuilder
 import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.nl.model.TagPairInfo
 import com.expfal.yunayu.domain.repository.TagRepository
-import kotlinx.coroutines.CancellationException
 
 /**
  * 找出可合并的语义重复标签对候选。
@@ -18,8 +17,8 @@ import kotlinx.coroutines.CancellationException
  * `countA + countB > 3` 的标签对 → 同根优先排序取上限 [MAX_PAIRS] 对 → 引擎不可用返回空 →
  * 每 [BATCH_SIZE] 对为一批调用引擎 → 解析并过滤 [MergeDecision.KEEP_BOTH] 后返回合并类候选。
  *
- * 降级语义：引擎不可用、[NLTransactionParser.generate] 返回 `null`、标签加载失败或解析阶段
- * 发生任何非取消异常，均返回空列表；[kotlinx.coroutines.CancellationException] 直接重抛。
+ * 降级语义：引擎不可用、[NLTransactionParser.generate] 返回 `null` 时返回空列表；加载 / 解析等
+ * 异常向上传播；[kotlinx.coroutines.CancellationException] 直接重抛。
  */
 class FindMergeCandidatesUseCase(
     private val tagRepository: TagRepository,
@@ -27,12 +26,7 @@ class FindMergeCandidatesUseCase(
 ) {
 
     /** 返回语义重复的叶子标签对合并候选（不含 KEEP_BOTH）。 */
-    suspend operator fun invoke(): List<MergeCandidate> = try {
-        findOrEmpty()
-    } catch (throwable: Throwable) {
-        if (throwable is CancellationException) throw throwable
-        emptyList()
-    }
+    suspend operator fun invoke(): List<MergeCandidate> = findOrEmpty()
 
     private suspend fun findOrEmpty(): List<MergeCandidate> {
         if (!parser.isAvailable()) return emptyList()

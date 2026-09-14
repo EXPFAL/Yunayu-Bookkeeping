@@ -25,6 +25,7 @@ import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
 import com.expfal.yunayu.domain.usecase.RecordTransferUseCase
+import com.expfal.yunayu.ui.util.parseAmountToCents
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -58,14 +59,14 @@ class QuickAddViewModelTest {
 
     @Test
     fun `parses amount text to cents`() {
-        assertNull(QuickAddViewModel.parseAmountToCents(""))
-        assertNull(QuickAddViewModel.parseAmountToCents("0"))
-        assertNull(QuickAddViewModel.parseAmountToCents("."))
-        assertNull(QuickAddViewModel.parseAmountToCents("0."))
-        assertEquals(1250L, QuickAddViewModel.parseAmountToCents("12.5"))
-        assertEquals(5L, QuickAddViewModel.parseAmountToCents("0.05"))
-        assertNull(QuickAddViewModel.parseAmountToCents("12.345"))
-        assertNull(QuickAddViewModel.parseAmountToCents("12345678901234567890"))
+        assertNull(parseAmountToCents(""))
+        assertNull(parseAmountToCents("0"))
+        assertNull(parseAmountToCents("."))
+        assertNull(parseAmountToCents("0."))
+        assertEquals(1250L, parseAmountToCents("12.5"))
+        assertEquals(5L, parseAmountToCents("0.05"))
+        assertNull(parseAmountToCents("12.345"))
+        assertNull(parseAmountToCents("12345678901234567890"))
     }
 
     @Test

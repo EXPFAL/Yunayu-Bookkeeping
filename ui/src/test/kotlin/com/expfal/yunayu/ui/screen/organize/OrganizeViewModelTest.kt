@@ -17,7 +17,6 @@ import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.ApplyOrganizeUseCase
-import com.expfal.yunayu.domain.usecase.FindMergeCandidatesUseCase
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -178,18 +177,14 @@ class OrganizeViewModelTest {
     @Test
     fun `done with applied records triggers merge hint count`() = runTest {
         val tagRepo = FakeTagRepository().apply {
-            roots = listOf(tag(10L, "学习"))
-            childrenByParent = mapOf(10L to listOf(tag(11L, "教材", 10L), tag(12L, "教材费", 10L)))
-            impactByTagId = mapOf(
-                11L to TagDeleteImpact(1, 5, listOf("教材")),
-                12L to TagDeleteImpact(1, 3, listOf("教材费")),
+            roots = listOf(tag(10L, "学习"), tag(20L, "生活"))
+            childrenByParent = mapOf(
+                10L to listOf(tag(11L, "教材", 10L)),
+                20L to listOf(tag(12L, "教材", 20L)),
             )
         }
         val txRepo = FakeTransactionRepository().apply { uncategorized = listOf(record(1000L)) }
-        val mergeParser = FakeParser(available = true).apply {
-            generateResult = """[{"tag_a":"教材","tag_b":"教材费","decision":"A_INTO_B"}]"""
-        }
-        val vm = viewModel(txRepo, tagRepo, mergeParser = mergeParser)
+        val vm = viewModel(txRepo, tagRepo)
 
         vm.start()
         vm.apply()
@@ -200,18 +195,13 @@ class OrganizeViewModelTest {
     }
 
     @Test
-    fun `done merge hint failure stays silent`() = runTest {
+    fun `done merge hint stays zero without duplicate leaf names`() = runTest {
         val tagRepo = FakeTagRepository().apply {
             roots = listOf(tag(10L, "学习"))
             childrenByParent = mapOf(10L to listOf(tag(11L, "教材", 10L), tag(12L, "教材费", 10L)))
-            impactByTagId = mapOf(
-                11L to TagDeleteImpact(1, 5, listOf("教材")),
-                12L to TagDeleteImpact(1, 3, listOf("教材费")),
-            )
         }
         val txRepo = FakeTransactionRepository().apply { uncategorized = listOf(record(1000L)) }
-        val mergeParser = FakeParser(available = true).apply { generateThrows = RuntimeException("boom") }
-        val vm = viewModel(txRepo, tagRepo, mergeParser = mergeParser)
+        val vm = viewModel(txRepo, tagRepo)
 
         vm.start()
         vm.apply()
@@ -242,30 +232,25 @@ class OrganizeViewModelTest {
     }
 
     @Test
-    fun `restart cancels stale merge hint detection`() = runTest {
+    fun `restart resets merge hint count before new review`() = runTest {
         val tagRepo = FakeTagRepository().apply {
-            roots = listOf(tag(10L, "学习"))
-            childrenByParent = mapOf(10L to listOf(tag(11L, "教材", 10L), tag(12L, "教材费", 10L)))
-            impactByTagId = mapOf(
-                11L to TagDeleteImpact(1, 5, listOf("教材")),
-                12L to TagDeleteImpact(1, 3, listOf("教材费")),
+            roots = listOf(tag(10L, "学习"), tag(20L, "生活"))
+            childrenByParent = mapOf(
+                10L to listOf(tag(11L, "教材", 10L)),
+                20L to listOf(tag(12L, "教材", 20L)),
             )
         }
         val txRepo = FakeTransactionRepository().apply { uncategorized = listOf(record(1000L)) }
-        val mergeParser = FakeParser(available = true).apply { generateGate = CompletableDeferred() }
-        val vm = viewModel(txRepo, tagRepo, mergeParser = mergeParser)
+        val vm = viewModel(txRepo, tagRepo)
 
         vm.start()
         vm.apply()
 
         assertEquals(OrganizePhase.DONE, vm.uiState.value.phase)
+        assertEquals(1, vm.uiState.value.mergeHintCount)
 
-        // 旧整合检测挂起中；重启新会话应取消它，防陈旧 mergeHintCount 跨会话回写。
         vm.start()
         assertEquals(OrganizePhase.REVIEWING, vm.uiState.value.phase)
-
-        mergeParser.generateGate?.complete("""[{"tag_a":"教材","tag_b":"教材费","decision":"A_INTO_B"}]""")
-
         assertEquals(0, vm.uiState.value.mergeHintCount)
     }
 
@@ -274,13 +259,11 @@ class OrganizeViewModelTest {
         tagRepo: TagRepository = FakeTagRepository(),
         reportRepo: ReportRepository = FakeReportRepository(),
         parser: NLTransactionParser = FakeParser(),
-        mergeParser: NLTransactionParser = FakeParser(),
     ) = OrganizeViewModel(
         transactionRepository = txRepo,
         tagRepository = tagRepo,
         organizeSuggestUseCase = OrganizeSuggestUseCase(parser),
         applyOrganizeUseCase = ApplyOrganizeUseCase(txRepo, tagRepo, reportRepo),
-        findMergeCandidatesUseCase = FindMergeCandidatesUseCase(tagRepo, mergeParser),
         parser = parser,
     )
 

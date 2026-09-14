@@ -32,8 +32,10 @@ class TransactionRepositoryImpl @Inject constructor(
         transactionDao.deleteById(transactionId)
     }
 
-    override suspend fun getById(id: Long): Transaction? =
-        transactionDao.getById(id)?.toDomain()
+    override suspend fun getById(id: Long): Transaction? {
+        val entity = transactionDao.getById(id) ?: return null
+        return entity.toDomainOrNull()
+    }
 
     override suspend fun updateTransaction(transaction: Transaction) {
         val existing = transactionDao.getById(transaction.id) ?: return
@@ -41,10 +43,10 @@ class TransactionRepositoryImpl @Inject constructor(
     }
 
     override fun observeAll(): Flow<List<Transaction>> =
-        transactionDao.observeAll().map { entities -> entities.map { it.toDomain() } }
+        transactionDao.observeAll().map { entities -> entities.mapNotNull { it.toDomainOrNull() } }
 
     override fun observeByTag(tagId: Long): Flow<List<Transaction>> =
-        transactionDao.observeByTag(tagId).map { entities -> entities.map { it.toDomain() } }
+        transactionDao.observeByTag(tagId).map { entities -> entities.mapNotNull { it.toDomainOrNull() } }
 
     override fun observeExpenseSumBetween(
         startInclusiveMs: Long,
@@ -71,7 +73,7 @@ class TransactionRepositoryImpl @Inject constructor(
 
     override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
         transactionDao.observeRecent(limit)
-            .map { rows -> rows.map { it.toRecentDomain() } }
+            .map { rows -> rows.mapNotNull { it.toRecentDomainOrNull() } }
             .distinctUntilChanged()
 
     override fun observeFiltered(
@@ -89,28 +91,28 @@ class TransactionRepositoryImpl @Inject constructor(
             } else {
                 transactionDao.observeFilteredByTags(startInclusiveMs, endExclusiveMs, keyword, tagIds, mode, id)
             }
-        return rows.map { list -> list.map { it.toRecentDomain() } }
+        return rows.map { list -> list.mapNotNull { it.toRecentDomainOrNull() } }
             .distinctUntilChanged()
     }
 
-    private fun TransactionDao.RecentTransactionRow.toRecentDomain(): RecentTransaction =
-        RecentTransaction(
+    private fun TransactionDao.RecentTransactionRow.toRecentDomainOrNull(): RecentTransaction? {
+        val type = parseTransactionType(transaction.type, transaction.id) ?: return null
+        return RecentTransaction(
             id = transaction.id,
             amountCents = transaction.amountCents,
-            type = runCatching { TransactionType.valueOf(transaction.type) }
-                .onFailure { Log.w(TAG, "Unknown transaction type \"${transaction.type}\" for id=${transaction.id}, fallback to EXPENSE") }
-                .getOrDefault(TransactionType.EXPENSE),
+            type = type,
             tagName = tagName,
             occurredAt = transaction.occurredAt,
             note = transaction.note,
             accountName = accountName,
         )
+    }
 
     override fun observeUncategorizedCount(): Flow<Int> =
         transactionDao.observeUncategorizedCount()
 
     override suspend fun getUncategorized(): List<RecentTransaction> =
-        transactionDao.getUncategorizedSnapshot().map { it.toRecentDomain() }
+        transactionDao.getUncategorizedSnapshot().mapNotNull { it.toRecentDomainOrNull() }
 
     override suspend fun assignTags(assignments: Map<Long, List<Long>>) {
         if (assignments.isEmpty()) return
@@ -131,17 +133,23 @@ class TransactionRepositoryImpl @Inject constructor(
         createdAt = createdAt,
     )
 
-    private fun TransactionEntity.toDomain(): Transaction = Transaction(
-        id = id,
-        amountCents = amountCents,
-        type = runCatching { TransactionType.valueOf(type) }
-            .onFailure { Log.w(TAG, "Unknown transaction type \"$type\" for id=$id, fallback to EXPENSE") }
-            .getOrDefault(TransactionType.EXPENSE),
-        note = note,
-        tagId = tagId,
-        accountId = accountId,
-        occurredAt = occurredAt,
-    )
+    private fun TransactionEntity.toDomainOrNull(): Transaction? {
+        val parsedType = parseTransactionType(type, id) ?: return null
+        return Transaction(
+            id = id,
+            amountCents = amountCents,
+            type = parsedType,
+            note = note,
+            tagId = tagId,
+            accountId = accountId,
+            occurredAt = occurredAt,
+        )
+    }
+
+    private fun parseTransactionType(raw: String, id: Long): TransactionType? =
+        runCatching { TransactionType.valueOf(raw) }
+            .onFailure { Log.e(TAG, "Unknown transaction type \"$raw\" for id=$id, skipping row") }
+            .getOrNull()
 
     private companion object {
         const val TAG = "TransactionRepo"

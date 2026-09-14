@@ -62,10 +62,7 @@ class TagRepositoryImpl @Inject constructor(
             )
         } catch (e: SQLiteConstraintException) {
             Log.w(TAG, "Constraint violation while adding sub tag", e)
-            if (e.message?.contains("UNIQUE") == true) {
-                throw DuplicateTagNameException("父标签 $parentId 下已存在同名标签「$trimmed」")
-            }
-            throw e
+            throw DuplicateTagNameException("父标签 $parentId 下已存在同名标签「$trimmed」")
         }
     }
 

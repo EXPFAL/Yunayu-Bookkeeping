@@ -11,6 +11,10 @@ import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.UpdateTransactionUseCase
+import com.expfal.yunayu.domain.util.TagTreeLoader
+import com.expfal.yunayu.ui.util.appendAmountDigit
+import com.expfal.yunayu.ui.util.centsToAmountText
+import com.expfal.yunayu.ui.util.parseAmountToCents
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -23,7 +27,6 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import java.util.Locale
 import javax.inject.Inject
 
 /** 交易编辑弹层的 UI 状态快照。 */
@@ -126,7 +129,7 @@ class EditTransactionViewModel @Inject constructor(
     /** 追加一位数字或小数点；超出位数上限或重复小数点时忽略。 */
     fun onDigit(digit: Char) {
         if (_uiState.value.saving) return
-        _uiState.update { state -> state.copy(amountText = appendDigit(state.amountText, digit)) }
+        _uiState.update { state -> state.copy(amountText = appendAmountDigit(state.amountText, digit)) }
     }
 
     /** 删除最后一位输入。 */
@@ -209,33 +212,22 @@ class EditTransactionViewModel @Inject constructor(
 
     /** 加载全部标签并按根分组；任一环节失败降级空映射，取消异常直接重抛。 */
     private suspend fun loadAllTags(): Map<Tag, List<Tag>> =
-        runCatching { loadAllTagsByRoot() }
+        runCatching {
+            TagTreeLoader.loadByRoot(
+                tagRepository = tagRepository,
+                onChildFailure = { rootId, throwable ->
+                    Log.w(TAG, "Failed to load children for root $rootId", throwable)
+                },
+            )
+        }
             .onFailure { throwable ->
                 if (throwable is CancellationException) throw throwable
                 Log.w(TAG, "Failed to load all tags", throwable)
             }
             .getOrDefault(emptyMap())
 
-    private suspend fun loadAllTagsByRoot(): Map<Tag, List<Tag>> {
-        val roots = tagRepository.getChildren(parentId = null)
-        return roots.associateWith { root ->
-            runCatching { tagRepository.getChildren(parentId = root.id) }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to load children for root ${root.id}", throwable)
-                }
-                .getOrDefault(emptyList())
-        }
-    }
-
     companion object {
         private const val TAG = "EditTransactionViewModel"
-
-        /** 整数部分最多位数。 */
-        const val MAX_INTEGER_DIGITS = 7
-
-        /** 小数部分最多位数。 */
-        const val MAX_FRACTION_DIGITS = 2
 
         /** 解析标签在编辑弹层中的展示名：子标签返回「父·子」，根标签返回自身名，未命中返回 null。 */
         fun resolveTagName(allTagsByRoot: Map<Tag, List<Tag>>, tagId: Long?): String? {
@@ -243,63 +235,10 @@ class EditTransactionViewModel @Inject constructor(
             allTagsByRoot.forEach { (root, children) ->
                 if (root.id == tagId) return root.name
                 children.firstOrNull { it.id == tagId }?.let { child ->
-                    return if (root.name == child.name) child.name else "${root.name}·${child.name}"
+                    return TagTreeLoader.displayName(child, mapOf(root.id to root.name))
                 }
             }
             return null
-        }
-
-        /** 将「分」转回可编辑金额文本：整数不带小数、十分位省略尾零，如 2500→"25"、1234→"12.34"。 */
-        fun centsToAmountText(cents: Long): String {
-            val yuan = cents / 100
-            val fraction = cents % 100
-            return when {
-                fraction == 0L -> yuan.toString()
-                fraction % 10 == 0L -> "$yuan.${fraction / 10}"
-                else -> String.format(Locale.US, "%d.%02d", yuan, fraction)
-            }
-        }
-
-        /**
-         * 将金额文本解析为「分」。仅接受数字与至多一个小数点，小数位 ≤2；
-         * 空串、非法文本、溢出或结果 ≤0 均返回 `null`。
-         */
-        fun parseAmountToCents(text: String): Long? {
-            val trimmed = text.trim()
-            if (trimmed.isEmpty()) return null
-            if (trimmed.count { it == '.' } > 1) return null
-            if (!trimmed.all { it in '0'..'9' || it == '.' }) return null
-
-            val parts = trimmed.split('.')
-            val integer = parts[0]
-            val fraction = parts.getOrNull(1) ?: ""
-            if (integer.isEmpty()) return null
-            if (fraction.length > MAX_FRACTION_DIGITS) return null
-
-            val yuan = integer.toLongOrNull() ?: return null
-            if (yuan > Long.MAX_VALUE / 100L) return null
-            val cents = when (fraction.length) {
-                0 -> 0L
-                1 -> (fraction[0] - '0') * 10L
-                else -> (fraction[0] - '0') * 10L + (fraction[1] - '0')
-            }
-            val total = yuan * 100L + cents
-            return if (total > 0L) total else null
-        }
-
-        private fun appendDigit(current: String, digit: Char): String {
-            if (digit == '.') {
-                if (current.contains('.')) return current
-                return if (current.isEmpty()) "0." else current + "."
-            }
-            if (current.contains('.')) {
-                val fraction = current.substringAfter('.')
-                if (fraction.length >= MAX_FRACTION_DIGITS) return current
-                return current + digit
-            }
-            if (current == "0") return digit.toString()
-            if (current.length >= MAX_INTEGER_DIGITS) return current
-            return current + digit
         }
     }
 }

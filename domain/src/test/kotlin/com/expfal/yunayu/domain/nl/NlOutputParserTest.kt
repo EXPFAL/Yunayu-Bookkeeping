@@ -4,12 +4,13 @@ import com.expfal.yunayu.domain.model.TransactionType
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import java.time.Instant
+import java.time.ZoneId
 
 /** [NlOutputParser] 的 JVM 单元测试。 */
 class NlOutputParserTest {
 
     private val now = 1_700_000_000_000L
-    private val dayMillis = 24L * 60 * 60 * 1000
 
     @Test
     fun `parses normal json`() {
@@ -49,9 +50,15 @@ class NlOutputParserTest {
 
     @Test
     fun `folds relative date`() {
+        val zone = ZoneId.systemDefault()
+        val expected = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+            .minusDays(1)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
         val draft = NlOutputParser.parseToDraft("{\"amount\":\"12\",\"date\":\"昨天\"}", now)!!
 
-        assertEquals(now - dayMillis, draft.occurredAtEpochMillis)
+        assertEquals(expected, draft.occurredAtEpochMillis)
     }
 
     @Test

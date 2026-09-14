@@ -74,13 +74,19 @@ class OrganizeSuggestUseCaseTest {
     }
 
     @Test
-    fun `swallows non cancellation exception`() = runTest {
+    fun `propagates non cancellation exception`() = runTest {
         val parser = FakeParser(available = true).apply { generateThrows = RuntimeException("boom") }
         val useCase = OrganizeSuggestUseCase(parser)
 
-        val result = useCase(listOf(record(1L)), listOf("学习"), "收入")
+        var caught: Throwable? = null
+        try {
+            useCase(listOf(record(1L)), listOf("学习"), "收入")
+        } catch (throwable: Throwable) {
+            caught = throwable
+        }
 
-        assertTrue(result.isEmpty())
+        assertTrue(caught is RuntimeException)
+        assertEquals("boom", caught?.message)
     }
 
     private fun record(id: Long) = OrganizeRecord(id, "买书", 2_500L, TransactionType.EXPENSE, 900L)

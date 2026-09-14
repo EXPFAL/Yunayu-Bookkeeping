@@ -83,6 +83,7 @@ open class MonthlyBudgetViewModel @Inject constructor(
                     }
                 }
                 .catch { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     Log.e(TAG, "Failed to observe monthly budget state", throwable)
                     _uiState.update { it.copy(loading = false) }
                 }

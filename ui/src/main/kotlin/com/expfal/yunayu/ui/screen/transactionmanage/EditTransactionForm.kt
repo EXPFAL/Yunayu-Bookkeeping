@@ -2,7 +2,6 @@ package com.expfal.yunayu.ui.screen.transactionmanage
 
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -19,160 +18,17 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expfal.yunayu.domain.model.Account
 import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.ui.component.TagTreeList
-import com.expfal.yunayu.ui.screen.quickadd.NumberPad
-import com.expfal.yunayu.ui.util.formatCents
-import com.expfal.yunayu.ui.util.vibrateSuccess
 
 /**
- * 「交易编辑」底部弹层：金额大数字键盘 + 收支类型切换 + 备注 + 标签 + 账户 + 保存 / 取消。
- *
- * 监听 ViewModel 的 [EditTransactionEvent.Saved]，成功后震动并回调 [onSaved] 关闭弹层；
- * 取消走 [onDismissRequest]，不产生任何写入。编辑范围不含发生时间（保持原值）。
+ * 交易编辑表单控件：从已删除的 EditTransactionSheet 抽出，供 [EditTransactionScreen] 复用。
  */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun EditTransactionSheet(
-    transactionId: Long,
-    onDismissRequest: () -> Unit,
-    onSaved: () -> Unit,
-    viewModel: EditTransactionViewModel = viewModel(),
-) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val context = LocalContext.current
-    var showTagPicker by remember { mutableStateOf(false) }
-
-    LaunchedEffect(transactionId) {
-        viewModel.open(transactionId)
-    }
-
-    LaunchedEffect(viewModel, context) {
-        viewModel.events.collect { event ->
-            when (event) {
-                EditTransactionEvent.Saved -> {
-                    context.vibrateSuccess()
-                    onSaved()
-                }
-                EditTransactionEvent.SaveFailed -> Unit // 提示文案由 uiState.saveFailed 驱动
-            }
-        }
-    }
-
-    ModalBottomSheet(onDismissRequest = { if (!uiState.saving) onDismissRequest() }) {
-        when {
-            uiState.loading -> EditPlaceholder("加载中…")
-            uiState.loadFailed -> EditPlaceholder("加载失败，请重试")
-            else -> EditContent(
-                uiState = uiState,
-                onTypeChange = viewModel::setType,
-                onDigit = viewModel::onDigit,
-                onDelete = viewModel::onDelete,
-                onNoteChange = viewModel::onNoteChange,
-                onSelectTag = viewModel::onSelectTag,
-                onOpenTagPicker = { showTagPicker = true },
-                onSelectAccount = viewModel::onSelectAccount,
-                onSave = viewModel::onSave,
-                onCancel = onDismissRequest,
-            )
-        }
-    }
-
-    if (showTagPicker) {
-        EditTagPickerSheet(
-            allTagsByRoot = uiState.allTagsByRoot,
-            selectedTagId = uiState.selectedTagId,
-            onSelect = { tagId ->
-                viewModel.onSelectTag(tagId)
-                showTagPicker = false
-            },
-            onDismiss = { showTagPicker = false },
-        )
-    }
-}
-
-/** 编辑弹层主体：金额 + 类型 + 备注 + 标签 / 账户 chips + 数字键盘 + 保存 / 取消。 */
-@Composable
-private fun EditContent(
-    uiState: EditTransactionUiState,
-    onTypeChange: (TransactionType) -> Unit,
-    onDigit: (Char) -> Unit,
-    onDelete: () -> Unit,
-    onNoteChange: (String) -> Unit,
-    onSelectTag: (Long) -> Unit,
-    onOpenTagPicker: () -> Unit,
-    onSelectAccount: (Long?) -> Unit,
-    onSave: () -> Unit,
-    onCancel: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp)
-            .padding(bottom = 28.dp),
-    ) {
-        Text(
-            text = "编辑记录",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        Spacer(Modifier.height(16.dp))
-        EditTypeToggle(transactionType = uiState.transactionType, onTypeChange = onTypeChange)
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = "¥ " + formatCents(EditTransactionViewModel.parseAmountToCents(uiState.amountText) ?: 0L),
-            style = MaterialTheme.typography.displayLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            textAlign = TextAlign.Center,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(16.dp))
-        EditNoteField(note = uiState.note, onNoteChange = onNoteChange)
-        Spacer(Modifier.height(12.dp))
-        EditTagChipsRow(
-            selectedTagId = uiState.selectedTagId,
-            selectedTagName = uiState.selectedTagName,
-            onSelectTag = onSelectTag,
-            onOpenTagPicker = onOpenTagPicker,
-        )
-        EditAccountChipsRow(
-            accounts = uiState.accounts,
-            selectedAccountId = uiState.selectedAccountId,
-            onSelect = onSelectAccount,
-            modifier = Modifier.padding(top = 12.dp),
-        )
-        Spacer(Modifier.height(16.dp))
-        NumberPad(onDigit = onDigit, onDelete = onDelete)
-        Spacer(Modifier.height(16.dp))
-        EditActionsRow(saving = uiState.saving, onSave = onSave, onCancel = onCancel)
-        if (uiState.saveFailed) {
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = "刚才没保存上，再试一次",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth(),
-            )
-        }
-    }
-}
-
 /** 收/支方向切换控件，样式与快捷记账的 [com.expfal.yunayu.ui.screen.quickadd.QuickAddScreen] 对齐。 */
 @Composable
 internal fun EditTypeToggle(
@@ -330,22 +186,5 @@ internal fun EditTagPickerSheet(
                 modifier = Modifier.padding(bottom = 28.dp),
             )
         }
-    }
-}
-
-/** 加载 / 失败占位文案。 */
-@Composable
-private fun EditPlaceholder(text: String) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 24.dp, vertical = 32.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
     }
 }

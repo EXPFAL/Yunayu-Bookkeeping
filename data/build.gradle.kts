@@ -112,6 +112,8 @@ dependencies {
 
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.test)
+    // 真实 org.json，覆盖 android.jar stub（isReturnDefaultValues 下 JSONObject.put 会 NPE）
+    testImplementation("org.json:json:20240303")
 
     androidTestImplementation(libs.androidx.test.core)
     androidTestImplementation(libs.androidx.test.ext.junit)

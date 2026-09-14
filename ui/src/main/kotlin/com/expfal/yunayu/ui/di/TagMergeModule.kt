@@ -15,8 +15,7 @@ import dagger.hilt.components.SingletonComponent
  * 「标签整合」UseCase 接线模块。
  *
  * [FindMergeCandidatesUseCase] 与 [MergeTagsUseCase] 采用构造注入、类本身不带
- * [dagger.inject.Inject]，故在此通过 [Provides] 显式组装，供标签管理整合流程与整理页
- * 整合提示共用（[FindMergeCandidatesUseCase] 亦被 OrganizeViewModel 复用，此处为唯一绑定源）。
+ * [dagger.inject.Inject]，故在此通过 [Provides] 显式组装，供标签管理整合流程注入。
  */
 @Module
 @InstallIn(SingletonComponent::class)

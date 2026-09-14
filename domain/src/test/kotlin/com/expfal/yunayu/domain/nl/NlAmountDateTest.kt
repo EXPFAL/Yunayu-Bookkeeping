@@ -3,6 +3,7 @@ package com.expfal.yunayu.domain.nl
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Test
+import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
@@ -56,13 +57,25 @@ class NlAmountDateTest {
     }
 
     @Test
-    fun `folds yesterday to base minus one day`() {
-        assertEquals(NOW - DAY_MILLIS, NlAmountDate.parseOccurredAtEpochMillis("昨天", NOW))
+    fun `folds yesterday to local midnight of previous calendar day`() {
+        val zone = ZoneId.systemDefault()
+        val expected = Instant.ofEpochMilli(NOW).atZone(zone).toLocalDate()
+            .minusDays(1)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+        assertEquals(expected, NlAmountDate.parseOccurredAtEpochMillis("昨天", NOW))
     }
 
     @Test
-    fun `folds day before yesterday to base minus two days`() {
-        assertEquals(NOW - 2 * DAY_MILLIS, NlAmountDate.parseOccurredAtEpochMillis("前天", NOW))
+    fun `folds day before yesterday to local midnight two calendar days back`() {
+        val zone = ZoneId.systemDefault()
+        val expected = Instant.ofEpochMilli(NOW).atZone(zone).toLocalDate()
+            .minusDays(2)
+            .atStartOfDay(zone)
+            .toInstant()
+            .toEpochMilli()
+        assertEquals(expected, NlAmountDate.parseOccurredAtEpochMillis("前天", NOW))
     }
 
     @Test
@@ -85,6 +98,5 @@ class NlAmountDateTest {
 
     private companion object {
         const val NOW = 1_700_000_000_000L
-        const val DAY_MILLIS = 24L * 60 * 60 * 1000
     }
 }

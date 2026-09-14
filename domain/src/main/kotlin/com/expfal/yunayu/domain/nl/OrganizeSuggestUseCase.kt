@@ -2,14 +2,12 @@ package com.expfal.yunayu.domain.nl
 
 import com.expfal.yunayu.domain.nl.model.OrganizeRecord
 import com.expfal.yunayu.domain.nl.model.OrganizeSuggestion
-import kotlinx.coroutines.CancellationException
 
 /**
  * 批量整理建议编排用例。
  *
- * 降级语义：记录为空、引擎不可用、[NLTransactionParser.generate] 返回 `null`，或解析阶段
- * 发生任何非取消异常，均返回空列表；[kotlinx.coroutines.CancellationException] 直接重抛，
- * 遵守协程取消语义。
+ * 降级语义：记录为空、引擎不可用、[NLTransactionParser.generate] 返回 `null` 时返回空列表；
+ * 解析等异常向上传播；[kotlinx.coroutines.CancellationException] 由调用方按协程语义处理。
  */
 class OrganizeSuggestUseCase(
     private val parser: NLTransactionParser,
@@ -17,17 +15,6 @@ class OrganizeSuggestUseCase(
 
     /** 依据 [records]、候选标签 [candidates] 与收入根名 [incomeRootName] 产出整理建议列表。 */
     suspend operator fun invoke(
-        records: List<OrganizeRecord>,
-        candidates: List<String>,
-        incomeRootName: String,
-    ): List<OrganizeSuggestion> = try {
-        suggestOrEmpty(records, candidates, incomeRootName)
-    } catch (throwable: Throwable) {
-        if (throwable is CancellationException) throw throwable
-        emptyList()
-    }
-
-    private suspend fun suggestOrEmpty(
         records: List<OrganizeRecord>,
         candidates: List<String>,
         incomeRootName: String,

@@ -46,6 +46,7 @@ import com.expfal.yunayu.domain.model.Tag
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.ui.component.TagTreeList
 import com.expfal.yunayu.ui.util.formatCents
+import com.expfal.yunayu.ui.util.parseAmountToCents
 import com.expfal.yunayu.ui.util.tagDisplayName
 import com.expfal.yunayu.ui.util.vibrateSuccess
 
@@ -374,7 +375,7 @@ private fun QuickAddFormContent(
 @Composable
 private fun AmountDisplay(amountText: String) {
     Text(
-        text = "¥ " + formatCents(QuickAddViewModel.parseAmountToCents(amountText) ?: 0L),
+        text = "¥ " + formatCents(parseAmountToCents(amountText) ?: 0L),
         style = MaterialTheme.typography.displayLarge,
         color = MaterialTheme.colorScheme.onSurface,
         textAlign = TextAlign.Center,
@@ -529,7 +530,7 @@ private fun FixedInputSection(
         Button(
             onClick = viewModel::onSave,
             enabled = !uiState.saving &&
-                QuickAddViewModel.parseAmountToCents(uiState.amountText) != null &&
+                parseAmountToCents(uiState.amountText) != null &&
                 (!uiState.transferMode || (uiState.fromAccountId != null && uiState.toAccountId != null)),
             modifier = Modifier
                 .fillMaxWidth()

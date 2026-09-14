@@ -32,6 +32,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expfal.yunayu.ui.screen.quickadd.NumberPad
 import com.expfal.yunayu.ui.util.formatCents
+import com.expfal.yunayu.ui.util.parseAmountToCents
 import com.expfal.yunayu.ui.util.vibrateSuccess
 
 /**
@@ -130,7 +131,7 @@ fun EditTransactionScreen(
                         Spacer(Modifier.height(16.dp))
                         Text(
                             text = "¥ " + formatCents(
-                                EditTransactionViewModel.parseAmountToCents(uiState.amountText) ?: 0L,
+                                parseAmountToCents(uiState.amountText) ?: 0L,
                             ),
                             style = MaterialTheme.typography.displayLarge,
                             color = MaterialTheme.colorScheme.onSurface,

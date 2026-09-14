@@ -9,6 +9,8 @@ import com.expfal.yunayu.domain.report.model.ReportStatus
 import com.expfal.yunayu.domain.repository.ReportRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
+import org.json.JSONArray
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -75,21 +77,60 @@ class ReportRepositoryImpl @Inject constructor(
         /** 报告提示词 / 内容版本。 */
         const val CONTENT_VERSION = "1"
 
+        /** JSON 序列化前缀，与 legacy `name:cents:percent;` 区分。 */
+        private const val JSON_PREFIX = "j1:"
+
         /**
-         * 序列化分类占比：`名称:cents:percent;`（未分类名称记为空串；名称中的 `:`/`;` 替换为全角 `：`/`；`，
-         * 避免破坏分隔结构）。
+         * 序列化分类占比：`j1:` + JSONArray of `{n,c,p}`（未分类 `n` 为空串）。
+         * 名称可含任意字符，不再做冒号/分号转义。
          */
-        internal fun serializeTopCategories(categories: List<CategoryShare>): String =
-            categories.joinToString(";") { share ->
-                val name = share.tagName.orEmpty().replace(':', '：').replace(';', '；')
-                "$name:${share.cents}:${share.percent}"
+        internal fun serializeTopCategories(categories: List<CategoryShare>): String {
+            val array = JSONArray()
+            for (share in categories) {
+                array.put(
+                    JSONObject()
+                        .put("n", share.tagName.orEmpty())
+                        .put("c", share.cents)
+                        .put("p", share.percent),
+                )
             }
+            return JSON_PREFIX + array.toString()
+        }
 
-        /** 反序列化分类占比：单个条目非法即跳过，整体失败回退空列表。 */
-        internal fun parseTopCategories(raw: String): List<CategoryShare> =
-            raw.split(';').mapNotNull { entry -> parseEntry(entry) }
+        /**
+         * 反序列化分类占比：`j1:` 前缀走 JSON；否则按 legacy 分号格式。
+         * 单个条目非法即跳过，整体失败回退空列表。
+         */
+        internal fun parseTopCategories(raw: String): List<CategoryShare> {
+            if (raw.startsWith(JSON_PREFIX)) {
+                return parseJsonTopCategories(raw.removePrefix(JSON_PREFIX))
+            }
+            return raw.split(';').mapNotNull { entry -> parseLegacyEntry(entry) }
+        }
 
-        private fun parseEntry(entry: String): CategoryShare? {
+        private fun parseJsonTopCategories(json: String): List<CategoryShare> =
+            runCatching {
+                val array = JSONArray(json)
+                buildList {
+                    for (i in 0 until array.length()) {
+                        val obj = array.optJSONObject(i) ?: continue
+                        val cents = obj.optLong("c", Long.MIN_VALUE)
+                        if (cents == Long.MIN_VALUE) continue
+                        if (!obj.has("p")) continue
+                        val percent = obj.optInt("p")
+                        val name = obj.optString("n", "")
+                        add(
+                            CategoryShare(
+                                tagName = name.takeIf { it.isNotEmpty() },
+                                cents = cents,
+                                percent = percent,
+                            ),
+                        )
+                    }
+                }
+            }.getOrDefault(emptyList())
+
+        private fun parseLegacyEntry(entry: String): CategoryShare? {
             val parts = entry.split(':')
             if (parts.size != 3) return null
             val cents = parts[1].toLongOrNull() ?: return null

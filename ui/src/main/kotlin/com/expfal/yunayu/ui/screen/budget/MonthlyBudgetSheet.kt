@@ -24,10 +24,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.expfal.yunayu.ui.util.centsToBudgetText
 import com.expfal.yunayu.ui.util.filterBudgetInput
 import com.expfal.yunayu.ui.util.parseBudgetToCents
 import com.expfal.yunayu.ui.util.vibrateSuccess
-import java.util.Locale
 
 /**
  * 月度预算设置底部弹层：仅金额输入（小数过滤）+ 保存。
@@ -110,13 +110,3 @@ fun MonthlyBudgetSheet(
         }
     }
 }
-
-/** 分 → 预算输入文本：非正数返回空串；整数元省略小数，否则保留两位。 */
-private fun centsToBudgetText(cents: Long): String =
-    if (cents <= 0L) {
-        ""
-    } else if (cents % 100L == 0L) {
-        (cents / 100L).toString()
-    } else {
-        String.format(Locale.US, "%.2f", cents / 100.0)
-    }

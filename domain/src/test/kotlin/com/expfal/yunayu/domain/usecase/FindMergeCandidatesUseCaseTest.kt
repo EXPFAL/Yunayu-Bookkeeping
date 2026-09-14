@@ -184,7 +184,7 @@ class FindMergeCandidatesUseCaseTest {
     }
 
     @Test
-    fun `swallows non cancellation exception`() = runTest {
+    fun `propagates non cancellation exception`() = runTest {
         val tags = FakeTagRepository().apply {
             childrenByParent[null] = listOf(tag(1L, "学习", null))
             childrenByParent[1L] = listOf(tag(2L, "餐饮", 1L), tag(3L, "吃饭", 1L))
@@ -194,9 +194,15 @@ class FindMergeCandidatesUseCaseTest {
         val parser = FakeParser(available = true).apply { generateThrows = RuntimeException("boom") }
         val useCase = FindMergeCandidatesUseCase(tags, parser)
 
-        val result = useCase()
+        var caught: Throwable? = null
+        try {
+            useCase()
+        } catch (throwable: Throwable) {
+            caught = throwable
+        }
 
-        assertTrue(result.isEmpty())
+        assertTrue(caught is RuntimeException)
+        assertEquals("boom", caught?.message)
     }
 
     private fun tag(id: Long, name: String, parentId: Long?) = Tag(id = id, name = name, parentId = parentId)

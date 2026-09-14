@@ -20,6 +20,7 @@ import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.repository.TransferRepository
 import com.expfal.yunayu.domain.usecase.DeleteTransactionUseCase
+import com.expfal.yunayu.domain.usecase.DeleteTransferUseCase
 import com.expfal.yunayu.domain.util.TimeWindows
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.CompletableDeferred
@@ -488,6 +489,7 @@ class TransactionManageViewModelTest {
         accountRepository = accountRepo,
         tagRepository = tagRepo,
         deleteTransactionUseCase = DeleteTransactionUseCase(txRepo, reportRepo),
+        deleteTransferUseCase = DeleteTransferUseCase(transferRepo),
         transferRepository = transferRepo,
     )
 

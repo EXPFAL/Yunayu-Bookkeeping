@@ -114,6 +114,7 @@ class TagManageViewModel @Inject constructor(
         viewModelScope.launch {
             observeTagTree()
                 .catch { throwable ->
+                    if (throwable is CancellationException) throw throwable
                     Log.e(TAG, "Failed to observe tag tree", throwable)
                     _uiState.update { it.copy(loading = false) }
                 }

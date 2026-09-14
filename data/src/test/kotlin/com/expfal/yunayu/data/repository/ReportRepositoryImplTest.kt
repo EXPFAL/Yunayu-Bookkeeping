@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /** [ReportRepositoryImpl] 的 JVM 单元测试（手写 fake DAO + coroutines-test）。 */
@@ -51,7 +52,14 @@ class ReportRepositoryImplTest {
         assertEquals(200L, entity.windowEndMs)
         assertEquals(5_000L, entity.incomeCents)
         assertEquals(3_000L, entity.expenseCents)
-        assertEquals("餐饮:1500:50;:500:16", entity.topCategories)
+        assertTrue(entity.topCategories.startsWith("j1:"))
+        assertEquals(
+            listOf(
+                CategoryShare("餐饮", 1_500L, 50),
+                CategoryShare(null, 500L, 16),
+            ),
+            ReportRepositoryImpl.parseTopCategories(entity.topCategories),
+        )
         assertEquals(4_000L, entity.prevIncomeCents)
         assertEquals(2_500L, entity.prevExpenseCents)
         assertEquals("分析文本", entity.analysisText)
@@ -153,12 +161,12 @@ class ReportRepositoryImplTest {
         val serialized = ReportRepositoryImpl.serializeTopCategories(categories)
         val parsed = ReportRepositoryImpl.parseTopCategories(serialized)
 
-        assertEquals("餐饮:1500:50;:500:16", serialized)
+        assertTrue(serialized.startsWith("j1:"))
         assertEquals(categories, parsed)
     }
 
     @Test
-    fun `serialize replaces colon and semicolon in tag name for round trip`() {
+    fun `serialize preserves colon and semicolon in tag name for round trip`() {
         val categories = listOf(
             CategoryShare("早:餐;套餐", 1_000L, 33),
             CategoryShare(null, 500L, 16),
@@ -167,12 +175,21 @@ class ReportRepositoryImplTest {
         val serialized = ReportRepositoryImpl.serializeTopCategories(categories)
         val parsed = ReportRepositoryImpl.parseTopCategories(serialized)
 
-        assertEquals("早：餐；套餐:1000:33;:500:16", serialized)
-        assertEquals(2, parsed.size)
-        assertEquals("早：餐；套餐", parsed[0].tagName)
-        assertEquals(1_000L, parsed[0].cents)
-        assertEquals(33, parsed[0].percent)
-        assertNull(parsed[1].tagName)
+        assertTrue(serialized.startsWith("j1:"))
+        assertEquals(categories, parsed)
+    }
+
+    @Test
+    fun `parse legacy top categories still works`() {
+        val parsed = ReportRepositoryImpl.parseTopCategories("餐饮:1500:50;:500:16")
+
+        assertEquals(
+            listOf(
+                CategoryShare("餐饮", 1_500L, 50),
+                CategoryShare(null, 500L, 16),
+            ),
+            parsed,
+        )
     }
 
     @Test
@@ -194,6 +211,7 @@ class ReportRepositoryImplTest {
         assertEquals(emptyList<CategoryShare>(), ReportRepositoryImpl.parseTopCategories(""))
         assertEquals(emptyList<CategoryShare>(), ReportRepositoryImpl.parseTopCategories(";;;"))
         assertEquals(emptyList<CategoryShare>(), ReportRepositoryImpl.parseTopCategories("abc"))
+        assertEquals(emptyList<CategoryShare>(), ReportRepositoryImpl.parseTopCategories("j1:not-json"))
     }
 
     /** [ReportDao] 手写 fake：记录 upsert 入参，可返回预置观察流。 */

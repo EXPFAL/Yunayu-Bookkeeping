@@ -17,8 +17,8 @@ class NlPromptBuilderTest {
         assertTrue(instruction.contains("tag"))
         assertTrue(instruction.contains("date"))
         assertTrue(instruction.contains("note"))
-        assertTrue(instruction.contains("必须"))
-        assertTrue(instruction.contains("2~8"))
+        assertTrue(instruction.contains("必填"))
+        assertTrue(instruction.contains("2-8"))
     }
 
     @Test
@@ -39,7 +39,7 @@ class NlPromptBuilderTest {
     @Test
     fun `every few-shot example demonstrates note field`() {
         val instruction = NlPromptBuilder.build(listOf("学习", "生活·餐饮"))
-        val exampleCount = instruction.lines().count { it.startsWith("输入：") }
+        val exampleCount = Regex("→\\{").findAll(instruction).count()
         val noteCount = Regex("\"note\":").findAll(instruction).count()
 
         assertEquals(exampleCount, noteCount)

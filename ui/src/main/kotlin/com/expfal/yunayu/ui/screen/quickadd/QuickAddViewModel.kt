@@ -17,6 +17,9 @@ import com.expfal.yunayu.domain.usecase.AddParsedTransactionUseCase
 import com.expfal.yunayu.domain.usecase.AddTransactionUseCase
 import com.expfal.yunayu.domain.usecase.GetRecentCategoriesUseCase
 import com.expfal.yunayu.domain.usecase.RecordTransferUseCase
+import com.expfal.yunayu.domain.util.TagTreeLoader
+import com.expfal.yunayu.ui.util.appendAmountDigit
+import com.expfal.yunayu.ui.util.parseAmountToCents
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -83,7 +86,7 @@ sealed interface QuickAddEvent {
 /**
  * 「3秒极速记账」ViewModel：手动记直输金额 + 自动记自然语言记账 + 最近常用分类预选 + 大额二次确认。
  *
- * 手动记金额以文本维护（整数 ≤7 位、小数 ≤2 位），落库前经 [parseAmountToCents]
+ * 手动记金额以文本维护（整数 ≤7 位、小数 ≤2 位），落库前经统一 [parseAmountToCents]
  * 转换为「分」；自动记模式调用 [ParseNaturalLanguageTransactionUseCase] 产出草稿预览，
  * 确认后经 [AddParsedTransactionUseCase] 直通落库。成功保存后经 [events] 发出一次性
  * [QuickAddEvent.Saved]，失败发出 [QuickAddEvent.SaveFailed]。事件流无回放、缓冲为 1 且
@@ -230,46 +233,38 @@ class QuickAddViewModel @Inject constructor(
      * 失败保持空 Map（不阻塞建议 chips），[kotlinx.coroutines.CancellationException] 直接重抛。
      */
     private suspend fun loadRootNames(): Map<Long, String> =
-        runCatching { tagRepository.getChildren(parentId = null) }
+        runCatching { TagTreeLoader.loadRootNameById(tagRepository) }
             .onFailure { throwable ->
                 if (throwable is CancellationException) throw throwable
                 Log.w(TAG, "Failed to load root tag names", throwable)
             }
-            .getOrDefault(emptyList())
-            .associate { it.id to it.name }
+            .getOrDefault(emptyMap())
 
     /**
      * 加载全部标签并按根分组，供「更多分类」选择层展示（仅子类可选，父类仅作分组头；筛选宿主除外）。
      *
-     * 按 [type] 收支方向过滤根列表：收入仅保留收入根、支出排除收入根。根列表经
-     * `getChildren(null)` 获取，再逐根 `getChildren(rootId)` 拉子标签；任一失败降级为空列表
-     * 并记日志，[kotlinx.coroutines.CancellationException] 直接重抛，绝不阻塞记账。
+     * 按 [type] 收支方向过滤根列表：收入仅保留收入根、支出排除收入根。
      */
     fun loadAllTags(type: TransactionType) {
         viewModelScope.launch {
-            val mapping = runCatching { loadAllTagsByRoot(type) }
+            val mapping = runCatching {
+                TagTreeLoader.loadByRoot(
+                    tagRepository = tagRepository,
+                    rootFilter = when (type) {
+                        TransactionType.INCOME -> { root -> root.name == IncomeTags.INCOME_ROOT_NAME }
+                        TransactionType.EXPENSE -> { root -> root.name != IncomeTags.INCOME_ROOT_NAME }
+                    },
+                    onChildFailure = { rootId, throwable ->
+                        Log.w(TAG, "Failed to load children for root $rootId", throwable)
+                    },
+                )
+            }
                 .onFailure { throwable ->
                     if (throwable is CancellationException) throw throwable
                     Log.w(TAG, "Failed to load all tags", throwable)
                 }
                 .getOrDefault(emptyMap())
             _uiState.update { it.copy(allTagsByRoot = mapping) }
-        }
-    }
-
-    private suspend fun loadAllTagsByRoot(type: TransactionType): Map<Tag, List<Tag>> {
-        val roots = tagRepository.getChildren(parentId = null)
-        val filteredRoots = when (type) {
-            TransactionType.INCOME -> roots.filter { it.name == IncomeTags.INCOME_ROOT_NAME }
-            TransactionType.EXPENSE -> roots.filter { it.name != IncomeTags.INCOME_ROOT_NAME }
-        }
-        return filteredRoots.associateWith { root ->
-            runCatching { tagRepository.getChildren(parentId = root.id) }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to load children for root ${root.id}", throwable)
-                }
-                .getOrDefault(emptyList())
         }
     }
 
@@ -293,7 +288,7 @@ class QuickAddViewModel @Inject constructor(
     /** 追加一位数字或小数点；超出位数上限或重复小数点时忽略。 */
     fun onDigit(digit: Char) {
         if (_uiState.value.saving) return
-        _uiState.update { state -> state.copy(amountText = appendDigit(state.amountText, digit)) }
+        _uiState.update { state -> state.copy(amountText = appendAmountDigit(state.amountText, digit)) }
     }
 
     /** 删除最后一位输入。 */
@@ -683,62 +678,14 @@ class QuickAddViewModel @Inject constructor(
         }
     }
 
-    private fun appendDigit(current: String, digit: Char): String {
-        if (digit == '.') {
-            if (current.contains('.')) return current
-            return if (current.isEmpty()) "0." else current + "."
-        }
-        if (current.contains('.')) {
-            val fraction = current.substringAfter('.')
-            if (fraction.length >= MAX_FRACTION_DIGITS) return current
-            return current + digit
-        }
-        if (current == "0") return digit.toString()
-        if (current.length >= MAX_INTEGER_DIGITS) return current
-        return current + digit
-    }
-
     companion object {
         /** 日志标签。 */
         private const val TAG = "QuickAddViewModel"
-
-        /** 整数部分最多位数。 */
-        private const val MAX_INTEGER_DIGITS = 7
-
-        /** 小数部分最多位数。 */
-        private const val MAX_FRACTION_DIGITS = 2
 
         /** 超过该金额（分）需二次确认是否属于必要支出。 */
         private const val NECESSARY_THRESHOLD_CENTS = 10_000L
 
         /** NL 解析最坏耗时上限，超时按引擎不可用降级处理。 */
         private const val NL_PARSE_TIMEOUT_MILLIS = 20_000L
-
-        /**
-         * 将金额文本解析为「分」。仅接受数字与至多一个小数点，小数位 ≤2；
-         * 空串、非法文本、溢出或结果 ≤0 均返回 `null`。
-         */
-        fun parseAmountToCents(text: String): Long? {
-            val trimmed = text.trim()
-            if (trimmed.isEmpty()) return null
-            if (trimmed.count { it == '.' } > 1) return null
-            if (!trimmed.all { it in '0'..'9' || it == '.' }) return null
-
-            val parts = trimmed.split('.')
-            val integer = parts[0]
-            val fraction = parts.getOrNull(1) ?: ""
-            if (integer.isEmpty()) return null
-            if (fraction.length > MAX_FRACTION_DIGITS) return null
-
-            val yuan = integer.toLongOrNull() ?: return null
-            if (yuan > Long.MAX_VALUE / 100L) return null
-            val cents = when (fraction.length) {
-                0 -> 0L
-                1 -> (fraction[0] - '0') * 10L
-                else -> (fraction[0] - '0') * 10L + (fraction[1] - '0')
-            }
-            val total = yuan * 100L + cents
-            return if (total > 0L) total else null
-        }
     }
 }

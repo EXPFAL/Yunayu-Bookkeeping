@@ -43,15 +43,15 @@ class EnsureAccountsUseCaseTest {
     }
 
     @Test
-    fun `creates only missing accounts on partial seed`() = runTest {
+    fun `skips seeding when any account already exists`() = runTest {
         val repository = FakeAccountRepository().apply { addExisting("微信") }
         val useCase = EnsureAccountsUseCase(repository)
 
         val result = useCase()
 
-        assertEquals(AccountPresets.PRESET_NAMES - "微信", result.created)
+        assertTrue(result.created.isEmpty())
         assertTrue(result.skipped.isEmpty())
-        assertEquals(AccountPresets.PRESET_NAMES - "微信", repository.addedNames)
+        assertTrue(repository.addedNames.isEmpty())
     }
 
     @Test

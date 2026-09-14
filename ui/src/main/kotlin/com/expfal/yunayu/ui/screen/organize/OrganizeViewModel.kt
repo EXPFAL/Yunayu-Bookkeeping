@@ -14,7 +14,7 @@ import com.expfal.yunayu.domain.nl.model.OrganizeSuggestion
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.usecase.ApplyOrganizeUseCase
-import com.expfal.yunayu.domain.usecase.FindMergeCandidatesUseCase
+import com.expfal.yunayu.domain.util.TagTreeLoader
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -95,7 +95,6 @@ class OrganizeViewModel @Inject constructor(
     private val tagRepository: TagRepository,
     private val organizeSuggestUseCase: OrganizeSuggestUseCase,
     private val applyOrganizeUseCase: ApplyOrganizeUseCase,
-    private val findMergeCandidatesUseCase: FindMergeCandidatesUseCase,
     private val parser: NLTransactionParser,
 ) : ViewModel() {
 
@@ -266,17 +265,22 @@ class OrganizeViewModel @Inject constructor(
         _uiState.update { it.copy(phase = OrganizePhase.IDLE, busy = false) }
     }
 
-    /** DONE 后 best-effort 检测疑似重复标签对数，失败静默不计，不阻塞 DONE 态。 */
+    /** DONE 后 best-effort 统计本地疑似重名叶子对数，失败静默不计，不阻塞 DONE 态。 */
     private fun triggerMergeHint() {
         mergeHintJob?.cancel()
         mergeHintJob = viewModelScope.launch {
-            val count = runCatching { findMergeCandidatesUseCase() }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to detect merge hints", throwable)
-                }
-                .getOrDefault(emptyList())
-                .size
+            val cached = _uiState.value.allTagsByRoot
+            val tagsByRoot = if (cached.isNotEmpty()) {
+                cached
+            } else {
+                runCatching { TagTreeLoader.loadByRoot(tagRepository) }
+                    .onFailure { throwable ->
+                        if (throwable is CancellationException) throw throwable
+                        Log.w(TAG, "Failed to load tags for merge hints", throwable)
+                    }
+                    .getOrDefault(emptyMap())
+            }
+            val count = TagTreeLoader.countDuplicateNameLeafPairs(tagsByRoot)
             _uiState.update { it.copy(mergeHintCount = count) }
         }
     }
@@ -375,18 +379,15 @@ class OrganizeViewModel @Inject constructor(
 
     /** 根名 + 逐根「根·子」全名组成候选清单（收入体系自然包含），并保留根分组映射。 */
     private suspend fun loadCatalog(): TagCatalog {
-        val roots = tagRepository.getChildren(parentId = null)
+        val allTagsByRoot = TagTreeLoader.loadByRoot(
+            tagRepository = tagRepository,
+            onChildFailure = { rootId, throwable ->
+                Log.w(TAG, "Failed to load children for root $rootId", throwable)
+            },
+        )
         val candidates = mutableListOf<String>()
-        val allTagsByRoot = linkedMapOf<Tag, List<Tag>>()
-        roots.forEach { root ->
+        allTagsByRoot.forEach { (root, children) ->
             candidates += root.name
-            val children = runCatching { tagRepository.getChildren(parentId = root.id) }
-                .onFailure { throwable ->
-                    if (throwable is CancellationException) throw throwable
-                    Log.w(TAG, "Failed to load children for root ${root.id}", throwable)
-                }
-                .getOrDefault(emptyList())
-            allTagsByRoot[root] = children
             children.forEach { child -> candidates += "${root.name}·${child.name}" }
         }
         return TagCatalog(candidates, allTagsByRoot)

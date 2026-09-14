@@ -97,10 +97,7 @@ class AccountRepositoryImpl @Inject constructor(
             accountDao.insert(AccountEntity(id = 0L, name = trimmed, createdAt = now))
         } catch (e: SQLiteConstraintException) {
             Log.w(TAG, "Constraint violation while adding account", e)
-            if (e.message?.contains("UNIQUE") == true) {
-                throw DuplicateAccountNameException("账户「$trimmed」已存在")
-            }
-            throw e
+            throw DuplicateAccountNameException("账户「$trimmed」已存在")
         }
     }
 
