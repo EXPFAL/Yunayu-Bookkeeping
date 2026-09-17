@@ -3,6 +3,8 @@ package com.expfal.yunayu.data.repository
 import com.expfal.yunayu.data.local.dao.ReportDao
 import com.expfal.yunayu.data.local.entity.ReportEntity
 import com.expfal.yunayu.domain.report.model.CategoryShare
+import com.expfal.yunayu.domain.report.model.LocalInsight
+import com.expfal.yunayu.domain.report.model.LocalInsightKind
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
@@ -109,6 +111,39 @@ class ReportRepositoryImplTest {
     }
 
     @Test
+    fun `observeByType maps STALE status`() = runTest {
+        val dao = FakeReportDao().apply {
+            observeResult = flowOf(
+                listOf(
+                    ReportEntity(
+                        id = 2L,
+                        reportType = "MONTHLY",
+                        periodKey = "2026-07",
+                        windowStartMs = 10L,
+                        windowEndMs = 20L,
+                        incomeCents = 1_000L,
+                        expenseCents = 800L,
+                        topCategories = "",
+                        prevIncomeCents = 0L,
+                        prevExpenseCents = 0L,
+                        analysisText = "旧分析",
+                        status = "STALE",
+                        engine = "api",
+                        contentVersion = "1",
+                        generatedAt = 5L,
+                    ),
+                ),
+            )
+        }
+        val repository = ReportRepositoryImpl(dao)
+
+        val report = repository.observeByType(ReportPeriodType.MONTHLY).first().single()
+
+        assertEquals(ReportStatus.STALE, report.status)
+        assertEquals("旧分析", report.analysisText)
+    }
+
+    @Test
     fun `observeByType falls back on unknown enum values`() = runTest {
         val dao = FakeReportDao().apply {
             observeResult = flowOf(
@@ -190,6 +225,73 @@ class ReportRepositoryImplTest {
             ),
             parsed,
         )
+    }
+
+    @Test
+    fun `serialize and parse top categories with optional tagId`() {
+        val categories = listOf(
+            CategoryShare("餐饮", 1_500L, 50, tagId = 7L),
+            CategoryShare(null, 500L, 16),
+        )
+        val serialized = ReportRepositoryImpl.serializeTopCategories(categories)
+        val parsed = ReportRepositoryImpl.parseTopCategories(serialized)
+
+        assertTrue(serialized.startsWith("j1:"))
+        assertTrue(serialized.contains("\"i\":7") || serialized.contains("\"i\": 7"))
+        assertEquals(categories, parsed)
+    }
+
+    @Test
+    fun `serialize and parse local insights`() {
+        val insights = listOf(
+            LocalInsight(
+                kind = LocalInsightKind.TREND,
+                title = "支出环比上升 40%",
+                detail = "相对上期支出上升约 40%。",
+            ),
+            LocalInsight(
+                kind = LocalInsightKind.SUMMARY,
+                title = "日均支出约 50 元",
+                detail = "按本期 7 天折算。",
+            ),
+        )
+        val serialized = ReportRepositoryImpl.serializeLocalInsights(insights)
+        val parsed = ReportRepositoryImpl.parseLocalInsights(serialized)
+
+        assertTrue(serialized.startsWith("j1:"))
+        assertEquals(insights, parsed)
+        assertEquals(emptyList<LocalInsight>(), ReportRepositoryImpl.parseLocalInsights(""))
+        assertEquals(emptyList<LocalInsight>(), ReportRepositoryImpl.parseLocalInsights("[]"))
+    }
+
+    @Test
+    fun `upsert maps localInsights to entity column`() = runTest {
+        val dao = FakeReportDao()
+        val repository = ReportRepositoryImpl(dao)
+        val insights = listOf(
+            LocalInsight(LocalInsightKind.BUDGET, "预算进度正常", "本月已用 50%。"),
+        )
+
+        repository.upsert(
+            Report(
+                id = 1L,
+                periodType = ReportPeriodType.MONTHLY,
+                periodKey = "2026-08",
+                windowStartMs = 0L,
+                windowEndMs = 1L,
+                incomeCents = 0L,
+                expenseCents = 0L,
+                topCategories = emptyList(),
+                prevIncomeCents = 0L,
+                prevExpenseCents = 0L,
+                analysisText = null,
+                localInsights = insights,
+                status = ReportStatus.SUCCESS,
+                generatedAtMs = 1L,
+            ),
+        )
+
+        assertEquals(insights, ReportRepositoryImpl.parseLocalInsights(dao.upserted.single().localInsights))
     }
 
     @Test

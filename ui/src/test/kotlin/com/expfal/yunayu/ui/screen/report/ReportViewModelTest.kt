@@ -5,6 +5,7 @@ import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.WindowTotals
+import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.report.GenerateReportUseCase
 import com.expfal.yunayu.domain.report.ReportAnalyzer
 import com.expfal.yunayu.domain.report.model.Report
@@ -92,7 +93,7 @@ class ReportViewModelTest {
                 startOfDay(LocalDate.of(2026, 7, 1)) to startOfDay(LocalDate.of(2026, 8, 1)),
                 startOfDay(LocalDate.of(2026, 6, 1)) to startOfDay(LocalDate.of(2026, 7, 1)),
             ),
-            txRepo.windowTotalsCalls,
+            txRepo.windowTotalsCalls.take(2),
         )
     }
 
@@ -114,7 +115,7 @@ class ReportViewModelTest {
                 startOfDay(LocalDate.of(2026, 1, 1)) to startOfDay(LocalDate.of(2027, 1, 1)),
                 startOfDay(LocalDate.of(2025, 1, 1)) to startOfDay(LocalDate.of(2026, 1, 1)),
             ),
-            txRepo.windowTotalsCalls,
+            txRepo.windowTotalsCalls.take(2),
         )
     }
 
@@ -177,18 +178,59 @@ class ReportViewModelTest {
                 startOfDay(LocalDate.of(2026, 8, 17)) to startOfDay(LocalDate.of(2026, 8, 24)),
                 startOfDay(LocalDate.of(2026, 8, 10)) to startOfDay(LocalDate.of(2026, 8, 17)),
             ),
-            txRepo.windowTotalsCalls,
+            txRepo.windowTotalsCalls.take(2),
         )
+    }
+
+    @Test
+    fun `retry stale report reuses existing id and overwrites status`() = runTest {
+        val stale = report(periodKey = "2026-07", status = ReportStatus.STALE).copy(
+            id = 7L,
+            analysisText = "旧分析",
+        )
+        val repo = FakeReportRepository().apply {
+            setReports(ReportPeriodType.MONTHLY, listOf(stale))
+        }
+        val analyzer = FakeReportAnalyzer().apply {
+            available = true
+            analyzeResult = "新分析"
+        }
+        val viewModel = newViewModel(repo, FakeTransactionRepository(), analyzer)
+
+        viewModel.retry(stale)
+        runCurrent()
+
+        val upserted = repo.upserted.single()
+        assertEquals(7L, upserted.id)
+        assertEquals(ReportStatus.SUCCESS, upserted.status)
+        assertEquals("新分析", upserted.analysisText)
+        assertEquals(ReportStatus.SUCCESS, viewModel.uiState.value.reports.single().status)
     }
 
     private fun newViewModel(
         repo: ReportRepository,
         txRepo: TransactionRepository,
         analyzer: ReportAnalyzer = FakeReportAnalyzer(),
-    ) = ReportViewModel(
-        reportRepository = repo,
-        generateReportUseCase = GenerateReportUseCase(txRepo, repo, analyzer),
-    )
+    ): ReportViewModel {
+        val budgetRepo = FakeMonthlyBudgetRepository()
+        val generate = GenerateReportUseCase(txRepo, repo, analyzer, budgetRepo)
+        // Ensure 用独立空仓储 / 独立交易 fake / 不可用分析器，避免 init 补生成污染断言。
+        val ensure = EnsureReportsUseCase(
+            FakeReportRepository(),
+            GenerateReportUseCase(
+                FakeTransactionRepository(),
+                FakeReportRepository(),
+                FakeReportAnalyzer().apply { available = false },
+                budgetRepo,
+            ),
+        )
+        return ReportViewModel(
+            reportRepository = repo,
+            generateReportUseCase = generate,
+            ensureReportsUseCase = ensure,
+            monthlyBudgetRepository = budgetRepo,
+        )
+    }
 
     private fun report(
         periodType: ReportPeriodType = ReportPeriodType.MONTHLY,
@@ -206,12 +248,18 @@ class ReportViewModelTest {
         prevIncomeCents = 0L,
         prevExpenseCents = 0L,
         analysisText = null,
+        localInsights = emptyList(),
         status = status,
         generatedAtMs = 0L,
     )
 
     private fun startOfDay(date: LocalDate): Long =
         date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+
+    private class FakeMonthlyBudgetRepository : com.expfal.yunayu.domain.repository.MonthlyBudgetRepository {
+        override fun observeMonthlyBudgetCents(): Flow<Long> = MutableStateFlow(0L)
+        override suspend fun saveMonthlyBudgetCents(cents: Long) = Unit
+    }
 
     /** [ReportRepository] 手写 fake：按类型维护 StateFlow，记录 observe/upsert 调用。 */
     private class FakeReportRepository : ReportRepository {
@@ -229,12 +277,16 @@ class ReportViewModelTest {
             return flows.getOrPut(type) { MutableStateFlow(emptyList()) }
         }
 
-        override suspend fun getByKey(periodType: ReportPeriodType, periodKey: String): Report? = null
+        override suspend fun getByKey(periodType: ReportPeriodType, periodKey: String): Report? =
+            flows[periodType]?.value?.firstOrNull { it.periodKey == periodKey }
 
         override suspend fun upsert(report: Report) {
             upserted += report
             val flow = flows.getOrPut(report.periodType) { MutableStateFlow(emptyList()) }
-            flow.value = flow.value + report
+            val without = flow.value.filterNot {
+                it.periodType == report.periodType && it.periodKey == report.periodKey
+            }
+            flow.value = without + report
         }
 
         override suspend fun invalidateWhereWindowContains(epochMillis: Long) = Unit
@@ -292,12 +344,17 @@ class ReportViewModelTest {
             startInclusiveMs: Long,
             endExclusiveMs: Long,
         ): List<CategoryExpense> = emptyList()
-    }
+    
+        override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
+
+        override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+}
 
     /** [ReportAnalyzer] 手写 fake：可控可用性与挂起门，供重试路径与防重入测试。 */
     private class FakeReportAnalyzer : ReportAnalyzer {
 
         var available: Boolean = false
+        var analyzeResult: String? = null
         var analyzeGate: CompletableDeferred<Unit>? = null
         val analyzeCalls = mutableListOf<Pair<String, String>>()
 
@@ -306,7 +363,7 @@ class ReportViewModelTest {
         override suspend fun analyze(systemInstruction: String, dataText: String): String? {
             analyzeCalls += systemInstruction to dataText
             analyzeGate?.await()
-            return null
+            return analyzeResult
         }
     }
 }

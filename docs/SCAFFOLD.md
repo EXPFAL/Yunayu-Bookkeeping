@@ -1002,3 +1002,27 @@ interface SemesterBudgetEngine {
 - `ReportRepository` 新增 `observeWeekly` / `generateWeekly` 两方法，须同步 `FakeReportRepository`：`EnsureReportsUseCaseTest`、`GenerateReportUseCaseTest`、`ReportViewModelTest` 共 3 处。
 - `EnsureReportsUseCase` 新增 `ensureWeekly` 逻辑，`FakeReportRepository` 需同步支持 WEEKLY 类型测试。
 - 本次新增 `PieChartTest` 自带 fake，不计入同步清单；后续再扩接口先更新上述 fake 再编译。
+
+---
+
+## 25. 报告本地洞察与 schema v7
+
+> 触发时机：报告升级——本地洞察、当期 ensure、新增记账标脏、分类下钻。
+
+### 25.1 Schema v7
+
+- `reports.local_insights TEXT NOT NULL DEFAULT ''`（实体默认空串；迁移存量行 `DEFAULT '[]'`）。
+- `MIGRATION_6_7`：`ALTER TABLE reports ADD COLUMN local_insights TEXT NOT NULL DEFAULT '[]'`。
+- 序列化：`j1:` + JSONArray `{k,t,d}`；`top_categories` 可选字段 `i`（tagId）。
+
+### 25.2 生成与标脏语义
+
+- `GenerateReportUseCase`：结构化 + `LocalInsightBuilder` 后恒 `SUCCESS`；LLM 失败仅 `analysisText=null`。
+- 标脏统一 `STALE`（非 FAILED）：`AddTransactionUseCase` / `AddParsedTransactionUseCase` / Delete / Update 成功后 `invalidateWhereWindowContains`。
+- `EnsureReportsUseCase`：上周/上月/(1 月上年) 之后再补 **本周 + 本月**（已存在则跳过）。
+
+### 25.3 UI / 通知
+
+- 报告详情：概览、双环比、预算块、可点分类、本地洞察卡、仅当有 `analysisText` 时显示 AI。
+- 分类下钻：`HomeScreen` → `TransactionManageScreen(initialStart/End/TagIds)` + `applyWindowFilter`。
+- `WeeklyReportNotifyWorker`：PeriodicWork 下周日提醒「本周消费复盘已更新」。

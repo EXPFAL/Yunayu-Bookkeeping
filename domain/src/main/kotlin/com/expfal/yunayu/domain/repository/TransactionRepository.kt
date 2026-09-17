@@ -54,12 +54,18 @@ interface TransactionRepository {
 
     /**
      * 单次查询时间窗内的支出按分类聚合（含未分类，`tagName = null`），
-     * 按支出金额降序返回。
+     * 按支出金额降序返回；[CategoryExpense.tagId] 在可能时带上标签主键。
      */
     suspend fun getExpenseByCategory(
         startInclusiveMs: Long,
         endExclusiveMs: Long,
     ): List<CategoryExpense>
+
+    /** 时间窗内未分类交易笔数（tag_id IS NULL）。 */
+    suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int
+
+    /** 时间窗内最大单笔支出金额（分）；无支出返回 null。 */
+    suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long?
 
     /**
      * 观察按时间窗、账户、标签集合与备注关键字过滤的交易摘要（含标签名），按发生时间倒序。

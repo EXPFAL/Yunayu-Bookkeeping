@@ -40,24 +40,31 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expfal.yunayu.domain.report.model.CategoryShare
+import com.expfal.yunayu.domain.report.model.LocalInsight
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
 import com.expfal.yunayu.ui.component.PieChart
 import com.expfal.yunayu.ui.util.formatCents
+import java.time.Instant
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.Locale
+import kotlin.math.abs
 
 /**
- * 「分析报告」全屏：顶部月度/年度切换，中部按期键倒序的报告列表，点选展开详情；失败条目可重试。
+ * 「分析报告」全屏：顶部周/月/年切换，中部按期键倒序的报告列表，点选展开详情；失败条目可重试。
  *
- * 列表与详情同处一个 [LazyColumn]，选中详情作为尾随 item 追加，保证整体可滚动。
+ * [onDrillToTransactions]：分类下钻到收支管理（时间窗 + 可选标签）。
  */
 @Composable
 fun ReportScreen(
     onBack: () -> Unit,
+    onDrillToTransactions: (startMs: Long, endMs: Long, tagId: Long?) -> Unit = { _, _, _ -> },
     viewModel: ReportViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val budgetCents by viewModel.budgetCents.collectAsStateWithLifecycle()
     BackHandler(onBack = onBack)
 
     Scaffold(
@@ -87,8 +94,12 @@ fun ReportScreen(
                     reports = uiState.reports,
                     selectedPeriodKey = uiState.selectedPeriodKey,
                     generating = uiState.generating,
+                    budgetCents = budgetCents,
                     onSelect = viewModel::selectReport,
                     onRetry = viewModel::retry,
+                    onCategoryClick = { report, tagId ->
+                        onDrillToTransactions(report.windowStartMs, report.windowEndMs, tagId)
+                    },
                 )
             }
         }
@@ -123,8 +134,10 @@ private fun ReportList(
     reports: List<Report>,
     selectedPeriodKey: String?,
     generating: Boolean,
+    budgetCents: Long,
     onSelect: (String) -> Unit,
     onRetry: (Report) -> Unit,
+    onCategoryClick: (Report, Long?) -> Unit,
 ) {
     val selected = reports.firstOrNull { it.periodKey == selectedPeriodKey }
     LazyColumn(
@@ -142,13 +155,17 @@ private fun ReportList(
         }
         if (selected != null) {
             item(key = "detail-${selected.periodKey}") {
-                ReportDetail(report = selected)
+                ReportDetail(
+                    report = selected,
+                    budgetCents = budgetCents,
+                    onCategoryClick = { tagId -> onCategoryClick(selected, tagId) },
+                )
             }
         }
     }
 }
 
-/** 单份报告行：期键标题 + 状态标识 + 收支摘要；失败条目附「重试」按钮。 */
+/** 单份报告行：期键标题 + 状态标识 + 净结余与首条洞察；失败条目附「重试」按钮。 */
 @Composable
 private fun ReportRow(
     report: Report,
@@ -157,6 +174,8 @@ private fun ReportRow(
     onClick: () -> Unit,
     onRetry: () -> Unit,
 ) {
+    val net = report.incomeCents - report.expenseCents
+    val insightTitle = report.localInsights.firstOrNull()?.title
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
@@ -178,11 +197,17 @@ private fun ReportRow(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "收入 ${formatCents(report.incomeCents)} · 支出 ${formatCents(report.expenseCents)}",
+                text = buildString {
+                    append("净结余 ${formatCents(net)}")
+                    if (insightTitle != null) {
+                        append(" · ")
+                        append(insightTitle)
+                    }
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (report.status == ReportStatus.FAILED) {
+            if (report.status == ReportStatus.FAILED || report.status == ReportStatus.STALE) {
                 Spacer(modifier = Modifier.height(8.dp))
                 RetryButton(generating = generating, onClick = onRetry)
             }
@@ -190,16 +215,18 @@ private fun ReportRow(
     }
 }
 
-/** 报告状态徽标：成功 / 失败，用主题色弱化背景衬托。 */
+/** 报告状态徽标：成功 / 失败 / 数据已变更。 */
 @Composable
 private fun StatusBadge(status: ReportStatus) {
     val text = when (status) {
         ReportStatus.SUCCESS -> "已生成"
         ReportStatus.FAILED -> "生成失败"
+        ReportStatus.STALE -> "数据已变更"
     }
     val color = when (status) {
         ReportStatus.SUCCESS -> MaterialTheme.colorScheme.primary
         ReportStatus.FAILED -> MaterialTheme.colorScheme.error
+        ReportStatus.STALE -> MaterialTheme.colorScheme.tertiary
     }
     Surface(shape = MaterialTheme.shapes.small, color = color.copy(alpha = 0.12f)) {
         Text(
@@ -225,9 +252,21 @@ private fun RetryButton(generating: Boolean, onClick: () -> Unit) {
     }
 }
 
-/** 报告详情：收支与环比、分类占比、饼状图、分析文本（null 时按状态给占位）。 */
+/**
+ * 报告详情：概览、环比、预算（周/月且预算>0）、可点击分类、本地洞察、可选 AI 点评。
+ */
 @Composable
-private fun ReportDetail(report: Report) {
+private fun ReportDetail(
+    report: Report,
+    budgetCents: Long,
+    onCategoryClick: (Long?) -> Unit,
+) {
+    val net = report.incomeCents - report.expenseCents
+    val dayCount = remember(report.windowStartMs, report.windowEndMs) {
+        windowDayCount(report.windowStartMs, report.windowEndMs)
+    }
+    val dailyAvg = if (dayCount > 0) report.expenseCents / dayCount else 0L
+
     Surface(
         shape = MaterialTheme.shapes.medium,
         color = MaterialTheme.colorScheme.surface,
@@ -237,15 +276,28 @@ private fun ReportDetail(report: Report) {
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Text("详情", style = MaterialTheme.typography.titleSmall)
+            Text("概览", style = MaterialTheme.typography.titleSmall)
             DetailLine("收入", formatCents(report.incomeCents))
             DetailLine("支出", formatCents(report.expenseCents))
-            DetailLine("环比支出", expenseDelta(report))
+            DetailLine("净结余", formatCents(net))
+            DetailLine("日均支出", formatCents(dailyAvg))
+
+            Text("环比", style = MaterialTheme.typography.titleSmall)
+            DetailLine("收入环比", momDelta(report.incomeCents, report.prevIncomeCents))
+            DetailLine("支出环比", momDelta(report.expenseCents, report.prevExpenseCents))
+
+            if (budgetCents > 0L &&
+                (report.periodType == ReportPeriodType.MONTHLY || report.periodType == ReportPeriodType.WEEKLY)
+            ) {
+                BudgetBlock(report = report, budgetCents = budgetCents)
+            }
+
             Text("支出分类占比", style = MaterialTheme.typography.titleSmall)
-            CategoryShares(report.topCategories)
-            // 饼状图：总支出 > 0 且有分类数据时显示
+            CategoryShares(
+                shares = report.topCategories,
+                onCategoryClick = onCategoryClick,
+            )
             if (report.expenseCents > 0 && report.topCategories.isNotEmpty()) {
-                // 当 topCategories 被截断（<5）时，补齐「其他」桶保证圆环闭合
                 val sharesForChart = remember(report.topCategories, report.expenseCents) {
                     val topSum = report.topCategories.sumOf { it.cents }
                     if (topSum < report.expenseCents) {
@@ -266,10 +318,68 @@ private fun ReportDetail(report: Report) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Text("分析", style = MaterialTheme.typography.titleSmall)
+
+            if (report.localInsights.isNotEmpty()) {
+                Text("本地洞察", style = MaterialTheme.typography.titleSmall)
+                report.localInsights.forEach { insight ->
+                    InsightCard(insight)
+                }
+            }
+
+            report.analysisText?.let { text ->
+                Text("AI 点评", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/** 月报预算进度 / 周报「本周可用额度」。 */
+@Composable
+private fun BudgetBlock(report: Report, budgetCents: Long) {
+    Text("预算", style = MaterialTheme.typography.titleSmall)
+    when (report.periodType) {
+        ReportPeriodType.MONTHLY -> {
+            DetailLine("月度预算", formatCents(budgetCents))
+            DetailLine("本期支出", formatCents(report.expenseCents))
+            val remaining = (budgetCents - report.expenseCents).coerceAtLeast(0L)
+            DetailLine("剩余额度", formatCents(remaining))
+        }
+        ReportPeriodType.WEEKLY -> {
+            val daysInMonth = remember(report.windowStartMs) {
+                Instant.ofEpochMilli(report.windowStartMs)
+                    .atZone(ZoneId.systemDefault())
+                    .toLocalDate()
+                    .lengthOfMonth()
+                    .coerceAtLeast(1)
+            }
+            val weeklyQuota = budgetCents * 7L / daysInMonth
+            DetailLine("本周可用额度", formatCents(weeklyQuota))
+            DetailLine("本周已花", formatCents(report.expenseCents))
+            val remaining = (weeklyQuota - report.expenseCents).coerceAtLeast(0L)
+            DetailLine("本周剩余", formatCents(remaining))
+        }
+        ReportPeriodType.ANNUAL -> Unit
+    }
+}
+
+@Composable
+private fun InsightCard(insight: LocalInsight) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(insight.title, style = MaterialTheme.typography.titleSmall)
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = analysisText(report),
-                style = MaterialTheme.typography.bodyMedium,
+                text = insight.detail,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
@@ -290,9 +400,12 @@ private fun DetailLine(label: String, value: String) {
     }
 }
 
-/** 分类占比列表；为空时给出占位文案。 */
+/** 可点击分类占比列表；为空时给出占位文案。 */
 @Composable
-private fun CategoryShares(shares: List<CategoryShare>) {
+private fun CategoryShares(
+    shares: List<CategoryShare>,
+    onCategoryClick: (Long?) -> Unit,
+) {
     if (shares.isEmpty()) {
         Text(
             text = "暂无分类数据",
@@ -303,7 +416,12 @@ private fun CategoryShares(shares: List<CategoryShare>) {
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         shares.forEach { share ->
-            Row(modifier = Modifier.fillMaxWidth()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onCategoryClick(share.tagId) }
+                    .padding(vertical = 4.dp),
+            ) {
                 Text(
                     text = share.tagName ?: "未分类",
                     style = MaterialTheme.typography.bodyMedium,
@@ -331,7 +449,7 @@ private fun LoadingState() {
     }
 }
 
-/** 空列表占位：提示应用启动时自动补生成上一周期报告。 */
+/** 空列表占位：提示打开时自动汇总本期。 */
 @Composable
 private fun EmptyState() {
     Column(
@@ -340,7 +458,7 @@ private fun EmptyState() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "暂无报告，打开应用时会自动补生成上一周期报告",
+            text = "暂无历史报告；本期会在打开时自动汇总",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
@@ -348,18 +466,19 @@ private fun EmptyState() {
     }
 }
 
-/** 分析文本占位：FAILED →「生成失败，可重试」；SUCCESS 但空白 →「暂无文字分析」。 */
-private fun analysisText(report: Report): String {
-    report.analysisText?.let { return it }
-    return if (report.status == ReportStatus.FAILED) "生成失败，可重试" else "暂无文字分析"
+/** 环比文案：无上期数据 / 持平 / 涨跌幅百分比。 */
+private fun momDelta(current: Long, previous: Long): String {
+    if (previous <= 0L) return "无上期数据"
+    val diff = current - previous
+    if (diff == 0L) return "与上期持平"
+    val ratio = abs(diff) * 100.0 / previous
+    val sign = if (diff > 0) "+" else "-"
+    return String.format(Locale.US, "%s%.1f%%", sign, ratio)
 }
 
-/** 支出环比文案：无上期数据 / 持平 / 涨跌幅百分比。 */
-private fun expenseDelta(report: Report): String {
-    val prev = report.prevExpenseCents
-    if (prev <= 0L) return "无上期数据"
-    val diff = report.expenseCents - prev
-    if (diff == 0L) return "与上期持平"
-    val ratio = diff * 100.0 / prev
-    return String.format(Locale.US, "%+.1f%%", ratio)
+private fun windowDayCount(startMs: Long, endMs: Long): Int {
+    val zone = ZoneId.systemDefault()
+    val start = Instant.ofEpochMilli(startMs).atZone(zone).toLocalDate()
+    val end = Instant.ofEpochMilli(endMs).atZone(zone).toLocalDate()
+    return ChronoUnit.DAYS.between(start, end).toInt().coerceAtLeast(1)
 }

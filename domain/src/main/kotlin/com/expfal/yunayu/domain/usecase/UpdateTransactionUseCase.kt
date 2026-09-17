@@ -14,7 +14,7 @@ import kotlinx.coroutines.CancellationException
  * 校验失败抛 [IllegalArgumentException]，不产生任何写入。
  *
  * 先更新交易（更新异常向上抛）；更新成功后尽力将窗口覆盖 [Transaction.occurredAt] 的报告状态置
- * FAILED，供报告页手动重试。标脏失败不阻断更新成功：:domain 为纯 JVM 模块、无 Android 日志依赖，
+ * STALE，供报告页手动重试。标脏失败不阻断更新成功：:domain 为纯 JVM 模块、无 Android 日志依赖，
  * 标脏异常被静默吞掉（仅 [CancellationException] 重抛，遵守协程取消语义）。
  */
 class UpdateTransactionUseCase(

@@ -69,7 +69,17 @@ class TransactionRepositoryImpl @Inject constructor(
         startInclusiveMs: Long,
         endExclusiveMs: Long,
     ): List<CategoryExpense> = transactionDao.getExpenseByCategory(startInclusiveMs, endExclusiveMs)
-        .map { CategoryExpense(tagName = it.tagName, cents = it.cents) }
+        .map { CategoryExpense(tagName = it.tagName, cents = it.cents, tagId = it.tagId) }
+
+    override suspend fun countUncategorizedBetween(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): Int = transactionDao.countUncategorizedBetween(startInclusiveMs, endExclusiveMs)
+
+    override suspend fun getMaxExpenseCentsBetween(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): Long? = transactionDao.getMaxExpenseCentsBetween(startInclusiveMs, endExclusiveMs)
 
     override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
         transactionDao.observeRecent(limit)

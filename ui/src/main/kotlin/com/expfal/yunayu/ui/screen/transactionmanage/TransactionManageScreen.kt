@@ -67,6 +67,9 @@ import com.expfal.yunayu.ui.util.formatTime
 @Composable
 fun TransactionManageScreen(
     onBack: () -> Unit,
+    initialStartMs: Long? = null,
+    initialEndMs: Long? = null,
+    initialTagIds: Set<Long> = emptySet(),
     viewModel: TransactionManageViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -74,6 +77,14 @@ fun TransactionManageScreen(
     var showTagSheet by remember { mutableStateOf(false) }
     var showOrganize by remember { mutableStateOf(false) }
     var editingTransactionId by remember { mutableStateOf<Long?>(null) }
+
+    LaunchedEffect(initialStartMs, initialEndMs, initialTagIds) {
+        val start = initialStartMs
+        val end = initialEndMs
+        if (start != null && end != null) {
+            viewModel.applyWindowFilter(start, end, initialTagIds)
+        }
+    }
 
     Crossfade(
         targetState = editingTransactionId,
@@ -282,11 +293,18 @@ private fun FilterSection(
                 .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            TimeFilter.entries.forEach { filter ->
+            TimeFilter.entries.filter { it != TimeFilter.CUSTOM }.forEach { filter ->
                 FilterChip(
                     selected = timeRange == filter,
                     onClick = { onTimeRangeSelect(filter) },
                     label = { Text(filter.label()) },
+                )
+            }
+            if (timeRange == TimeFilter.CUSTOM) {
+                FilterChip(
+                    selected = true,
+                    onClick = {},
+                    label = { Text("报告时段") },
                 )
             }
         }
@@ -378,7 +396,6 @@ private fun TagFilterSheet(
                     selectedIds = selectedIds,
                     onToggleSelect = onToggleSelect,
                     modifier = Modifier.padding(bottom = 8.dp),
-                    selectableRoots = true,
                 )
             }
             Row(
@@ -600,4 +617,5 @@ private fun TimeFilter.label(): String = when (this) {
     TimeFilter.LAST_7_DAYS -> "近7天"
     TimeFilter.LAST_30_DAYS -> "近30天"
     TimeFilter.THIS_MONTH -> "本月"
+    TimeFilter.CUSTOM -> "报告时段"
 }

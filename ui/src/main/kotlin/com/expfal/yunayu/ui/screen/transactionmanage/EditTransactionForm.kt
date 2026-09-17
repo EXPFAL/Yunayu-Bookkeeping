@@ -92,7 +92,7 @@ internal fun EditTagChipsRow(
     }
 }
 
-/** 账户选择横向 chips：首位固定「未指定」+ 各账户，单选互斥；账户列表为空时整行不渲染。 */
+/** 账户选择横向 chips：各账户在前，「未指定」固定末位，单选互斥；账户列表为空时整行不渲染。 */
 @Composable
 internal fun EditAccountChipsRow(
     accounts: List<Account>,
@@ -107,11 +107,6 @@ internal fun EditAccountChipsRow(
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        FilterChip(
-            selected = selectedAccountId == null,
-            onClick = { onSelect(null) },
-            label = { Text("未指定") },
-        )
         accounts.forEach { account ->
             FilterChip(
                 selected = selectedAccountId == account.id,
@@ -119,6 +114,11 @@ internal fun EditAccountChipsRow(
                 label = { Text(account.name) },
             )
         }
+        FilterChip(
+            selected = selectedAccountId == null,
+            onClick = { onSelect(null) },
+            label = { Text("未指定") },
+        )
     }
 }
 

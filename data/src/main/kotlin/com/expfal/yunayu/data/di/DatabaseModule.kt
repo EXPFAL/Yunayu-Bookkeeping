@@ -35,6 +35,7 @@ object DatabaseModule {
                 YunayuDatabase.MIGRATION_3_4,
                 YunayuDatabase.MIGRATION_4_5,
                 YunayuDatabase.MIGRATION_5_6,
+                YunayuDatabase.MIGRATION_6_7,
             )
             .build()
 

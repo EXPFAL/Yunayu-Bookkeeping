@@ -41,6 +41,8 @@ enum class TimeFilter {
     LAST_7_DAYS,
     LAST_30_DAYS,
     THIS_MONTH,
+    /** 报告下钻等外部传入的自定义半开区间。 */
+    CUSTOM,
 }
 
 /** 收支管理列表切换维度。 */
@@ -87,12 +89,13 @@ sealed interface TransactionManageEvent {
     data object Failed : TransactionManageEvent
 }
 
-/** 观察链组装结果：时间窗 + 标签集合 + 备注关键词 + 账户筛选。 */
+/** 观察链组装结果：时间窗 + 标签集合 + 备注关键词 + 账户筛选 + 可选自定义半开区间。 */
 private data class FilterParams(
     val timeRange: TimeFilter,
     val tagIds: Set<Long>,
     val keyword: String,
     val accountFilter: AccountFilter,
+    val customWindow: Pair<Long, Long>?,
 )
 
 /**
@@ -121,6 +124,8 @@ class TransactionManageViewModel @Inject constructor(
     private val selectedTagIdsFlow = MutableStateFlow<Set<Long>>(emptySet())
     private val keywordFlow = MutableStateFlow("")
     private val accountFilterFlow = MutableStateFlow<AccountFilter>(AccountFilter.All)
+    /** 非 null 时覆盖 [TimeFilter] 的预设窗口（报告下钻）。 */
+    private val customWindowFlow = MutableStateFlow<Pair<Long, Long>?>(null)
 
     private val _events = MutableSharedFlow<TransactionManageEvent>(
         extraBufferCapacity = 1,
@@ -136,10 +141,27 @@ class TransactionManageViewModel @Inject constructor(
         observeTransfers()
     }
 
-    /** 切换时间筛选维度，立即重查。 */
+    /** 切换时间筛选维度，立即重查；清除自定义下钻窗口。 */
     fun selectTimeRange(filter: TimeFilter) {
+        if (filter == TimeFilter.CUSTOM) return
+        customWindowFlow.value = null
         timeRangeFlow.value = filter
         _uiState.update { it.copy(timeRange = filter) }
+    }
+
+    /**
+     * 应用报告下钻窗口：自定义半开区间 + 标签集合（可空集合表示不过滤标签）。
+     */
+    fun applyWindowFilter(startMs: Long, endMs: Long, tagIds: Set<Long>) {
+        customWindowFlow.value = startMs to endMs
+        selectedTagIdsFlow.value = tagIds
+        timeRangeFlow.value = TimeFilter.CUSTOM
+        _uiState.update {
+            it.copy(
+                timeRange = TimeFilter.CUSTOM,
+                selectedTagIds = tagIds,
+            )
+        }
     }
 
     /** 切换标签选中态：已选则移除、未选则加入（多选）。 */
@@ -263,11 +285,13 @@ class TransactionManageViewModel @Inject constructor(
                     if (keyword.isEmpty()) 0L else KEYWORD_DEBOUNCE_MILLIS
                 },
                 accountFilterFlow,
-            ) { range, tagIds, keyword, accountFilter ->
-                FilterParams(range, tagIds, keyword, accountFilter)
+                customWindowFlow,
+            ) { range, tagIds, keyword, accountFilter, customWindow ->
+                FilterParams(range, tagIds, keyword, accountFilter, customWindow)
             }
                 .flatMapLatest { params ->
-                    val (start, end) = windowFor(params.timeRange)
+                    val (start, end) = params.customWindow
+                        ?: windowFor(params.timeRange)
                     transactionRepository.observeFiltered(
                         startInclusiveMs = start,
                         endExclusiveMs = end,
@@ -368,7 +392,7 @@ class TransactionManageViewModel @Inject constructor(
         }
     }
 
-    /** 时间窗映射：ALL 不设边界，其余以当前日期计算窗口起点。 */
+    /** 时间窗映射：ALL 不设边界，CUSTOM 由 [customWindowFlow] 覆盖，其余以当前日期计算窗口起点。 */
     private fun windowFor(filter: TimeFilter): Pair<Long?, Long?> {
         val today = LocalDate.now()
         return when (filter) {
@@ -376,6 +400,7 @@ class TransactionManageViewModel @Inject constructor(
             TimeFilter.LAST_7_DAYS -> TimeWindows.lastNDaysStartMillis(today, 7) to null
             TimeFilter.LAST_30_DAYS -> TimeWindows.lastNDaysStartMillis(today, 30) to null
             TimeFilter.THIS_MONTH -> TimeWindows.monthStartMillis(today) to null
+            TimeFilter.CUSTOM -> null to null
         }
     }
 

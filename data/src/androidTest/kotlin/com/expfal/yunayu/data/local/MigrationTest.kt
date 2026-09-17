@@ -221,6 +221,28 @@ class MigrationTest {
         }
     }
 
+    @Test
+    fun migrate6To7_addsLocalInsightsColumn() {
+        helper.createDatabase(TEST_DB, 6).apply {
+            execSQL(
+                "INSERT INTO reports (" +
+                    "report_type, period_key, window_start_ms, window_end_ms, " +
+                    "income_cents, expense_cents, top_categories, prev_income_cents, prev_expense_cents, " +
+                    "analysis_text, status, engine, content_version, generated_at) " +
+                    "VALUES ('MONTHLY', '2026-07', 0, 1, 0, 0, '', 0, 0, NULL, 'SUCCESS', 'api', '1', 1)",
+            )
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(TEST_DB, 7, true, YunayuDatabase.MIGRATION_6_7)
+
+        db.query("SELECT local_insights FROM reports WHERE period_key = '2026-07'").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("[]", cursor.getString(0))
+        }
+    }
+
     private companion object {
         const val TEST_DB = "migration-test.db"
     }

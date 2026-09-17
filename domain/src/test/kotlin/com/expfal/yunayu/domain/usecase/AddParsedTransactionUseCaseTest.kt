@@ -7,6 +7,9 @@ import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.nl.model.NlTransactionDraft
+import com.expfal.yunayu.domain.report.model.Report
+import com.expfal.yunayu.domain.report.model.ReportPeriodType
+import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -20,7 +23,7 @@ class AddParsedTransactionUseCaseTest {
     @Test
     fun `maps draft fields to transaction`() = runTest {
         val repository = FakeTransactionRepository()
-        val useCase = AddParsedTransactionUseCase(repository)
+        val useCase = AddParsedTransactionUseCase(repository, FakeReportRepository())
 
         useCase(
             NlTransactionDraft(
@@ -46,7 +49,7 @@ class AddParsedTransactionUseCaseTest {
     @Test
     fun `preserves income type and null note and tagId`() = runTest {
         val repository = FakeTransactionRepository()
-        val useCase = AddParsedTransactionUseCase(repository)
+        val useCase = AddParsedTransactionUseCase(repository, FakeReportRepository())
 
         useCase(
             NlTransactionDraft(
@@ -68,7 +71,7 @@ class AddParsedTransactionUseCaseTest {
     @Test
     fun `delegates to repository exactly once and returns its result`() = runTest {
         val repository = FakeTransactionRepository().apply { nextId = 42L }
-        val useCase = AddParsedTransactionUseCase(repository)
+        val useCase = AddParsedTransactionUseCase(repository, FakeReportRepository())
 
         val id = useCase(NlTransactionDraft(amountCents = 500L, occurredAtEpochMillis = 2L))
 
@@ -132,5 +135,16 @@ class AddParsedTransactionUseCaseTest {
         override suspend fun getById(id: Long): Transaction? = null
 
         override suspend fun updateTransaction(transaction: Transaction) = Unit
+    
+        override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
+
+        override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+}
+
+    private class FakeReportRepository : ReportRepository {
+        override fun observeByType(type: ReportPeriodType): Flow<List<Report>> = flowOf(emptyList())
+        override suspend fun getByKey(periodType: ReportPeriodType, periodKey: String): Report? = null
+        override suspend fun upsert(report: Report) = Unit
+        override suspend fun invalidateWhereWindowContains(epochMillis: Long) = Unit
     }
 }

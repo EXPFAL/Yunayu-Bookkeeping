@@ -191,6 +191,10 @@ class FakeTransactionDao : TransactionDao {
         return categoryExpenseRows
     }
 
+    override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
+
+    override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+
     override fun observeRecent(limit: Int): Flow<List<TransactionDao.RecentTransactionRow>> {
         recentCalls += limit
         return recentRowsFlow

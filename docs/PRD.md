@@ -208,20 +208,25 @@
 - 饼状图：Canvas 自绘（不引第三方库）、固定色板 + 稳定哈希、Top5 +「其他」桶闭合 360°
 - 验收要点：「本周」选项可切换；周报数据正确；饼状图显示 Top5 分类 + 其他；跨年周正确处理
 
-### 36. 冷启动过渡画面
+### 36. 报告本地洞察升级 + 当期补齐 + 分类下钻
+- 痛点：无 API 时报告 FAILED 空白；缺少当期汇总与分类下钻
+- 方案：`LocalInsightBuilder` 本地规则洞察必写；`GenerateReportUseCase` 结构化+洞察恒 SUCCESS、LLM 可选；schema v7 `local_insights`；新增/编辑/删除交易均 `invalidate→STALE`；Ensure 补本周/本月；报告页分类可下钻收支管理；周日 WorkManager 提醒
+- 验收要点：无 API 仍有概览/洞察；记账后报告 STALE；打开报告可见本期；点击分类跳转过滤列表
+
+### 37. 冷启动过渡画面
 - 痛点：应用启动时白屏，体验割裂
 - 方案：core-splashscreen 1.0.1 实现冷启动过渡画面，居中图标 + 背景与图标边缘一致
 - 技术要点：Theme.Yunayu.Splash（#FED1D0 浅粉）；installSplashScreen 先于 super.onCreate；图标圆形遮罩风险留痕（冒烟确认点）
 - 已知限制：圆形遮罩在部分设备可能裁剪图标边缘，需真机冒烟确认
 - 验收要点：冷启动显示过渡画面；背景色与图标协调；无白屏闪烁
 
-### 37. 标签管理页滑动流畅优化
+### 38. 标签管理页滑动流畅优化
 - 痛点：标签管理页滑动卡顿，展开/收起时位置跳变
 - 方案：LazyColumn 性能优化 + 滚动位置保持
 - 技术要点：derivedStateOf 减少重组；Lambda 稳定性优化；rememberLazyListState 显式管理；toggle 前记录 firstVisibleItemIndex/offset + LaunchedEffect(expandedRootIds) scrollToItem 恢复；heightIn(max=420.dp) 稳定 ModalBottomSheet 尺寸
 - 验收要点：滑动流畅无卡顿；展开/收起后滚动位置保持；动画保留
 
-### 38. 评审修复留痕
+### 39. 评审修复留痕
 - ISO 周年键：周报告期键改用 ISO weekBasedYear（DateTimeFormatter.ofPattern("YYYY-'W'ww")），修复跨年周（2027-01-01→2026-W53、2029-12-31→2030-W01）
 - jan4 锚点：byKey 反推锚点从 1 月 1 日改为 1 月 4 日（ISO 周定义：1 月 4 日所在周为该年第一周）
 - 饼图其他桶：total - top5Sum 确保闭合 360°，避免浮点误差导致缺口

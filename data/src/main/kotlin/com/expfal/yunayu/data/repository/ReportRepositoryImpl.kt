@@ -3,6 +3,8 @@ package com.expfal.yunayu.data.repository
 import com.expfal.yunayu.data.local.dao.ReportDao
 import com.expfal.yunayu.data.local.entity.ReportEntity
 import com.expfal.yunayu.domain.report.model.CategoryShare
+import com.expfal.yunayu.domain.report.model.LocalInsight
+import com.expfal.yunayu.domain.report.model.LocalInsightKind
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
@@ -47,6 +49,7 @@ class ReportRepositoryImpl @Inject constructor(
         prevIncomeCents = prevIncomeCents,
         prevExpenseCents = prevExpenseCents,
         analysisText = analysisText,
+        localInsights = parseLocalInsights(localInsights),
         status = runCatching { ReportStatus.valueOf(status) }
             .getOrDefault(ReportStatus.FAILED),
         generatedAtMs = generatedAt,
@@ -68,6 +71,7 @@ class ReportRepositoryImpl @Inject constructor(
         engine = ENGINE,
         contentVersion = CONTENT_VERSION,
         generatedAt = generatedAtMs,
+        localInsights = serializeLocalInsights(localInsights),
     )
 
     companion object {
@@ -81,18 +85,20 @@ class ReportRepositoryImpl @Inject constructor(
         private const val JSON_PREFIX = "j1:"
 
         /**
-         * 序列化分类占比：`j1:` + JSONArray of `{n,c,p}`（未分类 `n` 为空串）。
+         * 序列化分类占比：`j1:` + JSONArray of `{n,c,p[,i]}`（未分类 `n` 为空串；可选 `i`=tagId）。
          * 名称可含任意字符，不再做冒号/分号转义。
          */
         internal fun serializeTopCategories(categories: List<CategoryShare>): String {
             val array = JSONArray()
             for (share in categories) {
-                array.put(
-                    JSONObject()
-                        .put("n", share.tagName.orEmpty())
-                        .put("c", share.cents)
-                        .put("p", share.percent),
-                )
+                val obj = JSONObject()
+                    .put("n", share.tagName.orEmpty())
+                    .put("c", share.cents)
+                    .put("p", share.percent)
+                if (share.tagId != null) {
+                    obj.put("i", share.tagId)
+                }
+                array.put(obj)
             }
             return JSON_PREFIX + array.toString()
         }
@@ -108,6 +114,45 @@ class ReportRepositoryImpl @Inject constructor(
             return raw.split(';').mapNotNull { entry -> parseLegacyEntry(entry) }
         }
 
+        /**
+         * 序列化本地洞察：`j1:` + JSONArray of `{k,t,d}`（kind / title / detail）。
+         */
+        internal fun serializeLocalInsights(insights: List<LocalInsight>): String {
+            val array = JSONArray()
+            for (insight in insights) {
+                array.put(
+                    JSONObject()
+                        .put("k", insight.kind.name)
+                        .put("t", insight.title)
+                        .put("d", insight.detail),
+                )
+            }
+            return JSON_PREFIX + array.toString()
+        }
+
+        /**
+         * 反序列化本地洞察：空串 / `[]` / 非法整体回退空列表；`j1:` 前缀可选。
+         */
+        internal fun parseLocalInsights(raw: String): List<LocalInsight> {
+            if (raw.isBlank() || raw == "[]") return emptyList()
+            val json = if (raw.startsWith(JSON_PREFIX)) raw.removePrefix(JSON_PREFIX) else raw
+            return runCatching {
+                val array = JSONArray(json)
+                buildList {
+                    for (i in 0 until array.length()) {
+                        val obj = array.optJSONObject(i) ?: continue
+                        val kindName = obj.optString("k", "")
+                        val kind = runCatching { LocalInsightKind.valueOf(kindName) }.getOrNull()
+                            ?: continue
+                        val title = obj.optString("t", "")
+                        val detail = obj.optString("d", "")
+                        if (title.isEmpty()) continue
+                        add(LocalInsight(kind = kind, title = title, detail = detail))
+                    }
+                }
+            }.getOrDefault(emptyList())
+        }
+
         private fun parseJsonTopCategories(json: String): List<CategoryShare> =
             runCatching {
                 val array = JSONArray(json)
@@ -119,11 +164,13 @@ class ReportRepositoryImpl @Inject constructor(
                         if (!obj.has("p")) continue
                         val percent = obj.optInt("p")
                         val name = obj.optString("n", "")
+                        val tagId = if (obj.has("i") && !obj.isNull("i")) obj.optLong("i") else null
                         add(
                             CategoryShare(
                                 tagName = name.takeIf { it.isNotEmpty() },
                                 cents = cents,
                                 percent = percent,
+                                tagId = tagId,
                             ),
                         )
                     }

@@ -8,11 +8,13 @@ import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
+import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.advanceTimeBy
@@ -20,6 +22,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 
 /** [GenerateReportUseCase] 的 JVM 单元测试（手写 fake 仓储 + 分析器）。 */
@@ -35,13 +38,13 @@ class GenerateReportUseCaseTest {
             currentTotals = currentTotals,
             prevTotals = prevTotals,
             categoryExpenses = listOf(
-                CategoryExpense("餐饮", 1_500L),
+                CategoryExpense("餐饮", 1_500L, tagId = 1L),
                 CategoryExpense(null, 500L),
             ),
         )
         val reportRepository = FakeReportRepository()
         val analyzer = FakeReportAnalyzer(available = true).apply { analyzeResult = "消费分析结论" }
-        val useCase = GenerateReportUseCase(transactionRepository, reportRepository, analyzer)
+        val useCase = newUseCase(transactionRepository, reportRepository, analyzer)
 
         useCase(MONTHLY, "2026-07", 100L, 200L, 0L, 100L)
 
@@ -54,31 +57,36 @@ class GenerateReportUseCaseTest {
         assertEquals(2_500L, report.prevExpenseCents)
         assertEquals(listOf("餐饮", null), report.topCategories.map { it.tagName })
         assertEquals(listOf(50, 16), report.topCategories.map { it.percent })
-        assertEquals(listOf(100L to 200L, 0L to 100L), transactionRepository.windowTotalsCalls)
+        assertTrue(report.localInsights.isNotEmpty())
+        assertTrue(transactionRepository.windowTotalsCalls.size >= 2)
     }
 
     @Test
-    fun `analyzer returning null persists failed report`() = runTest {
+    fun `analyzer returning null still persists success with insights`() = runTest {
         val reportRepository = FakeReportRepository()
         val analyzer = FakeReportAnalyzer(available = true).apply { analyzeResult = null }
-        val useCase = GenerateReportUseCase(FakeTransactionRepository(), reportRepository, analyzer)
+        val useCase = newUseCase(FakeTransactionRepository(), reportRepository, analyzer)
 
         useCase(MONTHLY, "2026-07", 0L, 100L, 0L, 100L)
 
         val report = reportRepository.upserted.single()
-        assertEquals(ReportStatus.FAILED, report.status)
+        assertEquals(ReportStatus.SUCCESS, report.status)
         assertNull(report.analysisText)
+        assertTrue(report.localInsights.isNotEmpty())
     }
 
     @Test
-    fun `unavailable analyzer persists failed report without calling analyze`() = runTest {
+    fun `unavailable analyzer persists success with insights without calling analyze`() = runTest {
         val reportRepository = FakeReportRepository()
         val analyzer = FakeReportAnalyzer(available = false)
-        val useCase = GenerateReportUseCase(FakeTransactionRepository(), reportRepository, analyzer)
+        val useCase = newUseCase(FakeTransactionRepository(), reportRepository, analyzer)
 
         useCase(MONTHLY, "2026-07", 0L, 100L, 0L, 100L)
 
-        assertEquals(ReportStatus.FAILED, reportRepository.upserted.single().status)
+        val report = reportRepository.upserted.single()
+        assertEquals(ReportStatus.SUCCESS, report.status)
+        assertNull(report.analysisText)
+        assertTrue(report.localInsights.isNotEmpty())
         assertEquals(0, analyzer.analyzeCalls.size)
     }
 
@@ -86,7 +94,7 @@ class GenerateReportUseCaseTest {
     fun `blank analysis yields success report with null text`() = runTest {
         val reportRepository = FakeReportRepository()
         val analyzer = FakeReportAnalyzer(available = true).apply { analyzeResult = "   " }
-        val useCase = GenerateReportUseCase(FakeTransactionRepository(), reportRepository, analyzer)
+        val useCase = newUseCase(FakeTransactionRepository(), reportRepository, analyzer)
 
         useCase(MONTHLY, "2026-07", 0L, 100L, 0L, 100L)
 
@@ -96,23 +104,26 @@ class GenerateReportUseCaseTest {
     }
 
     @Test
-    fun `timeout persists failed report`() = runTest {
+    fun `timeout still persists success with insights`() = runTest {
         val reportRepository = FakeReportRepository()
         val analyzer = FakeReportAnalyzer(available = true).apply { blockAnalysis = true }
-        val useCase = GenerateReportUseCase(FakeTransactionRepository(), reportRepository, analyzer)
+        val useCase = newUseCase(FakeTransactionRepository(), reportRepository, analyzer)
 
         val job = launch { useCase(MONTHLY, "2026-07", 0L, 100L, 0L, 100L) }
         advanceTimeBy(66_000)
         job.join()
 
-        assertEquals(ReportStatus.FAILED, reportRepository.upserted.single().status)
+        val report = reportRepository.upserted.single()
+        assertEquals(ReportStatus.SUCCESS, report.status)
+        assertNull(report.analysisText)
+        assertTrue(report.localInsights.isNotEmpty())
     }
 
     @Test
     fun `overlong analysis text is truncated to max chars`() = runTest {
         val reportRepository = FakeReportRepository()
         val analyzer = FakeReportAnalyzer(available = true).apply { analyzeResult = "析".repeat(3000) }
-        val useCase = GenerateReportUseCase(FakeTransactionRepository(), reportRepository, analyzer)
+        val useCase = newUseCase(FakeTransactionRepository(), reportRepository, analyzer)
 
         useCase(MONTHLY, "2026-07", 0L, 100L, 0L, 100L)
 
@@ -125,7 +136,7 @@ class GenerateReportUseCaseTest {
     fun `analysis text with markdown code fence is stripped`() = runTest {
         val reportRepository = FakeReportRepository()
         val analyzer = FakeReportAnalyzer(available = true).apply { analyzeResult = "```text\n结论\n```" }
-        val useCase = GenerateReportUseCase(FakeTransactionRepository(), reportRepository, analyzer)
+        val useCase = newUseCase(FakeTransactionRepository(), reportRepository, analyzer)
 
         useCase(MONTHLY, "2026-07", 0L, 100L, 0L, 100L)
 
@@ -138,7 +149,7 @@ class GenerateReportUseCaseTest {
         val analyzer = FakeReportAnalyzer(available = true).apply {
             analyzeResult = "a" + "😀".repeat(1000)
         }
-        val useCase = GenerateReportUseCase(FakeTransactionRepository(), reportRepository, analyzer)
+        val useCase = newUseCase(FakeTransactionRepository(), reportRepository, analyzer)
 
         useCase(MONTHLY, "2026-07", 0L, 100L, 0L, 100L)
 
@@ -147,8 +158,53 @@ class GenerateReportUseCaseTest {
         assertFalse(Character.isHighSurrogate(text.last()))
     }
 
+    @Test
+    fun `regenerate reuses existing report id`() = runTest {
+        val existing = Report(
+            id = 42L,
+            periodType = MONTHLY,
+            periodKey = "2026-07",
+            windowStartMs = 100L,
+            windowEndMs = 200L,
+            incomeCents = 1L,
+            expenseCents = 1L,
+            topCategories = emptyList(),
+            prevIncomeCents = 0L,
+            prevExpenseCents = 0L,
+            analysisText = "旧分析",
+            localInsights = emptyList(),
+            status = ReportStatus.STALE,
+            generatedAtMs = 1L,
+        )
+        val reportRepository = FakeReportRepository().apply { seed(existing) }
+        val analyzer = FakeReportAnalyzer(available = true).apply { analyzeResult = "新分析" }
+        val useCase = newUseCase(FakeTransactionRepository(), reportRepository, analyzer)
+
+        useCase(MONTHLY, "2026-07", 100L, 200L, 0L, 100L)
+
+        val report = reportRepository.upserted.single()
+        assertEquals(42L, report.id)
+        assertEquals(ReportStatus.SUCCESS, report.status)
+        assertEquals("新分析", report.analysisText)
+    }
+
+    private fun newUseCase(
+        tx: TransactionRepository,
+        reports: ReportRepository,
+        analyzer: ReportAnalyzer,
+    ) = GenerateReportUseCase(tx, reports, analyzer, FakeMonthlyBudgetRepository())
+
     private companion object {
         val MONTHLY = ReportPeriodType.MONTHLY
+    }
+
+    private class FakeMonthlyBudgetRepository(
+        private val budgetFlow: MutableStateFlow<Long> = MutableStateFlow(0L),
+    ) : MonthlyBudgetRepository {
+        override fun observeMonthlyBudgetCents(): Flow<Long> = budgetFlow
+        override suspend fun saveMonthlyBudgetCents(cents: Long) {
+            budgetFlow.value = cents
+        }
     }
 
     /** [TransactionRepository] 手写 fake：按调用顺序返回当期 / 上期收支。 */
@@ -201,7 +257,11 @@ class GenerateReportUseCaseTest {
             endExclusiveMs: Long,
         ): WindowTotals {
             windowTotalsCalls += startInclusiveMs to endExclusiveMs
-            return if (windowTotalsCalls.size == 1) currentTotals else prevTotals
+            return when (windowTotalsCalls.size) {
+                1 -> currentTotals
+                2 -> prevTotals
+                else -> WindowTotals(0L, 0L)
+            }
         }
 
         override suspend fun getExpenseByCategory(
@@ -211,18 +271,29 @@ class GenerateReportUseCaseTest {
             categoryCalls += startInclusiveMs to endExclusiveMs
             return categoryExpenses
         }
+
+        override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
+
+        override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
     }
 
-    /** [ReportRepository] 手写 fake：记录 upsert 入参。 */
+    /** [ReportRepository] 手写 fake：按 period 键存取，记录 upsert 入参。 */
     private class FakeReportRepository : ReportRepository {
         val upserted = mutableListOf<Report>()
+        private val byKey = mutableMapOf<Pair<ReportPeriodType, String>, Report>()
+
+        fun seed(report: Report) {
+            byKey[report.periodType to report.periodKey] = report
+        }
 
         override fun observeByType(type: ReportPeriodType): Flow<List<Report>> = flowOf(emptyList())
 
-        override suspend fun getByKey(periodType: ReportPeriodType, periodKey: String): Report? = null
+        override suspend fun getByKey(periodType: ReportPeriodType, periodKey: String): Report? =
+            byKey[periodType to periodKey]
 
         override suspend fun upsert(report: Report) {
             upserted += report
+            byKey[report.periodType to report.periodKey] = report
         }
 
         override suspend fun invalidateWhereWindowContains(epochMillis: Long) = Unit

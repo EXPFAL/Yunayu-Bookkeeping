@@ -196,12 +196,7 @@ private fun QuickAddScreenContent(
     }
 }
 
-/** 标准布局：固定头部 + 可滚动内容区 + 固定底部。
- *
- * 手动记模式：固定头部（类型切换/金额/标签/账户/备注），固定底部（数字键盘）。
- * 自动记模式：固定头部（模式切换/标签/账户），可滚动内容区（NL输入框），无固定底部。
- * 键盘弹出时 imePadding 收缩下方空白，仅覆盖空白、不遮挡输入框。
- */
+/** 标准布局：上部可滚动表单 + 下部固定数字键盘（手动记）；NL 模式表头固定、内容区滚动。 */
 @Composable
 private fun StandardLayout(
     uiState: QuickAddUiState,
@@ -209,20 +204,16 @@ private fun StandardLayout(
     onShowTagPicker: () -> Unit,
 ) {
     Column(Modifier.fillMaxSize()) {
-        // 固定头部：选项区域，不随滚动移动
-        Column(
-            modifier = Modifier
-                .padding(horizontal = 24.dp),
-        ) {
-            QuickAddFormContent(
-                uiState = uiState,
-                viewModel = viewModel,
-                onShowTagPicker = onShowTagPicker,
-            )
-        }
-
-        // 可滚动内容区：自动记模式的 NL 输入框
         if (uiState.nlMode) {
+            Column(
+                modifier = Modifier.padding(horizontal = 24.dp),
+            ) {
+                QuickAddFormContent(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    onShowTagPicker = onShowTagPicker,
+                )
+            }
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -243,13 +234,21 @@ private fun StandardLayout(
                     onParse = viewModel::onParseNl,
                     onSave = viewModel::onSaveNl,
                 )
-                // 下方空白：键盘弹出时 imePadding 收缩此空间，仅覆盖空白不遮挡输入框
                 Spacer(modifier = Modifier.weight(1f))
             }
-        }
-
-        // 固定底部：手动记模式的数字键盘+保存按钮
-        if (!uiState.nlMode) {
+        } else {
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 24.dp),
+            ) {
+                QuickAddFormContent(
+                    uiState = uiState,
+                    viewModel = viewModel,
+                    onShowTagPicker = onShowTagPicker,
+                )
+            }
             FixedInputSection(
                 uiState = uiState,
                 viewModel = viewModel,
@@ -519,14 +518,14 @@ private fun FixedInputSection(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .padding(bottom = 28.dp),
+            .padding(bottom = 8.dp),
     ) {
         // 手动记模式：数字键盘+保存按钮
         NumberPad(
             onDigit = viewModel::onDigit,
             onDelete = viewModel::onDelete,
         )
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(12.dp))
         Button(
             onClick = viewModel::onSave,
             enabled = !uiState.saving &&
@@ -631,7 +630,7 @@ private fun TagPickerSheet(
     }
 }
 
-/** 账户选择横向 chips：首位固定「未指定」+ 各账户，单选互斥。 */
+/** 账户选择横向 chips：各账户在前，「未指定」固定末位，单选互斥。 */
 @Composable
 private fun AccountChipsRow(
     accounts: List<Account>,
@@ -646,11 +645,6 @@ private fun AccountChipsRow(
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        FilterChip(
-            selected = selectedAccountId == null,
-            onClick = { onSelect(null) },
-            label = { Text("未指定") },
-        )
         accounts.forEach { account ->
             FilterChip(
                 selected = selectedAccountId == account.id,
@@ -658,6 +652,11 @@ private fun AccountChipsRow(
                 label = { Text(account.name) },
             )
         }
+        FilterChip(
+            selected = selectedAccountId == null,
+            onClick = { onSelect(null) },
+            label = { Text("未指定") },
+        )
     }
 }
 

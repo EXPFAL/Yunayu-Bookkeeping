@@ -4,4 +4,5 @@ package com.expfal.yunayu.domain.model
 data class CategoryExpense(
     val tagName: String?,
     val cents: Long,
+    val tagId: Long? = null,
 )

@@ -1156,9 +1156,9 @@ class QuickAddViewModelTest {
             accountRepository = accountRepo,
             tagRepository = tagRepo,
             getRecentCategoriesUseCase = GetRecentCategoriesUseCase(tagRepo),
-            addTransactionUseCase = AddTransactionUseCase(txRepo),
+            addTransactionUseCase = AddTransactionUseCase(txRepo, FakeReportRepository()),
             parseNaturalLanguageTransactionUseCase = ParseNaturalLanguageTransactionUseCase(nlParser, tagRepo),
-            addParsedTransactionUseCase = AddParsedTransactionUseCase(txRepo),
+            addParsedTransactionUseCase = AddParsedTransactionUseCase(txRepo, FakeReportRepository()),
             recordTransferUseCase = RecordTransferUseCase(transferRepo),
         )
         vm.refreshSuggestedTags()
@@ -1311,6 +1311,10 @@ class QuickAddViewModelTest {
         override suspend fun getById(id: Long): Transaction? = null
 
         override suspend fun updateTransaction(transaction: Transaction) = Unit
+    
+        override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
+
+        override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
     }
 
     /** [TransferRepository] 手写 fake：记录转账插入与删除调用。 */
@@ -1330,6 +1334,20 @@ class QuickAddViewModelTest {
         override suspend fun deleteById(id: Long) {
             deletedIds += id
         }
+    }
+
+    private class FakeReportRepository : com.expfal.yunayu.domain.repository.ReportRepository {
+        override fun observeByType(type: com.expfal.yunayu.domain.report.model.ReportPeriodType) =
+            kotlinx.coroutines.flow.flowOf(emptyList<com.expfal.yunayu.domain.report.model.Report>())
+
+        override suspend fun getByKey(
+            periodType: com.expfal.yunayu.domain.report.model.ReportPeriodType,
+            periodKey: String,
+        ): com.expfal.yunayu.domain.report.model.Report? = null
+
+        override suspend fun upsert(report: com.expfal.yunayu.domain.report.model.Report) = Unit
+
+        override suspend fun invalidateWhereWindowContains(epochMillis: Long) = Unit
     }
 
     /** [NLTransactionParser] 手写 fake：可控可用性与返回，用于 NL 解析路径。 */

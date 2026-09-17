@@ -48,8 +48,9 @@ interface TransactionDao {
         @ColumnInfo(name = "expense_cents") val expenseCents: Long,
     )
 
-    /** 时间窗分类支出聚合行：标签名（未分类为 null）与支出总额（分）。 */
+    /** 时间窗分类支出聚合行：标签 id（未分类为 null）、标签名与支出总额（分）。 */
     data class CategoryExpenseRow(
+        @ColumnInfo(name = "tag_id") val tagId: Long?,
         @ColumnInfo(name = "tag_name") val tagName: String?,
         @ColumnInfo(name = "cents") val cents: Long,
     )
@@ -128,7 +129,7 @@ interface TransactionDao {
 
     /** 单次查询时间窗内支出按标签分组（未分类归入 null），按金额降序。 */
     @Query(
-        "SELECT tag.name AS tag_name, SUM(t.amount_cents) AS cents " +
+        "SELECT t.tag_id AS tag_id, tag.name AS tag_name, SUM(t.amount_cents) AS cents " +
             "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
             "WHERE t.type = 'EXPENSE' " +
             "AND t.occurred_at >= :startInclusiveMs AND t.occurred_at < :endExclusiveMs " +
@@ -138,6 +139,22 @@ interface TransactionDao {
         startInclusiveMs: Long,
         endExclusiveMs: Long,
     ): List<CategoryExpenseRow>
+
+    /** 统计时间窗内未分类交易笔数（`tag_id IS NULL`）。 */
+    @Query(
+        "SELECT COUNT(*) FROM transactions " +
+            "WHERE tag_id IS NULL " +
+            "AND occurred_at >= :startInclusiveMs AND occurred_at < :endExclusiveMs",
+    )
+    suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int
+
+    /** 时间窗内最大单笔支出（分）；无支出行时返回 null。 */
+    @Query(
+        "SELECT MAX(amount_cents) FROM transactions " +
+            "WHERE type = 'EXPENSE' " +
+            "AND occurred_at >= :startInclusiveMs AND occurred_at < :endExclusiveMs",
+    )
+    suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long?
 
     /** 观察最近 [limit] 笔交易（含标签名、图标与账户名），按发生时间倒序。 */
     @Query(

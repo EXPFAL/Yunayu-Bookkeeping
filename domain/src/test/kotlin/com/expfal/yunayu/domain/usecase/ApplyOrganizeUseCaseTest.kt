@@ -384,6 +384,10 @@ class ApplyOrganizeUseCaseTest {
         override suspend fun getById(id: Long): Transaction? = null
 
         override suspend fun updateTransaction(transaction: Transaction) = Unit
+    
+        override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
+
+        override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
     }
 
     /** [TagRepository] 手写 fake：预置根 / 子标签，记录 addSubTag 入参。 */

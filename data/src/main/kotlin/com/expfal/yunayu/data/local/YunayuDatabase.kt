@@ -30,7 +30,7 @@ import com.expfal.yunayu.domain.model.AccountPresets
         TransferEntity::class,
         ReportEntity::class,
     ],
-    version = 6,
+    version = 7,
     exportSchema = true,
 )
 abstract class YunayuDatabase : RoomDatabase() {
@@ -347,6 +347,25 @@ abstract class YunayuDatabase : RoomDatabase() {
                     )
                     db.execSQL(
                         "CREATE INDEX IF NOT EXISTS `index_transfers_to_account_id` ON `transfers` (`to_account_id`)",
+                    )
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /**
+         * Schema v6 → v7 迁移：reports 新增 `local_insights` 列（本地规则洞察 JSON）。
+         *
+         * 存量行默认 `[]`（空洞察列表）；整体包事务，防止半迁移状态。
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    db.execSQL(
+                        "ALTER TABLE reports ADD COLUMN local_insights TEXT NOT NULL DEFAULT '[]'",
                     )
                     db.setTransactionSuccessful()
                 } finally {

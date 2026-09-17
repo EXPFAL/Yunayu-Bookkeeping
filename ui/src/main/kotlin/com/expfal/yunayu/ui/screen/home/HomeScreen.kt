@@ -70,6 +70,9 @@ private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS, REPORT, TRANSACT
 fun HomeScreen(modifier: Modifier = Modifier) {
     var showBudgetSetup by remember { mutableStateOf(false) }
     var fullScreen by remember { mutableStateOf(FullScreen.NONE) }
+    var drillStartMs by remember { mutableStateOf<Long?>(null) }
+    var drillEndMs by remember { mutableStateOf<Long?>(null) }
+    var drillTagIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val budgetViewModel: MonthlyBudgetViewModel = viewModel()
     val budgetState by budgetViewModel.uiState.collectAsStateWithLifecycle()
     val homeViewModel: HomeViewModel = viewModel()
@@ -82,8 +85,26 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     when (fullScreen) {
         FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = { fullScreen = FullScreen.NONE })
-        FullScreen.REPORT -> ReportScreen(onBack = { fullScreen = FullScreen.NONE })
-        FullScreen.TRANSACTIONS -> TransactionManageScreen(onBack = { fullScreen = FullScreen.NONE })
+        FullScreen.REPORT -> ReportScreen(
+            onBack = { fullScreen = FullScreen.NONE },
+            onDrillToTransactions = { start, end, tagId ->
+                drillStartMs = start
+                drillEndMs = end
+                drillTagIds = tagId?.let { setOf(it) } ?: emptySet()
+                fullScreen = FullScreen.TRANSACTIONS
+            },
+        )
+        FullScreen.TRANSACTIONS -> TransactionManageScreen(
+            onBack = {
+                fullScreen = FullScreen.NONE
+                drillStartMs = null
+                drillEndMs = null
+                drillTagIds = emptySet()
+            },
+            initialStartMs = drillStartMs,
+            initialEndMs = drillEndMs,
+            initialTagIds = drillTagIds,
+        )
         FullScreen.ACCOUNT_MANAGE -> AccountManageScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.QUICK_ADD -> QuickAddScreen(
             onBack = { fullScreen = FullScreen.NONE },

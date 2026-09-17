@@ -12,9 +12,10 @@ import java.time.LocalDate
 /**
  * 应用启动时的报告补生成编排用例。
  *
- * 打开应用即检查上月月度报告是否已生成，缺则补生成；每年 1 月首开再补上年年度报告。最多生成
- * 3 份且串行执行；周期键已存在（SUCCESS 或 FAILED）即跳过，FAILED 不自动重试（由未来报告页
- * 手动重试）。[Mutex] 防重入；[CancellationException] 重抛，其余异常吞掉不阻主流程。
+ * 打开应用即检查上月月度报告是否已生成，缺则补生成；每年 1 月首开再补上年年度报告；随后补生成本周
+ * 与本月报告（打开报告页即可看到当期汇总）。最多串行执行；周期键已存在（SUCCESS / FAILED / STALE）
+ * 即跳过，FAILED / STALE 不自动重试（由报告页手动重试）。[Mutex] 防重入；
+ * [CancellationException] 重抛，其余异常吞掉不阻主流程。
  */
 class EnsureReportsUseCase(
     private val reportRepository: ReportRepository,
@@ -23,11 +24,15 @@ class EnsureReportsUseCase(
 
     private val mutex = Mutex()
 
-    /** 按 [today] 补生成缺失的上周周报、上月月报与（1 月时）上年年报。 */
+    /**
+     * 按 [today] 补生成缺失的上周周报、上月月报、（1 月时）上年年报，以及本周 / 本月当期报告。
+     */
     suspend fun ensure(today: LocalDate) = mutex.withLock {
         ensureMonthly(today)
         ensureAnnual(today)
         ensureWeekly(today)
+        ensureCurrentWeek(today)
+        ensureCurrentMonth(today)
     }
 
     /** 上周周报缺失则生成（环比基期为上上周）。 */
@@ -53,6 +58,22 @@ class EnsureReportsUseCase(
         if (reportRepository.getByKey(ReportPeriodType.ANNUAL, window.periodKey) != null) return
         val prevWindow = TimeWindows.previousYearWindow(today.minusYears(1))
         generateSafely(ReportPeriodType.ANNUAL, window, prevWindow)
+    }
+
+    /** 本周周报缺失则生成（环比基期为上周）。 */
+    private suspend fun ensureCurrentWeek(today: LocalDate) {
+        val window = TimeWindows.weekWindow(today)
+        if (reportRepository.getByKey(ReportPeriodType.WEEKLY, window.periodKey) != null) return
+        val prevWindow = TimeWindows.previousWeekWindow(today)
+        generateSafely(ReportPeriodType.WEEKLY, window, prevWindow)
+    }
+
+    /** 本月月报缺失则生成（环比基期为上月）。 */
+    private suspend fun ensureCurrentMonth(today: LocalDate) {
+        val window = TimeWindows.monthWindow(today)
+        if (reportRepository.getByKey(ReportPeriodType.MONTHLY, window.periodKey) != null) return
+        val prevWindow = TimeWindows.previousMonthWindow(today)
+        generateSafely(ReportPeriodType.MONTHLY, window, prevWindow)
     }
 
     /** 生成失败（含 DB / 引擎异常）不阻主流程；仅取消异常重抛。 */

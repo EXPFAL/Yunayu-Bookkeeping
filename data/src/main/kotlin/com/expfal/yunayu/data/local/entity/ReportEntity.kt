@@ -35,4 +35,6 @@ data class ReportEntity(
     @ColumnInfo(name = "engine") val engine: String,
     @ColumnInfo(name = "content_version") val contentVersion: String,
     @ColumnInfo(name = "generated_at") val generatedAt: Long,
+    /** 本地规则洞察序列化（`j1:` + JSONArray）；空串表示无洞察。Schema v7。 */
+    @ColumnInfo(name = "local_insights", defaultValue = "") val localInsights: String = "",
 )

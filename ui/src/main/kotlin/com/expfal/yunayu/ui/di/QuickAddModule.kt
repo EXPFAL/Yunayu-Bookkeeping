@@ -1,5 +1,6 @@
 package com.expfal.yunayu.ui.di
 
+import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import com.expfal.yunayu.domain.repository.TransferRepository
@@ -30,12 +31,14 @@ object QuickAddModule {
     @Provides
     fun provideAddTransactionUseCase(
         transactionRepository: TransactionRepository,
-    ): AddTransactionUseCase = AddTransactionUseCase(transactionRepository)
+        reportRepository: ReportRepository,
+    ): AddTransactionUseCase = AddTransactionUseCase(transactionRepository, reportRepository)
 
     @Provides
     fun provideAddParsedTransactionUseCase(
         transactionRepository: TransactionRepository,
-    ): AddParsedTransactionUseCase = AddParsedTransactionUseCase(transactionRepository)
+        reportRepository: ReportRepository,
+    ): AddParsedTransactionUseCase = AddParsedTransactionUseCase(transactionRepository, reportRepository)
 
     @Provides
     fun provideRecordTransferUseCase(

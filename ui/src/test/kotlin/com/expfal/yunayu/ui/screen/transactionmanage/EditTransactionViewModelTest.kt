@@ -294,6 +294,10 @@ class EditTransactionViewModelTest {
         override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
+    
+        override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
+
+        override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
     }
 
     /** [AccountRepository] 手写 fake：一次性返回预置账户列表。 */

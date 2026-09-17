@@ -1,10 +1,10 @@
 package com.expfal.yunayu.domain.report.model
 
 /**
- * 一份月度 / 年度报告。金额一律以「分」为单位。
+ * 一份周期报告。金额一律以「分」为单位。
  *
- * `topCategories` 为当期支出按金额降序的前 N 个分类占比；`analysisText` 为引擎生成的分析文本，
- * 生成失败时为 `null` 且 [status] 为 [ReportStatus.FAILED]（结构化数据仍在，可手动重试）。
+ * [localInsights] 为本地规则洞察（必有，可为空列表）；[analysisText] 为可选 LLM 点评。
+ * 有结构化数据 + 本地洞察即可 [ReportStatus.SUCCESS]；无 API 不视为失败。
  */
 data class Report(
     val id: Long = 0L,
@@ -17,6 +17,7 @@ data class Report(
     val topCategories: List<CategoryShare>,
     val prevIncomeCents: Long,
     val prevExpenseCents: Long,
+    val localInsights: List<LocalInsight> = emptyList(),
     val analysisText: String?,
     val status: ReportStatus,
     val generatedAtMs: Long,

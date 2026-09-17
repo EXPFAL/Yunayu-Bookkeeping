@@ -6,6 +6,9 @@ import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
 import com.expfal.yunayu.domain.model.WindowTotals
+import com.expfal.yunayu.domain.report.model.Report
+import com.expfal.yunayu.domain.report.model.ReportPeriodType
+import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
@@ -19,7 +22,7 @@ class AddTransactionUseCaseTest {
     @Test
     fun `creates expense transaction`() = runTest {
         val repository = FakeTransactionRepository()
-        val useCase = AddTransactionUseCase(repository)
+        val useCase = AddTransactionUseCase(repository, FakeReportRepository())
 
         useCase(amountCents = 1234L, tagId = 7L, occurredAt = 500L)
 
@@ -29,7 +32,7 @@ class AddTransactionUseCaseTest {
     @Test
     fun `creates income transaction when type specified`() = runTest {
         val repository = FakeTransactionRepository()
-        val useCase = AddTransactionUseCase(repository)
+        val useCase = AddTransactionUseCase(repository, FakeReportRepository())
 
         useCase(amountCents = 500L, tagId = null, occurredAt = 1L, type = TransactionType.INCOME)
 
@@ -39,7 +42,7 @@ class AddTransactionUseCaseTest {
     @Test
     fun `passes amountCents tagId accountId and occurredAt through`() = runTest {
         val repository = FakeTransactionRepository()
-        val useCase = AddTransactionUseCase(repository)
+        val useCase = AddTransactionUseCase(repository, FakeReportRepository())
 
         useCase(amountCents = 2500L, tagId = 3L, accountId = 9L, occurredAt = 900L)
 
@@ -54,7 +57,7 @@ class AddTransactionUseCaseTest {
     @Test
     fun `accountId defaults to null when omitted`() = runTest {
         val repository = FakeTransactionRepository()
-        val useCase = AddTransactionUseCase(repository)
+        val useCase = AddTransactionUseCase(repository, FakeReportRepository())
 
         useCase(amountCents = 2500L, tagId = 3L, occurredAt = 900L)
 
@@ -64,12 +67,23 @@ class AddTransactionUseCaseTest {
     @Test
     fun `delegates to repository exactly once and returns its result`() = runTest {
         val repository = FakeTransactionRepository().apply { nextId = 42L }
-        val useCase = AddTransactionUseCase(repository)
+        val useCase = AddTransactionUseCase(repository, FakeReportRepository())
 
         val id = useCase(amountCents = 100L, tagId = null, occurredAt = 1L)
 
         assertEquals(42L, id)
         assertEquals(1, repository.added.size)
+    }
+
+    @Test
+    fun `invalidates reports covering occurredAt after successful add`() = runTest {
+        val repository = FakeTransactionRepository().apply { nextId = 1L }
+        val reports = FakeReportRepository()
+        val useCase = AddTransactionUseCase(repository, reports)
+
+        useCase(amountCents = 100L, tagId = null, occurredAt = 1_700L)
+
+        assertEquals(listOf(1_700L), reports.invalidateCalls)
     }
 
     /** [TransactionRepository] 手写 fake：记录 add 入参，返回预置主键。 */
@@ -128,5 +142,23 @@ class AddTransactionUseCaseTest {
         override suspend fun getById(id: Long): Transaction? = null
 
         override suspend fun updateTransaction(transaction: Transaction) = Unit
+    
+        override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
+
+        override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+}
+
+    private class FakeReportRepository : ReportRepository {
+        val invalidateCalls = mutableListOf<Long>()
+
+        override fun observeByType(type: ReportPeriodType): Flow<List<Report>> = flowOf(emptyList())
+
+        override suspend fun getByKey(periodType: ReportPeriodType, periodKey: String): Report? = null
+
+        override suspend fun upsert(report: Report) = Unit
+
+        override suspend fun invalidateWhereWindowContains(epochMillis: Long) {
+            invalidateCalls += epochMillis
+        }
     }
 }

@@ -5,16 +5,17 @@ import com.expfal.yunayu.domain.report.model.CategoryShare
 /** 构建报告分析提示词的纯函数对象（无副作用，便于单测）。 */
 object ReportPromptBuilder {
 
-    /** 固定系统指令：要求 ≤500 字中文分析、消费洞察 + 建议、纯文本输出、禁 JSON/代码块。 */
+    /** 系统指令：在已有本地结论基础上补充建议，勿重复罗列数字。 */
     fun buildSystemInstruction(): String = SYSTEM_INSTRUCTION
 
-    /** 由收支汇总、分类占比与环比数据组装待分析的数据文本。 */
+    /** 由收支汇总、分类占比、环比与本地洞察标题组装待分析的数据文本。 */
     fun buildDataText(
         incomeCents: Long,
         expenseCents: Long,
         topCategories: List<CategoryShare>,
         prevIncomeCents: Long,
         prevExpenseCents: Long,
+        localInsightTitles: List<String> = emptyList(),
     ): String = buildString {
         append("本期收入：").append(formatCents(incomeCents)).append(" 元\n")
         append("本期支出：").append(formatCents(expenseCents)).append(" 元\n")
@@ -30,7 +31,13 @@ object ReportPromptBuilder {
         append("环比：收入 上期 ").append(formatCents(prevIncomeCents)).append(" 元 → 本期 ")
             .append(formatCents(incomeCents)).append(" 元；支出 上期 ")
             .append(formatCents(prevExpenseCents)).append(" 元 → 本期 ")
-            .append(formatCents(expenseCents)).append(" 元")
+            .append(formatCents(expenseCents)).append(" 元\n")
+        if (localInsightTitles.isNotEmpty()) {
+            append("本地已得出的结论标题（请勿逐条复述数字，请补充建议与解读）：\n")
+            localInsightTitles.forEach { title ->
+                append("- ").append(title).append('\n')
+            }
+        }
     }
 
     /** 将「分」格式化为「元」字符串，保留两位小数（如 `123456` → `"1234.56"`）。 */
@@ -41,9 +48,9 @@ object ReportPromptBuilder {
     }
 
     private const val SYSTEM_INSTRUCTION =
-        "你是记账应用的消费分析助手。根据用户提供的记账统计数据进行消费分析。\n" +
+        "你是记账应用的消费分析助手。用户侧已有本地规则洞察，请在此基础上补充建议。\n" +
             "要求：\n" +
-            "1. 输出不超过 500 字的中文分析。\n" +
-            "2. 包含消费洞察（主要消费方向、结构变化）与实用建议。\n" +
+            "1. 输出不超过 500 字的中文点评。\n" +
+            "2. 不要重复罗列收入/支出/百分比等数字，侧重解读与可执行建议。\n" +
             "3. 纯文本输出，不要 JSON、不要代码块、不要 Markdown 标记。"
 }
