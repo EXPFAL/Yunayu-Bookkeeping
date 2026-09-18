@@ -239,7 +239,82 @@ class MigrationTest {
 
         db.query("SELECT local_insights FROM reports WHERE period_key = '2026-07'").use { cursor ->
             assertTrue(cursor.moveToFirst())
-            assertEquals("[]", cursor.getString(0))
+            assertEquals("", cursor.getString(0))
+        }
+    }
+
+    @Test
+    fun migrate7To10_createsSubscriptionsTable() {
+        helper.createDatabase(TEST_DB, 7).apply {
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(
+                TEST_DB,
+                10,
+                true,
+                YunayuDatabase.MIGRATION_7_10,
+            )
+
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'subscriptions'")
+            .use { cursor -> assertTrue(cursor.moveToFirst()) }
+    }
+
+    @Test
+    fun migrate9To10_addsLocalInsightsPreservingSubscriptions() {
+        // 模拟手机 v9：基于 schema v6（无 local_insights）+ subscriptions，user_version=9
+        helper.createDatabase(TEST_DB, 6).apply {
+            execSQL(
+                "INSERT INTO reports (" +
+                    "report_type, period_key, window_start_ms, window_end_ms, " +
+                    "income_cents, expense_cents, top_categories, prev_income_cents, prev_expense_cents, " +
+                    "analysis_text, status, engine, content_version, generated_at) " +
+                    "VALUES ('MONTHLY', '2026-08', 0, 1, 0, 0, '', 0, 0, NULL, 'SUCCESS', 'api', '1', 1)",
+            )
+            execSQL(
+                "CREATE TABLE IF NOT EXISTS `subscriptions` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`name` TEXT NOT NULL, " +
+                    "`amount_cents` INTEGER NOT NULL, " +
+                    "`billing_cycle` TEXT NOT NULL, " +
+                    "`note` TEXT, " +
+                    "`is_active` INTEGER NOT NULL DEFAULT 1, " +
+                    "`created_at` INTEGER NOT NULL, " +
+                    "`updated_at` INTEGER NOT NULL, " +
+                    "`billing_start_at` INTEGER NOT NULL DEFAULT 0, " +
+                    "`last_posted_at` INTEGER, " +
+                    "`last_posted_due_at` INTEGER)",
+            )
+            execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_subscriptions_is_active` " +
+                    "ON `subscriptions` (`is_active`)",
+            )
+            execSQL(
+                "INSERT INTO subscriptions " +
+                    "(name, amount_cents, billing_cycle, note, is_active, created_at, updated_at, " +
+                    "billing_start_at, last_posted_at, last_posted_due_at) " +
+                    "VALUES ('Cursor Pro', 13900, 'MONTHLY', NULL, 1, 1, 1, 0, NULL, NULL)",
+            )
+            version = 9
+            close()
+        }
+
+        val db: SupportSQLiteDatabase =
+            helper.runMigrationsAndValidate(
+                TEST_DB,
+                10,
+                true,
+                YunayuDatabase.MIGRATION_9_10,
+            )
+
+        db.query("SELECT local_insights FROM reports WHERE period_key = '2026-08'").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("", cursor.getString(0))
+        }
+        db.query("SELECT name FROM subscriptions WHERE id = 1").use { cursor ->
+            assertTrue(cursor.moveToFirst())
+            assertEquals("Cursor Pro", cursor.getString(0))
         }
     }
 

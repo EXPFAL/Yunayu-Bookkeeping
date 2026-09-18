@@ -6,18 +6,21 @@ import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.ReportDao
+import com.expfal.yunayu.data.local.dao.SubscriptionDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.dao.TransferDao
 import com.expfal.yunayu.data.local.entity.AccountEntity
 import com.expfal.yunayu.data.local.entity.ReportEntity
+import com.expfal.yunayu.data.local.entity.SubscriptionEntity
 import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import com.expfal.yunayu.data.local.entity.TransferEntity
 import com.expfal.yunayu.domain.model.AccountPresets
 
 /**
- * Yunayu 数据库。包含 accounts / tags / transactions / transfers / reports 五张表（月度预算经 DataStore 存储，不落库）。
+ * Yunayu 数据库。包含 accounts / tags / transactions / transfers / reports / subscriptions
+ * （月度预算经 DataStore 存储，不落库）。
  *
  * Schema 变更策略：version 递增 + 显式 Migration，禁止 fallbackToDestructiveMigration
  * （用户数据不可丢失）；schema 经 exportSchema 输出至 data/schemas。
@@ -29,8 +32,9 @@ import com.expfal.yunayu.domain.model.AccountPresets
         TransactionEntity::class,
         TransferEntity::class,
         ReportEntity::class,
+        SubscriptionEntity::class,
     ],
-    version = 7,
+    version = 10,
     exportSchema = true,
 )
 abstract class YunayuDatabase : RoomDatabase() {
@@ -44,6 +48,8 @@ abstract class YunayuDatabase : RoomDatabase() {
     abstract fun transferDao(): TransferDao
 
     abstract fun reportDao(): ReportDao
+
+    abstract fun subscriptionDao(): SubscriptionDao
 
     companion object {
         const val NAME = "yunayu.db"
@@ -365,12 +371,104 @@ abstract class YunayuDatabase : RoomDatabase() {
                 db.beginTransaction()
                 try {
                     db.execSQL(
-                        "ALTER TABLE reports ADD COLUMN local_insights TEXT NOT NULL DEFAULT '[]'",
+                        "ALTER TABLE reports ADD COLUMN local_insights TEXT NOT NULL DEFAULT ''",
                     )
                     db.setTransactionSuccessful()
                 } finally {
                     db.endTransaction()
                 }
+            }
+        }
+
+        /**
+         * Schema v7 → v10：本仓库 v7 已有 `local_insights`，补建手机端历史已有的 subscriptions 表。
+         *
+         * 跳过未导出的 v8/v9（旧机分支），直接对齐到 v10 实体集。
+         */
+        val MIGRATION_7_10 = object : Migration(7, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    ensureSubscriptionsTable(db)
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /**
+         * Schema v8 → v10：旧机中间版本兜底（可能已有 subscriptions，可能缺 local_insights）。
+         */
+        val MIGRATION_8_10 = object : Migration(8, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    ensureSubscriptionsTable(db)
+                    ensureReportsLocalInsightsColumn(db)
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /**
+         * Schema v9 → v10：手机存量库（user_version=9）已有 subscriptions，缺 `reports.local_insights`。
+         *
+         * 正是「覆盖安装后打开无记录」的修复路径：Room 此前试图 9→7 降级失败，库打不开。
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.beginTransaction()
+                try {
+                    ensureSubscriptionsTable(db)
+                    ensureReportsLocalInsightsColumn(db)
+                    db.setTransactionSuccessful()
+                } finally {
+                    db.endTransaction()
+                }
+            }
+        }
+
+        /** 与手机 v9 一致的 subscriptions DDL（IF NOT EXISTS，可重复执行）。 */
+        private fun ensureSubscriptionsTable(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                "CREATE TABLE IF NOT EXISTS `subscriptions` (" +
+                    "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                    "`name` TEXT NOT NULL, " +
+                    "`amount_cents` INTEGER NOT NULL, " +
+                    "`billing_cycle` TEXT NOT NULL, " +
+                    "`note` TEXT, " +
+                    "`is_active` INTEGER NOT NULL DEFAULT 1, " +
+                    "`created_at` INTEGER NOT NULL, " +
+                    "`updated_at` INTEGER NOT NULL, " +
+                    "`billing_start_at` INTEGER NOT NULL DEFAULT 0, " +
+                    "`last_posted_at` INTEGER, " +
+                    "`last_posted_due_at` INTEGER)",
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_subscriptions_is_active` " +
+                    "ON `subscriptions` (`is_active`)",
+            )
+        }
+
+        /** 仅当 reports 尚无 local_insights 时 ALTER（v7 已有则跳过）。 */
+        private fun ensureReportsLocalInsightsColumn(db: SupportSQLiteDatabase) {
+            var hasColumn = false
+            db.query("PRAGMA table_info(`reports`)").use { cursor ->
+                val nameIndex = cursor.getColumnIndex("name")
+                while (cursor.moveToNext()) {
+                    if (nameIndex >= 0 && cursor.getString(nameIndex) == "local_insights") {
+                        hasColumn = true
+                        break
+                    }
+                }
+            }
+            if (!hasColumn) {
+                db.execSQL(
+                    "ALTER TABLE `reports` ADD COLUMN `local_insights` TEXT NOT NULL DEFAULT ''",
+                )
             }
         }
 

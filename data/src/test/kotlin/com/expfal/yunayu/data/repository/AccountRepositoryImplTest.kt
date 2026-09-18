@@ -11,6 +11,7 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
 import com.expfal.yunayu.data.local.YunayuDatabase
 import com.expfal.yunayu.data.local.dao.AccountDao
 import com.expfal.yunayu.data.local.dao.ReportDao
+import com.expfal.yunayu.data.local.dao.SubscriptionDao
 import com.expfal.yunayu.data.local.dao.TagDao
 import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.dao.TransferDao
@@ -389,6 +390,7 @@ class AccountRepositoryImplTest {
         override fun transactionDao(): TransactionDao = throw UnsupportedOperationException()
         override fun transferDao(): TransferDao = throw UnsupportedOperationException()
         override fun reportDao(): ReportDao = throw UnsupportedOperationException()
+        override fun subscriptionDao(): SubscriptionDao = throw UnsupportedOperationException()
         override fun createOpenHelper(config: DatabaseConfiguration): SupportSQLiteOpenHelper =
             throw UnsupportedOperationException()
         override fun createInvalidationTracker(): InvalidationTracker = throw UnsupportedOperationException()
