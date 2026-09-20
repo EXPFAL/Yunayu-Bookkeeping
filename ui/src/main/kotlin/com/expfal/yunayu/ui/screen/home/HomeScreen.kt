@@ -51,6 +51,7 @@ import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetUiState
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetViewModel
 import com.expfal.yunayu.ui.screen.quickadd.QuickAddScreen
 import com.expfal.yunayu.ui.screen.report.ReportScreen
+import com.expfal.yunayu.ui.screen.subscription.SubscriptionManageScreen
 import com.expfal.yunayu.ui.screen.tagmanage.TagManageScreen
 import com.expfal.yunayu.ui.screen.transactionmanage.TransactionManageScreen
 import kotlinx.coroutines.launch
@@ -61,8 +62,17 @@ private val FAB_GAP_DP = 8.dp
 /** 最近记录区域上移距离，使标题与 FAB 中心对齐（FAB 中心 = FAB_GAP_DP + FAB_SIZE_DP / 2）。 */
 private val RECORD_SHIFT_DP = 28.dp
 
-/** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告 / 收支管理 / 账户管理 / 记一笔，七态互斥。 */
-private enum class FullScreen { NONE, TAG_MANAGE, API_SETTINGS, REPORT, TRANSACTIONS, ACCOUNT_MANAGE, QUICK_ADD }
+/** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告 / 收支管理 / 账户管理 / 订阅开支 / 记一笔，八态互斥。 */
+private enum class FullScreen {
+    NONE,
+    TAG_MANAGE,
+    API_SETTINGS,
+    REPORT,
+    TRANSACTIONS,
+    ACCOUNT_MANAGE,
+    SUBSCRIPTION_MANAGE,
+    QUICK_ADD,
+}
 
 /** 首页：月度预算看板卡片置顶，下方最近记录列表，悬浮「快速记账」按钮进入全屏记账页面。 */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -106,6 +116,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             initialTagIds = drillTagIds,
         )
         FullScreen.ACCOUNT_MANAGE -> AccountManageScreen(onBack = { fullScreen = FullScreen.NONE })
+        FullScreen.SUBSCRIPTION_MANAGE -> SubscriptionManageScreen(onBack = { fullScreen = FullScreen.NONE })
         FullScreen.QUICK_ADD -> QuickAddScreen(
             onBack = { fullScreen = FullScreen.NONE },
             onSaved = {
@@ -324,7 +335,7 @@ private fun FirstRunHint(modifier: Modifier = Modifier) {
     }
 }
 
-/** 侧栏抽屉内容：显示「功能菜单」标题和 5 个 NavigationDrawerItem。 */
+/** 侧栏抽屉内容：显示「功能菜单」标题和 6 个 NavigationDrawerItem。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeDrawerContent(
@@ -361,6 +372,12 @@ private fun HomeDrawerContent(
             label = { Text("报告") },
             selected = currentFullScreen == FullScreen.REPORT,
             onClick = { onItemClick(FullScreen.REPORT) },
+        )
+        NavigationDrawerItem(
+            icon = { Icon(Icons.Default.Menu, contentDescription = null) },
+            label = { Text("订阅开支") },
+            selected = currentFullScreen == FullScreen.SUBSCRIPTION_MANAGE,
+            onClick = { onItemClick(FullScreen.SUBSCRIPTION_MANAGE) },
         )
         NavigationDrawerItem(
             icon = { Icon(Icons.Default.Menu, contentDescription = null) },
