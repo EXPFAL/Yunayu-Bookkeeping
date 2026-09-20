@@ -76,7 +76,14 @@ class GenerateReportUseCase(
             windowDayCount = windowDays,
         )
 
-        val analysisText = analyzeOptional(topCategories, totals, prevTotals, localInsights)
+        val analysisText = analyzeOptional(
+            topCategories = topCategories,
+            totals = totals,
+            prevTotals = prevTotals,
+            localInsights = localInsights,
+            windowStartMs = windowStartMs,
+            windowEndMs = windowEndMs,
+        )
         val existingId = reportRepository.getByKey(periodType, periodKey)?.id ?: 0L
         reportRepository.upsert(
             Report(
@@ -104,7 +111,7 @@ class GenerateReportUseCase(
         expenseCents: Long,
     ): List<CategoryShare> =
         transactionRepository.getExpenseByCategory(windowStartMs, windowEndMs)
-            .take(TOP_CATEGORIES_LIMIT)
+            .take(ReportCategoryLimits.TOP_CATEGORIES)
             .map {
                 CategoryShare(
                     tagName = it.tagName,
@@ -120,8 +127,11 @@ class GenerateReportUseCase(
         totals: WindowTotals,
         prevTotals: WindowTotals,
         localInsights: List<com.expfal.yunayu.domain.report.model.LocalInsight>,
+        windowStartMs: Long,
+        windowEndMs: Long,
     ): String? {
         if (!analyzer.isAvailable()) return null
+        val noteSamples = loadNoteSamplesForTop(topCategories, windowStartMs, windowEndMs)
         val instruction = ReportPromptBuilder.buildSystemInstruction()
         val dataText = ReportPromptBuilder.buildDataText(
             incomeCents = totals.incomeCents,
@@ -130,6 +140,7 @@ class GenerateReportUseCase(
             prevIncomeCents = prevTotals.incomeCents,
             prevExpenseCents = prevTotals.expenseCents,
             localInsightTitles = localInsights.map { it.title },
+            categoryNoteSamples = noteSamples,
         )
         val raw = try {
             withTimeoutOrNull(ANALYZE_TIMEOUT_MILLIS) { analyzer.analyze(instruction, dataText) }
@@ -139,6 +150,26 @@ class GenerateReportUseCase(
             null
         } ?: return null
         return sanitizeAnalysis(raw)
+    }
+
+    /** 仅对 Top 分类（含未分类若在榜）拉取代表备注。 */
+    private suspend fun loadNoteSamplesForTop(
+        topCategories: List<CategoryShare>,
+        windowStartMs: Long,
+        windowEndMs: Long,
+    ): List<com.expfal.yunayu.domain.model.CategoryNoteSample> {
+        if (topCategories.isEmpty()) return emptyList()
+        val allowedTagIds = topCategories.map { it.tagId }.toSet()
+        return runCatching {
+            transactionRepository.getExpenseNotesByCategory(
+                startInclusiveMs = windowStartMs,
+                endExclusiveMs = windowEndMs,
+                limitPerCategory = NOTES_PER_CATEGORY,
+            )
+        }.onFailure { e ->
+            if (e is CancellationException) throw e
+        }.getOrDefault(emptyList())
+            .filter { it.tagId in allowedTagIds && it.notes.isNotEmpty() }
     }
 
     private fun sanitizeAnalysis(raw: String): String? {
@@ -156,8 +187,8 @@ class GenerateReportUseCase(
         if (totalCents <= 0L) 0 else ((partCents * 100) / totalCents).toInt()
 
     private companion object {
-        const val TOP_CATEGORIES_LIMIT = 5
         const val ANALYZE_TIMEOUT_MILLIS = 65_000L
         const val MAX_ANALYSIS_CHARS = 2000
+        const val NOTES_PER_CATEGORY = 3
     }
 }

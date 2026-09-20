@@ -25,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -347,8 +348,15 @@ private fun QuickAddFormContent(
             onNoteChange = viewModel::onTransferNoteChange,
         )
     } else {
+        if (!uiState.nlMode) {
+            ManualNoteField(
+                note = uiState.manualNote,
+                onNoteChange = viewModel::onManualNoteChange,
+            )
+        }
         ExpenseFormBranch(
             nlMode = uiState.nlMode,
+            noteSuggestedTags = uiState.noteSuggestedTags,
             suggestedTags = uiState.suggestedTags,
             selectedTagId = uiState.selectedTagId,
             rootNameById = uiState.rootNameById,
@@ -360,12 +368,6 @@ private fun QuickAddFormContent(
             onLoadAllTags = viewModel::loadAllTags,
             onSelectAccount = viewModel::onSelectAccount,
             onShowTagPicker = onShowTagPicker,
-        )
-    }
-    if (!uiState.nlMode && !uiState.transferMode) {
-        ManualNoteField(
-            note = uiState.manualNote,
-            onNoteChange = viewModel::onManualNoteChange,
         )
     }
 }
@@ -452,10 +454,11 @@ private fun TransferFormBranch(
     Spacer(modifier = Modifier.height(8.dp))
 }
 
-/** 收支表单分支块：最近分类 chips + 账户选择。 */
+/** 收支表单分支块：备注建议分类 + 最近分类 chips + 账户选择。 */
 @Composable
 private fun ExpenseFormBranch(
     nlMode: Boolean,
+    noteSuggestedTags: List<Tag>,
     suggestedTags: List<Tag>,
     selectedTagId: Long?,
     rootNameById: Map<Long, String>,
@@ -468,6 +471,28 @@ private fun ExpenseFormBranch(
     onSelectAccount: (Long?) -> Unit,
     onShowTagPicker: () -> Unit,
 ) {
+    if (!nlMode && noteSuggestedTags.isNotEmpty() && selectedTagId == null) {
+        Text(
+            text = "根据备注建议",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            noteSuggestedTags.forEach { tag ->
+                SuggestionChip(
+                    onClick = { onSelectTag(tag.id) },
+                    label = { Text(tagDisplayName(tag, rootNameById)) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()

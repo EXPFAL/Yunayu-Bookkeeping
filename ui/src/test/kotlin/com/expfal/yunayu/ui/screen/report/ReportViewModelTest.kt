@@ -7,6 +7,7 @@ import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.report.GenerateReportUseCase
+import com.expfal.yunayu.domain.report.LoadCategoryExpenseDetailUseCase
 import com.expfal.yunayu.domain.report.ReportAnalyzer
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
@@ -228,6 +229,7 @@ class ReportViewModelTest {
             reportRepository = repo,
             generateReportUseCase = generate,
             ensureReportsUseCase = ensure,
+            loadCategoryExpenseDetailUseCase = LoadCategoryExpenseDetailUseCase(txRepo),
             monthlyBudgetRepository = budgetRepo,
         )
     }

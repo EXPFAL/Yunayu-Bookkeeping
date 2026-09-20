@@ -1,5 +1,6 @@
 package com.expfal.yunayu.domain.report
 
+import com.expfal.yunayu.domain.model.CategoryNoteSample
 import com.expfal.yunayu.domain.report.model.CategoryShare
 
 /** 构建报告分析提示词的纯函数对象（无副作用，便于单测）。 */
@@ -16,6 +17,7 @@ object ReportPromptBuilder {
         prevIncomeCents: Long,
         prevExpenseCents: Long,
         localInsightTitles: List<String> = emptyList(),
+        categoryNoteSamples: List<CategoryNoteSample> = emptyList(),
     ): String = buildString {
         append("本期收入：").append(formatCents(incomeCents)).append(" 元\n")
         append("本期支出：").append(formatCents(expenseCents)).append(" 元\n")
@@ -38,6 +40,7 @@ object ReportPromptBuilder {
                 append("- ").append(title).append('\n')
             }
         }
+        appendCategoryNotes(categoryNoteSamples)
     }
 
     /** 将「分」格式化为「元」字符串，保留两位小数（如 `123456` → `"1234.56"`）。 */
@@ -47,10 +50,39 @@ object ReportPromptBuilder {
         return "$sign${abs / 100}.${(abs % 100).toString().padStart(2, '0')}"
     }
 
+    /**
+     * 追加「各类代表备注」小节；合计备注字符超过 [MAX_NOTE_CHARS] 时截断后续备注。
+     */
+    private fun StringBuilder.appendCategoryNotes(samples: List<CategoryNoteSample>) {
+        val usable = samples.filter { it.notes.isNotEmpty() }
+        if (usable.isEmpty()) return
+        append("各类代表备注（可结合理解消费场景，勿复述数字）：\n")
+        var remaining = MAX_NOTE_CHARS
+        for (sample in usable) {
+            if (remaining <= 0) break
+            val label = sample.tagName ?: "未分类"
+            val accepted = mutableListOf<String>()
+            for (note in sample.notes) {
+                if (remaining <= 0) break
+                val take = note.take(remaining)
+                if (take.isEmpty()) break
+                accepted += take
+                remaining -= take.length
+            }
+            if (accepted.isEmpty()) continue
+            append("- ").append(label).append("：")
+                .append(accepted.joinToString("；"))
+                .append('\n')
+        }
+    }
+
+    private const val MAX_NOTE_CHARS = 800
+
     private const val SYSTEM_INSTRUCTION =
         "你是记账应用的消费分析助手。用户侧已有本地规则洞察，请在此基础上补充建议。\n" +
             "要求：\n" +
             "1. 输出不超过 500 字的中文点评。\n" +
             "2. 不要重复罗列收入/支出/百分比等数字，侧重解读与可执行建议。\n" +
-            "3. 纯文本输出，不要 JSON、不要代码块、不要 Markdown 标记。"
+            "3. 若提供了分类代表备注，可结合备注理解消费场景，仍勿复述数字。\n" +
+            "4. 纯文本输出，不要 JSON、不要代码块、不要 Markdown 标记。"
 }

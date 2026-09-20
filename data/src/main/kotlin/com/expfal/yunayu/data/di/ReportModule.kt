@@ -3,6 +3,7 @@ package com.expfal.yunayu.data.di
 import com.expfal.yunayu.data.report.ApiReportAnalyzer
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.report.GenerateReportUseCase
+import com.expfal.yunayu.domain.report.LoadCategoryExpenseDetailUseCase
 import com.expfal.yunayu.domain.report.ReportAnalyzer
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.NlApiConfigRepository
@@ -47,4 +48,10 @@ object ReportModule {
         reportRepository: ReportRepository,
         generateReportUseCase: GenerateReportUseCase,
     ): EnsureReportsUseCase = EnsureReportsUseCase(reportRepository, generateReportUseCase)
+
+    @Provides
+    @Singleton
+    fun provideLoadCategoryExpenseDetailUseCase(
+        transactionRepository: TransactionRepository,
+    ): LoadCategoryExpenseDetailUseCase = LoadCategoryExpenseDetailUseCase(transactionRepository)
 }

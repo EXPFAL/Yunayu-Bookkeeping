@@ -2,6 +2,7 @@ package com.expfal.yunayu.domain.report
 
 import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
+import com.expfal.yunayu.domain.model.CategoryNoteSample
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.WindowTotals
@@ -120,6 +121,26 @@ class GenerateReportUseCaseTest {
     }
 
     @Test
+    fun `analyze data text includes sampled category notes`() = runTest {
+        val transactionRepository = FakeTransactionRepository(
+            currentTotals = currentTotals,
+            prevTotals = prevTotals,
+            categoryExpenses = listOf(CategoryExpense("餐饮", 1_500L, tagId = 1L)),
+            noteSamples = listOf(
+                CategoryNoteSample(1L, "餐饮", listOf("食堂套餐")),
+            ),
+        )
+        val analyzer = FakeReportAnalyzer(available = true).apply { analyzeResult = "结合备注的点评" }
+        val useCase = newUseCase(transactionRepository, FakeReportRepository(), analyzer)
+
+        useCase(MONTHLY, "2026-07", 100L, 200L, 0L, 100L)
+
+        val dataText = analyzer.analyzeCalls.single().second
+        assertTrue(dataText.contains("各类代表备注"))
+        assertTrue(dataText.contains("食堂套餐"))
+    }
+
+    @Test
     fun `overlong analysis text is truncated to max chars`() = runTest {
         val reportRepository = FakeReportRepository()
         val analyzer = FakeReportAnalyzer(available = true).apply { analyzeResult = "析".repeat(3000) }
@@ -212,6 +233,7 @@ class GenerateReportUseCaseTest {
         private val currentTotals: WindowTotals = WindowTotals(0L, 0L),
         private val prevTotals: WindowTotals = WindowTotals(0L, 0L),
         private val categoryExpenses: List<CategoryExpense> = emptyList(),
+        private val noteSamples: List<CategoryNoteSample> = emptyList(),
     ) : TransactionRepository {
 
         val windowTotalsCalls = mutableListOf<Pair<Long, Long>>()
@@ -275,6 +297,12 @@ class GenerateReportUseCaseTest {
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+
+        override suspend fun getExpenseNotesByCategory(
+            startInclusiveMs: Long,
+            endExclusiveMs: Long,
+            limitPerCategory: Int,
+        ): List<CategoryNoteSample> = noteSamples
     }
 
     /** [ReportRepository] 手写 fake：按 period 键存取，记录 upsert 入参。 */
