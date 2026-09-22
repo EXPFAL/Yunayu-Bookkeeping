@@ -72,9 +72,7 @@ class ReportViewModel @Inject constructor(
             it.copy(periodType = type, selectedPeriodKey = null, categoryDetail = null)
         }
         observeReports(type)
-        if (type == ReportPeriodType.WEEKLY || type == ReportPeriodType.MONTHLY) {
-            ensureCurrentPeriods()
-        }
+        ensureCurrentPeriods()
     }
 
     /** 点选 / 取消点选某份报告，用于展开或收起详情。 */

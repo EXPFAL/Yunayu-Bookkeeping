@@ -1,9 +1,10 @@
 package com.expfal.yunayu.ui.screen.home
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -49,8 +50,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -73,10 +75,13 @@ private val FAB_GAP_DP = 8.dp
 /** 标准 FAB 边长。放在固定高度槽里，避免等卡片测高后才出现。 */
 private val FAB_SIZE_DP = 56.dp
 
-/** 首页与全屏子页切换时长。 */
-private const val PAGE_TRANSITION_MILLIS = 280
+/** 全屏盖页滑动时长。 */
+private const val PAGE_TRANSITION_MILLIS = 300
 
-/** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告 / 收支管理 / 账户管理 / 订阅开支 / 记一笔，八态互斥。 */
+/** 被盖住的页面只顺着盖页方向挪这么多，保持不透明。 */
+private const val PAGE_NUDGE_PERCENT = 8
+
+/** 全屏页。栈底是首页，栈顶是当前页。 */
 private enum class FullScreen {
     NONE,
     TAG_MANAGE,
@@ -93,7 +98,7 @@ private enum class FullScreen {
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
     var showBudgetSetup by remember { mutableStateOf(false) }
-    var fullScreen by remember { mutableStateOf(FullScreen.NONE) }
+    var pageStack by remember { mutableStateOf(listOf(FullScreen.NONE)) }
     var pendingFullScreen by remember { mutableStateOf<FullScreen?>(null) }
     var drillStartMs by remember { mutableStateOf<Long?>(null) }
     var drillEndMs by remember { mutableStateOf<Long?>(null) }
@@ -110,74 +115,100 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(drawerState) {
         snapshotFlow { drawerState.currentValue to pendingFullScreen }
             .collect { (value, pending) ->
-                if (value == DrawerValue.Closed && pending != null) {
+                if (value == DrawerValue.Closed && pending != null && pageStack.last() == FullScreen.NONE) {
                     pendingFullScreen = null
-                    fullScreen = pending
+                    pageStack = pageStack + pending
                 }
             }
     }
 
-    AnimatedContent(
-        targetState = fullScreen,
-        modifier = modifier.fillMaxSize(),
-        transitionSpec = {
-            val motion = tween<Float>(PAGE_TRANSITION_MILLIS)
-            val slide = tween<IntOffset>(PAGE_TRANSITION_MILLIS)
-            if (targetState == FullScreen.NONE) {
-                (slideInHorizontally(slide) { -it / 4 } + fadeIn(motion))
-                    .togetherWith(slideOutHorizontally(slide) { it } + fadeOut(motion))
-            } else {
-                (slideInHorizontally(slide) { it } + fadeIn(motion))
-                    .togetherWith(slideOutHorizontally(slide) { -it / 4 } + fadeOut(motion))
+    val popPage: () -> Unit = {
+        if (pageStack.size > 1) {
+            val leaving = pageStack.last()
+            pageStack = pageStack.dropLast(1)
+            if (leaving == FullScreen.TRANSACTIONS) {
+                drillStartMs = null
+                drillEndMs = null
+                drillTagIds = emptySet()
             }
+        }
+    }
+
+    AnimatedContent(
+        targetState = pageStack,
+        modifier = modifier
+            .fillMaxSize()
+            .clipToBounds(),
+        transitionSpec = {
+            val pushing = targetState.size > initialState.size
+            val fromRight = if (pushing) {
+                targetState.last() == FullScreen.QUICK_ADD
+            } else {
+                initialState.last() == FullScreen.QUICK_ADD
+            }
+            val slide = tween<IntOffset>(PAGE_TRANSITION_MILLIS, easing = FastOutSlowInEasing)
+            val nudge: (Int) -> Int = { fullWidth -> fullWidth * PAGE_NUDGE_PERCENT / 100 }
+            val enter = if (pushing) {
+                slideInHorizontally(slide) { fullWidth -> if (fromRight) fullWidth else -fullWidth }
+            } else {
+                slideInHorizontally(slide) { fullWidth -> if (fromRight) -nudge(fullWidth) else nudge(fullWidth) }
+            }
+            val exit = if (pushing) {
+                slideOutHorizontally(slide) { fullWidth -> if (fromRight) -nudge(fullWidth) else nudge(fullWidth) }
+            } else {
+                slideOutHorizontally(slide) { fullWidth -> if (fromRight) fullWidth else -fullWidth }
+            }
+            (enter togetherWith exit).apply {
+                targetContentZIndex = if (pushing) 1f else 0f
+            }.using(SizeTransform(clip = true) { _, _ -> snap() })
         },
         label = "fullScreen",
-    ) { screen ->
-        when (screen) {
-            FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
-            FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = { fullScreen = FullScreen.NONE })
-            FullScreen.REPORT -> ReportScreen(
-                onBack = { fullScreen = FullScreen.NONE },
-                onDrillToTransactions = { start, end, tagId ->
-                    drillStartMs = start
-                    drillEndMs = end
-                    drillTagIds = tagId?.let { setOf(it) } ?: emptySet()
-                    fullScreen = FullScreen.TRANSACTIONS
-                },
-            )
-            FullScreen.TRANSACTIONS -> TransactionManageScreen(
-                onBack = {
-                    fullScreen = FullScreen.NONE
-                    drillStartMs = null
-                    drillEndMs = null
-                    drillTagIds = emptySet()
-                },
-                initialStartMs = drillStartMs,
-                initialEndMs = drillEndMs,
-                initialTagIds = drillTagIds,
-            )
-            FullScreen.ACCOUNT_MANAGE -> AccountManageScreen(onBack = { fullScreen = FullScreen.NONE })
-            FullScreen.SUBSCRIPTION_MANAGE -> SubscriptionManageScreen(onBack = { fullScreen = FullScreen.NONE })
-            FullScreen.QUICK_ADD -> QuickAddScreen(
-                onBack = { fullScreen = FullScreen.NONE },
-                onSaved = {
-                    fullScreen = FullScreen.NONE
-                    homeViewModel.notifySaved()
-                },
-            )
-            FullScreen.NONE -> HomeMainContent(
-                modifier = Modifier.fillMaxSize(),
-                homeViewModel = homeViewModel,
-                homeState = homeState,
-                budgetState = budgetState,
-                drawerState = drawerState,
-                scope = scope,
-                listState = listState,
-                currentFullScreen = screen,
-                onDrawerDestination = { pendingFullScreen = it },
-                onShowQuickAdd = { fullScreen = FullScreen.QUICK_ADD },
-                onShowBudgetSetup = { showBudgetSetup = true },
-            )
+    ) { stack ->
+        val screen = stack.last()
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = MaterialTheme.colorScheme.background,
+        ) {
+            when (screen) {
+                FullScreen.TAG_MANAGE -> TagManageScreen(onBack = popPage)
+                FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = popPage)
+                FullScreen.REPORT -> ReportScreen(
+                    onBack = popPage,
+                    onDrillToTransactions = { start, end, tagId ->
+                        drillStartMs = start
+                        drillEndMs = end
+                        drillTagIds = tagId?.let { setOf(it) } ?: emptySet()
+                        pageStack = pageStack + FullScreen.TRANSACTIONS
+                    },
+                )
+                FullScreen.TRANSACTIONS -> TransactionManageScreen(
+                    onBack = popPage,
+                    initialStartMs = drillStartMs,
+                    initialEndMs = drillEndMs,
+                    initialTagIds = drillTagIds,
+                )
+                FullScreen.ACCOUNT_MANAGE -> AccountManageScreen(onBack = popPage)
+                FullScreen.SUBSCRIPTION_MANAGE -> SubscriptionManageScreen(onBack = popPage)
+                FullScreen.QUICK_ADD -> QuickAddScreen(
+                    onBack = popPage,
+                    onSaved = {
+                        popPage()
+                        homeViewModel.notifySaved()
+                    },
+                )
+                FullScreen.NONE -> HomeMainContent(
+                    modifier = Modifier.fillMaxSize(),
+                    homeViewModel = homeViewModel,
+                    homeState = homeState,
+                    budgetState = budgetState,
+                    drawerState = drawerState,
+                    scope = scope,
+                    listState = listState,
+                    onDrawerDestination = { pendingFullScreen = it },
+                    onShowQuickAdd = { pageStack = pageStack + FullScreen.QUICK_ADD },
+                    onShowBudgetSetup = { showBudgetSetup = true },
+                )
+            }
         }
     }
 
@@ -200,7 +231,6 @@ private fun HomeMainContent(
     drawerState: androidx.compose.material3.DrawerState,
     scope: kotlinx.coroutines.CoroutineScope,
     listState: LazyListState,
-    currentFullScreen: FullScreen,
     onDrawerDestination: (FullScreen) -> Unit,
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
@@ -217,7 +247,6 @@ private fun HomeMainContent(
         drawerState = drawerState,
         drawerContent = {
             HomeDrawerContent(
-                currentFullScreen = currentFullScreen,
                 onItemClick = { selectedFullScreen ->
                     onDrawerDestination(selectedFullScreen)
                     scope.launch { drawerState.close() }
@@ -359,7 +388,6 @@ private fun FirstRunHint(modifier: Modifier = Modifier) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeDrawerContent(
-    currentFullScreen: FullScreen,
     onItemClick: (FullScreen) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -369,24 +397,12 @@ private fun HomeDrawerContent(
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(16.dp),
         )
-        DrawerEntry(Icons.AutoMirrored.Filled.List, "收支管理", currentFullScreen == FullScreen.TRANSACTIONS) {
-            onItemClick(FullScreen.TRANSACTIONS)
-        }
-        DrawerEntry(Icons.Filled.DateRange, "分析报告", currentFullScreen == FullScreen.REPORT) {
-            onItemClick(FullScreen.REPORT)
-        }
-        DrawerEntry(Icons.Filled.Notifications, "订阅开支", currentFullScreen == FullScreen.SUBSCRIPTION_MANAGE) {
-            onItemClick(FullScreen.SUBSCRIPTION_MANAGE)
-        }
-        DrawerEntry(Icons.Filled.AccountCircle, "账户管理", currentFullScreen == FullScreen.ACCOUNT_MANAGE) {
-            onItemClick(FullScreen.ACCOUNT_MANAGE)
-        }
-        DrawerEntry(Icons.Filled.Star, "标签管理", currentFullScreen == FullScreen.TAG_MANAGE) {
-            onItemClick(FullScreen.TAG_MANAGE)
-        }
-        DrawerEntry(Icons.Filled.Settings, "API 设置", currentFullScreen == FullScreen.API_SETTINGS) {
-            onItemClick(FullScreen.API_SETTINGS)
-        }
+        DrawerEntry(Icons.AutoMirrored.Filled.List, "收支管理") { onItemClick(FullScreen.TRANSACTIONS) }
+        DrawerEntry(Icons.Filled.DateRange, "分析报告") { onItemClick(FullScreen.REPORT) }
+        DrawerEntry(Icons.Filled.Notifications, "订阅开支") { onItemClick(FullScreen.SUBSCRIPTION_MANAGE) }
+        DrawerEntry(Icons.Filled.AccountCircle, "账户管理") { onItemClick(FullScreen.ACCOUNT_MANAGE) }
+        DrawerEntry(Icons.Filled.Star, "标签管理") { onItemClick(FullScreen.TAG_MANAGE) }
+        DrawerEntry(Icons.Filled.Settings, "API 设置") { onItemClick(FullScreen.API_SETTINGS) }
     }
 }
 
@@ -394,13 +410,12 @@ private fun HomeDrawerContent(
 private fun DrawerEntry(
     icon: ImageVector,
     label: String,
-    selected: Boolean,
     onClick: () -> Unit,
 ) {
     NavigationDrawerItem(
         icon = { Icon(icon, contentDescription = null) },
         label = { Text(label) },
-        selected = selected,
+        selected = false,
         onClick = onClick,
     )
 }
