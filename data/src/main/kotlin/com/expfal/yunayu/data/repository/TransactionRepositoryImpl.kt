@@ -6,7 +6,6 @@ import com.expfal.yunayu.data.local.dao.TransactionDao
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
-import com.expfal.yunayu.domain.model.CategoryNoteSample
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.TransactionType
@@ -81,32 +80,6 @@ class TransactionRepositoryImpl @Inject constructor(
         startInclusiveMs: Long,
         endExclusiveMs: Long,
     ): Long? = transactionDao.getMaxExpenseCentsBetween(startInclusiveMs, endExclusiveMs)
-
-    override suspend fun getExpenseNotesByCategory(
-        startInclusiveMs: Long,
-        endExclusiveMs: Long,
-        limitPerCategory: Int,
-    ): List<CategoryNoteSample> {
-        if (limitPerCategory <= 0) return emptyList()
-        val rows = transactionDao.getExpenseNotesOrderedByAmount(startInclusiveMs, endExclusiveMs)
-        val notesByTag = linkedMapOf<Long?, MutableList<String>>()
-        val nameByTag = mutableMapOf<Long?, String?>()
-        for (row in rows) {
-            val list = notesByTag.getOrPut(row.tagId) { mutableListOf() }
-            if (list.size >= limitPerCategory) continue
-            val trimmed = row.note.trim()
-            if (trimmed.isEmpty()) continue
-            list += trimmed
-            nameByTag.putIfAbsent(row.tagId, row.tagName)
-        }
-        return notesByTag.map { (tagId, notes) ->
-            CategoryNoteSample(
-                tagId = tagId,
-                tagName = nameByTag[tagId],
-                notes = notes,
-            )
-        }
-    }
 
     override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
         transactionDao.observeRecent(limit)

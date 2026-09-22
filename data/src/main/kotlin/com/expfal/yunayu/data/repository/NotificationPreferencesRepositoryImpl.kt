@@ -28,21 +28,10 @@ class NotificationPreferencesRepositoryImpl @Inject constructor(
         }
     }
 
-    override suspend fun wasWeeklyReportNotified(periodKey: String): Boolean =
-        readSet(KEY_WEEKLY_REPORTS).contains(periodKey)
-
-    override suspend fun markWeeklyReportNotified(periodKey: String) {
-        context.notificationPrefsDataStore.edit { prefs ->
-            val updated = prefs[KEY_WEEKLY_REPORTS].orEmpty() + periodKey
-            prefs[KEY_WEEKLY_REPORTS] = updated
-        }
-    }
-
     private suspend fun readSet(key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>): Set<String> =
         context.notificationPrefsDataStore.data.map { it[key].orEmpty() }.first()
 
     private companion object {
         val KEY_SUBSCRIPTION_REMINDERS = stringSetPreferencesKey("subscription_reminder_keys")
-        val KEY_WEEKLY_REPORTS = stringSetPreferencesKey("weekly_report_period_keys")
     }
 }

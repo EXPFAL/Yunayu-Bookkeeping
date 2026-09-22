@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Card
 import androidx.compose.material3.LinearProgressIndicator
@@ -42,7 +43,7 @@ fun BudgetCard(
 
 @Composable
 private fun LoadingCard(modifier: Modifier = Modifier) {
-    Card(modifier.fillMaxWidth()) {
+    Card(modifier.fillMaxWidth().heightIn(min = ACTIVE_CARD_MIN_HEIGHT)) {
         Text(
             "加载中…",
             Modifier.padding(24.dp),
@@ -50,6 +51,9 @@ private fun LoadingCard(modifier: Modifier = Modifier) {
         )
     }
 }
+
+/** 与激活态（不含超支提示）同高，避免加载结束时把下方内容顶下去。 */
+private val ACTIVE_CARD_MIN_HEIGHT = 168.dp
 
 @Composable
 private fun EmptyCard(onSetup: () -> Unit, modifier: Modifier = Modifier) {

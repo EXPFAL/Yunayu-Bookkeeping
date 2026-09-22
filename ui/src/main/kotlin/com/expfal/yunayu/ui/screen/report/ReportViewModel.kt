@@ -3,14 +3,11 @@ package com.expfal.yunayu.ui.screen.report
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.report.GenerateReportUseCase
-import com.expfal.yunayu.domain.report.LoadCategoryExpenseDetailUseCase
 import com.expfal.yunayu.domain.report.model.CategoryShare
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
-import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.util.TimeWindow
 import com.expfal.yunayu.domain.util.TimeWindows
@@ -18,30 +15,22 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import javax.inject.Inject
 
-/** 分类详情面板 UI 快照。 */
+/** 选中分类的轻量快照：金额、占比，以及下钻用标签。 */
 data class CategoryDetailUiState(
-    val loading: Boolean = false,
     val label: String = "",
     val expenseCents: Long = 0L,
     val percent: Int = 0,
-    val txCount: Int = 0,
-    val dailyAvgCents: Long = 0L,
-    val recent: List<RecentTransaction> = emptyList(),
-    val remainingShares: List<CategoryShare> = emptyList(),
     val isOtherBucket: Boolean = false,
     /** 下钻用 tagId；「其他」桶为 null 表示时间窗内不按标签过滤。 */
     val drillTagId: Long? = null,
-    val errorMessage: String? = null,
 )
 
 /** 分析报告屏 UI 状态快照。 */
@@ -56,29 +45,20 @@ data class ReportUiState(
 
 /**
  * 「分析报告」ViewModel：按周期类型观察报告列表、切换类型、失败报告重试，
- * 并加载饼图选中分类的详情（笔数 / 日均 / 最近流水）。
+ * 并记录饼图选中分类（金额 / 占比 / 下钻标签）。
  */
 @HiltViewModel
 class ReportViewModel @Inject constructor(
     private val reportRepository: ReportRepository,
     private val generateReportUseCase: GenerateReportUseCase,
     private val ensureReportsUseCase: EnsureReportsUseCase,
-    private val loadCategoryExpenseDetailUseCase: LoadCategoryExpenseDetailUseCase,
-    monthlyBudgetRepository: MonthlyBudgetRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReportUiState())
     val uiState: StateFlow<ReportUiState> = _uiState.asStateFlow()
 
-    /** 月度预算额度（分）；未设置时为 0。 */
-    val budgetCents: StateFlow<Long> = monthlyBudgetRepository.observeMonthlyBudgetCents()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), 0L)
-
     /** 当前报告列表观察协程，切换类型时取消重订阅。 */
     private var observeJob: Job? = null
-
-    /** 分类详情加载协程。 */
-    private var categoryDetailJob: Job? = null
 
     init {
         observeReports(ReportPeriodType.MONTHLY)
@@ -87,8 +67,7 @@ class ReportViewModel @Inject constructor(
 
     /** 切换周期类型并重新订阅对应列表；重复选择同一类型不做任何事。 */
     fun selectPeriodType(type: ReportPeriodType) {
-        if (_uiState.value.periodType == type) return
-        categoryDetailJob?.cancel()
+        if (_uiState.value.periodType == type || type == ReportPeriodType.ANNUAL) return
         _uiState.update {
             it.copy(periodType = type, selectedPeriodKey = null, categoryDetail = null)
         }
@@ -100,7 +79,6 @@ class ReportViewModel @Inject constructor(
 
     /** 点选 / 取消点选某份报告，用于展开或收起详情。 */
     fun selectReport(periodKey: String) {
-        categoryDetailJob?.cancel()
         _uiState.update {
             val nextKey = if (it.selectedPeriodKey == periodKey) null else periodKey
             it.copy(selectedPeriodKey = nextKey, categoryDetail = null)
@@ -109,28 +87,18 @@ class ReportViewModel @Inject constructor(
 
     /** 清空分类选中详情。 */
     fun clearCategoryDetail() {
-        categoryDetailJob?.cancel()
         _uiState.update { it.copy(categoryDetail = null) }
     }
 
     /**
-     * 加载选中分类详情。[isOtherBucket] 表示饼图合成的「其他」残差桶。
+     * 记录选中分类。[isOtherBucket] 表示饼图合成的「其他」残差桶。
+     * 金额与占比直接取自报告快照，不再另查流水。
      */
-    fun selectCategoryShare(
-        report: Report,
-        share: CategoryShare,
-        isOtherBucket: Boolean,
-        windowDayCount: Int,
-    ) {
-        categoryDetailJob?.cancel()
-        val label = when {
-            isOtherBucket -> "其他"
-            else -> share.tagName ?: "未分类"
-        }
+    fun selectCategoryShare(share: CategoryShare, isOtherBucket: Boolean) {
+        val label = if (isOtherBucket) "其他" else share.tagName ?: "未分类"
         _uiState.update {
             it.copy(
                 categoryDetail = CategoryDetailUiState(
-                    loading = true,
                     label = label,
                     expenseCents = share.cents,
                     percent = share.percent,
@@ -138,46 +106,6 @@ class ReportViewModel @Inject constructor(
                     drillTagId = if (isOtherBucket) null else share.tagId,
                 ),
             )
-        }
-        categoryDetailJob = viewModelScope.launch {
-            try {
-                val detail = loadCategoryExpenseDetailUseCase(
-                    windowStartMs = report.windowStartMs,
-                    windowEndMs = report.windowEndMs,
-                    totalExpenseCents = report.expenseCents,
-                    windowDayCount = windowDayCount,
-                    share = share,
-                    isOtherBucket = isOtherBucket,
-                )
-                _uiState.update { state ->
-                    state.copy(
-                        categoryDetail = CategoryDetailUiState(
-                            loading = false,
-                            label = label,
-                            expenseCents = detail.expenseCents,
-                            percent = detail.percent,
-                            txCount = detail.txCount,
-                            dailyAvgCents = detail.dailyAvgCents,
-                            recent = detail.recent,
-                            remainingShares = detail.remainingShares,
-                            isOtherBucket = isOtherBucket,
-                            drillTagId = if (isOtherBucket) null else share.tagId,
-                        ),
-                    )
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to load category detail for $label", e)
-                _uiState.update { state ->
-                    state.copy(
-                        categoryDetail = state.categoryDetail?.copy(
-                            loading = false,
-                            errorMessage = "加载分类详情失败",
-                        ),
-                    )
-                }
-            }
         }
     }
 

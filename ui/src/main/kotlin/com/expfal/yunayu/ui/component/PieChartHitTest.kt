@@ -38,6 +38,29 @@ fun hitTestPieShareIndex(
     return null
 }
 
+/**
+ * 环形图在边长为 [canvasMin] 的正方形里的尺寸。
+ * 选中描边加粗后，外缘仍停在画布内侧。
+ */
+data class DonutLayout(
+    val arcDiameter: Float,
+    val strokeWidth: Float,
+    val selectedStrokeWidth: Float,
+)
+
+fun donutLayout(canvasMin: Float): DonutLayout {
+    val selectedStroke = canvasMin * 0.18f
+    val stroke = selectedStroke / SELECTED_STROKE_SCALE
+    val diameter = (canvasMin - selectedStroke - 2f).coerceAtLeast(0f)
+    return DonutLayout(diameter, stroke, selectedStroke)
+}
+
+/** 触点是否落在环形内孔（用于点中心取消选中）。 */
+fun isInsideDonutHole(dx: Float, dy: Float, innerRadius: Float): Boolean {
+    if (innerRadius <= 0f) return false
+    return sqrt(dx * dx + dy * dy) < innerRadius
+}
+
 /** 触点是否落在环形（甜甜圈）描线带内。 */
 fun isOnDonutRing(
     dx: Float,
@@ -50,3 +73,5 @@ fun isOnDonutRing(
     val mid = outerRadius - half
     return dist in (mid - half)..(mid + half)
 }
+
+private const val SELECTED_STROKE_SCALE = 1.15f

@@ -2,7 +2,6 @@ package com.expfal.yunayu.domain.repository
 
 import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
-import com.expfal.yunayu.domain.model.CategoryNoteSample
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.WindowTotals
@@ -67,17 +66,6 @@ interface TransactionRepository {
 
     /** 时间窗内最大单笔支出金额（分）；无支出返回 null。 */
     suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long?
-
-    /**
-     * 时间窗内按分类抽样支出备注（非空），各类最多 [limitPerCategory] 条，按金额降序。
-     *
-     * 默认实现返回空列表，便于测试 fake 无需全量覆写；生产实现必须提供真实抽样。
-     */
-    suspend fun getExpenseNotesByCategory(
-        startInclusiveMs: Long,
-        endExclusiveMs: Long,
-        limitPerCategory: Int,
-    ): List<CategoryNoteSample> = emptyList()
 
     /**
      * 观察按时间窗、账户、标签集合与备注关键字过滤的交易摘要（含标签名），按发生时间倒序。

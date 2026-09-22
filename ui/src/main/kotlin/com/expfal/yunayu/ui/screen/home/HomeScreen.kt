@@ -1,5 +1,12 @@
 package com.expfal.yunayu.ui.screen.home
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -10,8 +17,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -29,20 +42,18 @@ import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.layout.layout
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.expfal.yunayu.domain.model.AccountBalance
 import com.expfal.yunayu.ui.screen.accountmanage.AccountManageScreen
 import com.expfal.yunayu.ui.screen.apiconfig.ApiSettingsScreen
 import com.expfal.yunayu.ui.screen.budget.BudgetCard
@@ -59,8 +70,11 @@ import kotlinx.coroutines.launch
 /** FAB 上边框与持有资金卡片下边框的间距。 */
 private val FAB_GAP_DP = 8.dp
 
-/** 最近记录区域上移距离，使标题与 FAB 中心对齐（FAB 中心 = FAB_GAP_DP + FAB_SIZE_DP / 2）。 */
-private val RECORD_SHIFT_DP = 28.dp
+/** 标准 FAB 边长。放在固定高度槽里，避免等卡片测高后才出现。 */
+private val FAB_SIZE_DP = 56.dp
+
+/** 首页与全屏子页切换时长。 */
+private const val PAGE_TRANSITION_MILLIS = 280
 
 /** 首页全屏子界面：无 / 标签管理 / API 管理 / 分析报告 / 收支管理 / 账户管理 / 订阅开支 / 记一笔，八态互斥。 */
 private enum class FullScreen {
@@ -80,6 +94,7 @@ private enum class FullScreen {
 fun HomeScreen(modifier: Modifier = Modifier) {
     var showBudgetSetup by remember { mutableStateOf(false) }
     var fullScreen by remember { mutableStateOf(FullScreen.NONE) }
+    var pendingFullScreen by remember { mutableStateOf<FullScreen?>(null) }
     var drillStartMs by remember { mutableStateOf<Long?>(null) }
     var drillEndMs by remember { mutableStateOf<Long?>(null) }
     var drillTagIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
@@ -92,51 +107,78 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     // F3 修复：提升 listState 到 when 分发之外，跨全屏切换存活，避免返回时滚动位置丢失
     val listState = rememberLazyListState()
 
-    when (fullScreen) {
-        FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
-        FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = { fullScreen = FullScreen.NONE })
-        FullScreen.REPORT -> ReportScreen(
-            onBack = { fullScreen = FullScreen.NONE },
-            onDrillToTransactions = { start, end, tagId ->
-                drillStartMs = start
-                drillEndMs = end
-                drillTagIds = tagId?.let { setOf(it) } ?: emptySet()
-                fullScreen = FullScreen.TRANSACTIONS
-            },
-        )
-        FullScreen.TRANSACTIONS -> TransactionManageScreen(
-            onBack = {
-                fullScreen = FullScreen.NONE
-                drillStartMs = null
-                drillEndMs = null
-                drillTagIds = emptySet()
-            },
-            initialStartMs = drillStartMs,
-            initialEndMs = drillEndMs,
-            initialTagIds = drillTagIds,
-        )
-        FullScreen.ACCOUNT_MANAGE -> AccountManageScreen(onBack = { fullScreen = FullScreen.NONE })
-        FullScreen.SUBSCRIPTION_MANAGE -> SubscriptionManageScreen(onBack = { fullScreen = FullScreen.NONE })
-        FullScreen.QUICK_ADD -> QuickAddScreen(
-            onBack = { fullScreen = FullScreen.NONE },
-            onSaved = {
-                fullScreen = FullScreen.NONE
-                homeViewModel.notifySaved()
-            },
-        )
-        FullScreen.NONE -> HomeMainContent(
-            modifier = modifier,
-            homeViewModel = homeViewModel,
-            homeState = homeState,
-            budgetState = budgetState,
-            drawerState = drawerState,
-            scope = scope,
-            listState = listState,
-            currentFullScreen = fullScreen,
-            onFullScreenChange = { fullScreen = it },
-            onShowQuickAdd = { fullScreen = FullScreen.QUICK_ADD },
-            onShowBudgetSetup = { showBudgetSetup = true },
-        )
+    LaunchedEffect(drawerState) {
+        snapshotFlow { drawerState.currentValue to pendingFullScreen }
+            .collect { (value, pending) ->
+                if (value == DrawerValue.Closed && pending != null) {
+                    pendingFullScreen = null
+                    fullScreen = pending
+                }
+            }
+    }
+
+    AnimatedContent(
+        targetState = fullScreen,
+        modifier = modifier.fillMaxSize(),
+        transitionSpec = {
+            val motion = tween<Float>(PAGE_TRANSITION_MILLIS)
+            val slide = tween<IntOffset>(PAGE_TRANSITION_MILLIS)
+            if (targetState == FullScreen.NONE) {
+                (slideInHorizontally(slide) { -it / 4 } + fadeIn(motion))
+                    .togetherWith(slideOutHorizontally(slide) { it } + fadeOut(motion))
+            } else {
+                (slideInHorizontally(slide) { it } + fadeIn(motion))
+                    .togetherWith(slideOutHorizontally(slide) { -it / 4 } + fadeOut(motion))
+            }
+        },
+        label = "fullScreen",
+    ) { screen ->
+        when (screen) {
+            FullScreen.TAG_MANAGE -> TagManageScreen(onBack = { fullScreen = FullScreen.NONE })
+            FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = { fullScreen = FullScreen.NONE })
+            FullScreen.REPORT -> ReportScreen(
+                onBack = { fullScreen = FullScreen.NONE },
+                onDrillToTransactions = { start, end, tagId ->
+                    drillStartMs = start
+                    drillEndMs = end
+                    drillTagIds = tagId?.let { setOf(it) } ?: emptySet()
+                    fullScreen = FullScreen.TRANSACTIONS
+                },
+            )
+            FullScreen.TRANSACTIONS -> TransactionManageScreen(
+                onBack = {
+                    fullScreen = FullScreen.NONE
+                    drillStartMs = null
+                    drillEndMs = null
+                    drillTagIds = emptySet()
+                },
+                initialStartMs = drillStartMs,
+                initialEndMs = drillEndMs,
+                initialTagIds = drillTagIds,
+            )
+            FullScreen.ACCOUNT_MANAGE -> AccountManageScreen(onBack = { fullScreen = FullScreen.NONE })
+            FullScreen.SUBSCRIPTION_MANAGE -> SubscriptionManageScreen(onBack = { fullScreen = FullScreen.NONE })
+            FullScreen.QUICK_ADD -> QuickAddScreen(
+                onBack = { fullScreen = FullScreen.NONE },
+                onSaved = {
+                    fullScreen = FullScreen.NONE
+                    homeViewModel.notifySaved()
+                },
+            )
+            FullScreen.NONE -> HomeMainContent(
+                modifier = Modifier.fillMaxSize(),
+                homeViewModel = homeViewModel,
+                homeState = homeState,
+                budgetState = budgetState,
+                drawerState = drawerState,
+                scope = scope,
+                listState = listState,
+                currentFullScreen = screen,
+                onDrawerDestination = { pendingFullScreen = it },
+                onShowQuickAdd = { fullScreen = FullScreen.QUICK_ADD },
+                onShowBudgetSetup = { showBudgetSetup = true },
+            )
+        }
     }
 
     if (showBudgetSetup) {
@@ -159,7 +201,7 @@ private fun HomeMainContent(
     scope: kotlinx.coroutines.CoroutineScope,
     listState: LazyListState,
     currentFullScreen: FullScreen,
-    onFullScreenChange: (FullScreen) -> Unit,
+    onDrawerDestination: (FullScreen) -> Unit,
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
 ) {
@@ -177,7 +219,7 @@ private fun HomeMainContent(
             HomeDrawerContent(
                 currentFullScreen = currentFullScreen,
                 onItemClick = { selectedFullScreen ->
-                    onFullScreenChange(selectedFullScreen)
+                    onDrawerDestination(selectedFullScreen)
                     scope.launch { drawerState.close() }
                 },
             )
@@ -237,74 +279,52 @@ private fun HomeContent(
             onSetup = onShowBudgetSetup,
         )
         Spacer(modifier = Modifier.height(6.dp))
-        HeldFundsCardWithFab(
+        HeldFundsCard(
             heldCents = homeState.heldCents,
             heldByAccount = homeState.heldByAccount,
-            onShowQuickAdd = onShowQuickAdd,
         )
-        if (!homeState.loading && homeState.recent.isEmpty()) {
-            FirstRunHint()
-            Spacer(modifier = Modifier.height(6.dp))
-        }
-        RecentTransactionsSection(
-            homeState = homeState,
-            listState = listState,
-        )
-    }
-}
-
-/** 持有资金卡片与 FAB 组合：FAB 右边框对齐卡片，上边框在卡片下边框以下 [FAB_GAP_DP]dp。 */
-@Composable
-private fun HeldFundsCardWithFab(
-    heldCents: Long,
-    heldByAccount: List<AccountBalance>,
-    onShowQuickAdd: () -> Unit,
-) {
-    Box {
-        val density = LocalDensity.current
-        // 保存上次高度，避免从记一笔返回时首帧为0导致错位
-        var cardHeightPx by remember { mutableIntStateOf(0) }
-        var lastValidHeightPx by remember { mutableIntStateOf(0) }
-        HeldFundsCard(
-            heldCents = heldCents,
-            heldByAccount = heldByAccount,
-            modifier = Modifier.onGloballyPositioned { coordinates ->
-                val height = coordinates.size.height
-                cardHeightPx = height
-                if (height > 0) lastValidHeightPx = height
-            },
-        )
-        // 使用有效高度计算 FAB 位置
-        val effectiveHeightPx = if (cardHeightPx > 0) cardHeightPx else lastValidHeightPx
-        if (effectiveHeightPx > 0) {
-            FloatingActionButton(
-                onClick = onShowQuickAdd,
-                modifier = Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(top = with(density) { effectiveHeightPx.toDp() } + FAB_GAP_DP),
-            ) {
-                Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
+        QuickAddFabSlot(onShowQuickAdd = onShowQuickAdd)
+        if (!budgetState.loading && homeState.accountsReady) {
+            if (!homeState.loading && homeState.recent.isEmpty()) {
+                FirstRunHint()
+                Spacer(modifier = Modifier.height(6.dp))
             }
+            RecentTransactionsSection(
+                homeState = homeState,
+                listState = listState,
+                modifier = Modifier.weight(1f),
+            )
         }
     }
 }
 
-/** 最近记录区域：标题与列表整体上移 [RECORD_SHIFT_DP]dp，使标题与 FAB 中心对齐。 */
+/** 记一笔按钮的固定槽：高度为间距加 FAB 边长，不依赖卡片测量。 */
+@Composable
+private fun QuickAddFabSlot(onShowQuickAdd: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(FAB_GAP_DP + FAB_SIZE_DP),
+    ) {
+        FloatingActionButton(
+            onClick = onShowQuickAdd,
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = FAB_GAP_DP),
+        ) {
+            Icon(imageVector = Icons.Default.Add, contentDescription = "快速记账")
+        }
+    }
+}
+
+/** 最近记录区域：紧挨记一笔按钮槽，不再用负向偏移去贴齐按钮。 */
 @Composable
 private fun RecentTransactionsSection(
     homeState: HomeUiState,
     listState: LazyListState,
+    modifier: Modifier = Modifier,
 ) {
-    Column(
-        modifier = Modifier.layout { measurable, constraints ->
-            val shiftPx = RECORD_SHIFT_DP.roundToPx()
-            val expandedConstraints = constraints.copy(maxHeight = constraints.maxHeight + shiftPx)
-            val placeable = measurable.measure(expandedConstraints)
-            layout(placeable.width, placeable.height - shiftPx) {
-                placeable.place(0, -shiftPx)
-            }
-        },
-    ) {
+    Column(modifier = modifier) {
         Text(
             "最近记录",
             style = MaterialTheme.typography.titleMedium,
@@ -335,7 +355,7 @@ private fun FirstRunHint(modifier: Modifier = Modifier) {
     }
 }
 
-/** 侧栏抽屉内容：显示「功能菜单」标题和 6 个 NavigationDrawerItem。 */
+/** 侧栏抽屉：日常功能在前，设置在最后。文案与各页顶栏一致。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeDrawerContent(
@@ -349,41 +369,38 @@ private fun HomeDrawerContent(
             style = MaterialTheme.typography.headlineSmall,
             modifier = Modifier.padding(16.dp),
         )
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.Menu, contentDescription = null) },
-            label = { Text("收支管理") },
-            selected = currentFullScreen == FullScreen.TRANSACTIONS,
-            onClick = { onItemClick(FullScreen.TRANSACTIONS) },
-        )
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.Menu, contentDescription = null) },
-            label = { Text("管理标签") },
-            selected = currentFullScreen == FullScreen.TAG_MANAGE,
-            onClick = { onItemClick(FullScreen.TAG_MANAGE) },
-        )
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.Menu, contentDescription = null) },
-            label = { Text("API 管理") },
-            selected = currentFullScreen == FullScreen.API_SETTINGS,
-            onClick = { onItemClick(FullScreen.API_SETTINGS) },
-        )
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.Menu, contentDescription = null) },
-            label = { Text("报告") },
-            selected = currentFullScreen == FullScreen.REPORT,
-            onClick = { onItemClick(FullScreen.REPORT) },
-        )
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.Menu, contentDescription = null) },
-            label = { Text("订阅开支") },
-            selected = currentFullScreen == FullScreen.SUBSCRIPTION_MANAGE,
-            onClick = { onItemClick(FullScreen.SUBSCRIPTION_MANAGE) },
-        )
-        NavigationDrawerItem(
-            icon = { Icon(Icons.Default.Menu, contentDescription = null) },
-            label = { Text("管理账户") },
-            selected = currentFullScreen == FullScreen.ACCOUNT_MANAGE,
-            onClick = { onItemClick(FullScreen.ACCOUNT_MANAGE) },
-        )
+        DrawerEntry(Icons.AutoMirrored.Filled.List, "收支管理", currentFullScreen == FullScreen.TRANSACTIONS) {
+            onItemClick(FullScreen.TRANSACTIONS)
+        }
+        DrawerEntry(Icons.Filled.DateRange, "分析报告", currentFullScreen == FullScreen.REPORT) {
+            onItemClick(FullScreen.REPORT)
+        }
+        DrawerEntry(Icons.Filled.Notifications, "订阅开支", currentFullScreen == FullScreen.SUBSCRIPTION_MANAGE) {
+            onItemClick(FullScreen.SUBSCRIPTION_MANAGE)
+        }
+        DrawerEntry(Icons.Filled.AccountCircle, "账户管理", currentFullScreen == FullScreen.ACCOUNT_MANAGE) {
+            onItemClick(FullScreen.ACCOUNT_MANAGE)
+        }
+        DrawerEntry(Icons.Filled.Star, "标签管理", currentFullScreen == FullScreen.TAG_MANAGE) {
+            onItemClick(FullScreen.TAG_MANAGE)
+        }
+        DrawerEntry(Icons.Filled.Settings, "API 设置", currentFullScreen == FullScreen.API_SETTINGS) {
+            onItemClick(FullScreen.API_SETTINGS)
+        }
     }
+}
+
+@Composable
+private fun DrawerEntry(
+    icon: ImageVector,
+    label: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    NavigationDrawerItem(
+        icon = { Icon(icon, contentDescription = null) },
+        label = { Text(label) },
+        selected = selected,
+        onClick = onClick,
+    )
 }

@@ -1,6 +1,7 @@
 package com.expfal.yunayu.ui.component
 
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -36,5 +37,22 @@ class PieChartHitTestTest {
         val outer = 100f
         val stroke = 40f
         assertTrue(isOnDonutRing(0f, -(outer - stroke / 2f), outer, stroke))
+    }
+
+    @Test
+    fun `selected stroke stays inside the canvas`() {
+        val canvas = 200f
+        val layout = donutLayout(canvas)
+        val visualOuter = layout.arcDiameter / 2f + layout.selectedStrokeWidth / 2f
+        assertTrue(visualOuter <= canvas / 2f)
+    }
+
+    @Test
+    fun `center tap is inside the hole and not on the ring`() {
+        val layout = donutLayout(200f)
+        val pathRadius = layout.arcDiameter / 2f
+        val inner = pathRadius - layout.strokeWidth / 2f
+        assertTrue(isInsideDonutHole(0f, 0f, inner))
+        assertFalse(isOnDonutRing(0f, 0f, pathRadius + layout.strokeWidth / 2f, layout.strokeWidth))
     }
 }

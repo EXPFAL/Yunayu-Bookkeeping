@@ -30,7 +30,7 @@ import com.expfal.yunayu.ui.util.formatCents
  * 正结余以常规色展示并标注「含期初余额」；负结余以 error 色展示并标注「已超支」，
  * 金额符号统一以「-¥」前置表达方向。
  *
- * 当存在具名账户分组时，在总计行上方按账户逐行展示余额（各账户余额 = 期初 + 交易净额 +
+ * 当存在具名账户分组时，在总计行下方按账户逐行展示余额（各账户余额 = 期初 + 交易净额 +
  * 转账净额；「未指定账户」无期初与转账，仅交易净额，置末位）；各账户余额之和 + 未指定账户
  * = 总计（恒等式由数据层聚合保证：总资金 = 期初总和 + 累计净结余 = Σ账户余额 + 未指定净额）。
  * 分组为空或仅一条未指定账户行时不渲染分组区，仅显示总计。
@@ -63,13 +63,6 @@ fun HeldFundsCard(
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            if (showBreakdown) {
-                Spacer(Modifier.height(12.dp))
-                AccountBreakdown(heldByAccount)
-                Spacer(Modifier.height(12.dp))
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-                Spacer(Modifier.height(12.dp))
-            }
             Text(
                 amountText,
                 style = MaterialTheme.typography.headlineLarge,
@@ -82,6 +75,12 @@ fun HeldFundsCard(
                 style = MaterialTheme.typography.bodySmall,
                 color = subColor,
             )
+            if (showBreakdown) {
+                Spacer(Modifier.height(12.dp))
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                Spacer(Modifier.height(12.dp))
+                AccountBreakdown(heldByAccount)
+            }
         }
     }
 }

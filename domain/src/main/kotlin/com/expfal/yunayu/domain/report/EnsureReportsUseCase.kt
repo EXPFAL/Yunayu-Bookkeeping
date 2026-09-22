@@ -12,10 +12,9 @@ import java.time.LocalDate
 /**
  * 应用启动时的报告补生成编排用例。
  *
- * 打开应用即检查上月月度报告是否已生成，缺则补生成；每年 1 月首开再补上年年度报告；随后补生成本周
- * 与本月报告（打开报告页即可看到当期汇总）。最多串行执行；周期键已存在（SUCCESS / FAILED / STALE）
- * 即跳过，FAILED / STALE 不自动重试（由报告页手动重试）。[Mutex] 防重入；
- * [CancellationException] 重抛，其余异常吞掉不阻主流程。
+ * 打开应用即检查上月月报是否已生成，缺则补生成；随后补生成本周与本月报告（打开报告页即可看到当期汇总）。
+ * 不再补年报。最多串行执行；周期键已存在（SUCCESS / FAILED / STALE）即跳过，FAILED / STALE 不自动重试
+ * （由报告页手动重试）。[Mutex] 防重入；[CancellationException] 重抛，其余异常吞掉不阻主流程。
  */
 class EnsureReportsUseCase(
     private val reportRepository: ReportRepository,
@@ -25,11 +24,10 @@ class EnsureReportsUseCase(
     private val mutex = Mutex()
 
     /**
-     * 按 [today] 补生成缺失的上周周报、上月月报、（1 月时）上年年报，以及本周 / 本月当期报告。
+     * 按 [today] 补生成缺失的上周周报、上月月报，以及本周 / 本月当期报告。
      */
     suspend fun ensure(today: LocalDate) = mutex.withLock {
         ensureMonthly(today)
-        ensureAnnual(today)
         ensureWeekly(today)
         ensureCurrentWeek(today)
         ensureCurrentMonth(today)
@@ -49,15 +47,6 @@ class EnsureReportsUseCase(
         if (reportRepository.getByKey(ReportPeriodType.MONTHLY, window.periodKey) != null) return
         val prevWindow = TimeWindows.previousMonthWindow(today.minusMonths(1))
         generateSafely(ReportPeriodType.MONTHLY, window, prevWindow)
-    }
-
-    /** 仅 1 月补上年年报（环比基期为再上一年）。 */
-    private suspend fun ensureAnnual(today: LocalDate) {
-        if (today.monthValue != 1) return
-        val window = TimeWindows.previousYearWindow(today)
-        if (reportRepository.getByKey(ReportPeriodType.ANNUAL, window.periodKey) != null) return
-        val prevWindow = TimeWindows.previousYearWindow(today.minusYears(1))
-        generateSafely(ReportPeriodType.ANNUAL, window, prevWindow)
     }
 
     /** 本周周报缺失则生成（环比基期为上周）。 */

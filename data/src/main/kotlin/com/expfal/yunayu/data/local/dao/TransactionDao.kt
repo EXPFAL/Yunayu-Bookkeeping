@@ -55,14 +55,6 @@ interface TransactionDao {
         @ColumnInfo(name = "cents") val cents: Long,
     )
 
-    /** 时间窗支出备注行：按金额降序抽样用。 */
-    data class ExpenseNoteRow(
-        @ColumnInfo(name = "tag_id") val tagId: Long?,
-        @ColumnInfo(name = "tag_name") val tagName: String?,
-        @ColumnInfo(name = "note") val note: String,
-        @ColumnInfo(name = "amount_cents") val amountCents: Long,
-    )
-
     /** 按账户聚合的持有资金行：账户 id（null=未指定）、账户名（null=未指定）与净结余（分）。 */
     data class HeldByAccountRow(
         @ColumnInfo(name = "account_id") val accountId: Long?,
@@ -163,23 +155,6 @@ interface TransactionDao {
             "AND occurred_at >= :startInclusiveMs AND occurred_at < :endExclusiveMs",
     )
     suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long?
-
-    /**
-     * 时间窗内非空备注的支出行，按金额降序（供按分类抽样代表备注）。
-     * SQLite `TRIM` 后空串视为无备注。
-     */
-    @Query(
-        "SELECT t.tag_id AS tag_id, tag.name AS tag_name, t.note AS note, t.amount_cents AS amount_cents " +
-            "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
-            "WHERE t.type = 'EXPENSE' " +
-            "AND t.occurred_at >= :startInclusiveMs AND t.occurred_at < :endExclusiveMs " +
-            "AND t.note IS NOT NULL AND LENGTH(TRIM(t.note)) > 0 " +
-            "ORDER BY t.amount_cents DESC",
-    )
-    suspend fun getExpenseNotesOrderedByAmount(
-        startInclusiveMs: Long,
-        endExclusiveMs: Long,
-    ): List<ExpenseNoteRow>
 
     /** 观察最近 [limit] 笔交易（含标签名、图标与账户名），按发生时间倒序。 */
     @Query(
