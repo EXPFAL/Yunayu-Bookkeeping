@@ -44,24 +44,24 @@ class EnsureReportsUseCaseTest {
     }
 
     @Test
-    fun `ensures annual report only in january plus current periods`() = runTest {
+    fun `january does not generate an annual report`() = runTest {
         val reportRepository = FakeReportRepository()
         val useCase = newUseCase(reportRepository)
 
         useCase.ensure(LocalDate.of(2026, 1, 15))
 
         val upserted = reportRepository.upserted
-        assertEquals(5, upserted.size) // 上周 + 上月 + 年报 + 本周 + 本月
+        assertEquals(4, upserted.size) // 上周 + 上月 + 本周 + 本月
         assertEquals(
             setOf(
                 ReportPeriodType.WEEKLY to "2026-W02",
                 ReportPeriodType.WEEKLY to "2026-W03",
                 ReportPeriodType.MONTHLY to "2025-12",
                 ReportPeriodType.MONTHLY to "2026-01",
-                ReportPeriodType.ANNUAL to "2025",
             ),
             upserted.map { it.periodType to it.periodKey }.toSet(),
         )
+        assertTrue(upserted.none { it.periodType == ReportPeriodType.ANNUAL })
     }
 
     @Test
@@ -112,7 +112,6 @@ class EnsureReportsUseCaseTest {
         GenerateReportUseCase(
             FakeTransactionRepository(),
             reportRepository,
-            FakeReportAnalyzer(),
             FakeMonthlyBudgetRepository(),
         ),
     )
@@ -191,13 +190,6 @@ class EnsureReportsUseCaseTest {
         }
 
         override suspend fun invalidateWhereWindowContains(epochMillis: Long) = Unit
-    }
-
-    /** [ReportAnalyzer] 手写 fake：始终可用并返回固定分析文本。 */
-    private class FakeReportAnalyzer : ReportAnalyzer {
-        override suspend fun isAvailable(): Boolean = true
-
-        override suspend fun analyze(systemInstruction: String, dataText: String): String = "分析结论"
     }
 
     private fun report(

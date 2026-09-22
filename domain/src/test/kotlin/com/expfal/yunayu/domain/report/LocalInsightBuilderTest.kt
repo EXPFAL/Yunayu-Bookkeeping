@@ -16,7 +16,6 @@ class LocalInsightBuilderTest {
         val insights = LocalInsightBuilder.build(
             periodType = ReportPeriodType.MONTHLY,
             totals = WindowTotals(0L, 0L),
-            prevTotals = WindowTotals(0L, 0L),
             topCategories = emptyList(),
             uncategorizedCount = 0,
         )
@@ -30,7 +29,6 @@ class LocalInsightBuilderTest {
         val insights = LocalInsightBuilder.build(
             periodType = ReportPeriodType.MONTHLY,
             totals = WindowTotals(incomeCents = 1_000L, expenseCents = 2_000L),
-            prevTotals = WindowTotals(0L, 0L),
             topCategories = emptyList(),
             uncategorizedCount = 0,
         )
@@ -42,7 +40,6 @@ class LocalInsightBuilderTest {
         val insights = LocalInsightBuilder.build(
             periodType = ReportPeriodType.MONTHLY,
             totals = WindowTotals(incomeCents = 0L, expenseCents = 10_000L),
-            prevTotals = WindowTotals(0L, 0L),
             topCategories = listOf(CategoryShare("餐饮", 5_000L, 50, tagId = 1L)),
             uncategorizedCount = 0,
         )
@@ -54,7 +51,6 @@ class LocalInsightBuilderTest {
         val insights = LocalInsightBuilder.build(
             periodType = ReportPeriodType.WEEKLY,
             totals = WindowTotals(1_000L, 1_000L),
-            prevTotals = WindowTotals(0L, 0L),
             topCategories = emptyList(),
             uncategorizedCount = 3,
         )
@@ -66,25 +62,38 @@ class LocalInsightBuilderTest {
         val insights = LocalInsightBuilder.build(
             periodType = ReportPeriodType.MONTHLY,
             totals = WindowTotals(0L, 50_000L),
-            prevTotals = WindowTotals(0L, 0L),
             topCategories = emptyList(),
             uncategorizedCount = 0,
             largeTxnCents = 25_000L,
-            windowDayCount = 7,
         )
         assertTrue(insights.any { it.kind == LocalInsightKind.ANOMALY })
     }
 
     @Test
-    fun `expense mom rise above threshold yields trend`() {
+    fun `budget pace ahead yields budget insight`() {
+        val insights = LocalInsightBuilder.build(
+            periodType = ReportPeriodType.MONTHLY,
+            totals = WindowTotals(0L, 8_000L),
+            topCategories = emptyList(),
+            uncategorizedCount = 0,
+            budgetCents = 10_000L,
+            spentInBudgetMonthCents = 8_000L,
+            elapsedDaysInMonth = 5,
+            daysInMonth = 30,
+        )
+        assertTrue(insights.any { it.kind == LocalInsightKind.BUDGET && it.title.contains("偏快") })
+    }
+
+    @Test
+    fun `does not restate mom or daily average`() {
         val insights = LocalInsightBuilder.build(
             periodType = ReportPeriodType.MONTHLY,
             totals = WindowTotals(0L, 20_000L),
-            prevTotals = WindowTotals(0L, 10_000L),
             topCategories = emptyList(),
             uncategorizedCount = 0,
-            windowDayCount = 30,
         )
-        assertTrue(insights.any { it.kind == LocalInsightKind.TREND && it.title.contains("支出") })
+        assertTrue(insights.none { it.kind == LocalInsightKind.TREND })
+        assertTrue(insights.none { it.title.contains("日均") })
+        assertTrue(insights.none { it.title.contains("环比") })
     }
 }

@@ -16,6 +16,7 @@ import com.expfal.yunayu.domain.model.Transfer
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
+import com.expfal.yunayu.domain.nl.SuggestTagsFromNoteUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
@@ -34,6 +35,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -1145,6 +1148,57 @@ class QuickAddViewModelTest {
         assertEquals("", viewModel.uiState.value.manualNote)
     }
 
+    @Test
+    fun `note suggest fills chips after debounce when no selected tag`() = runTest {
+        val standard = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(standard)
+        val learning = tag(1L, "学习")
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(learning)
+            rootTags = listOf(learning)
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = """[{"tag_name":"学习"}]"""
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser)
+        runCurrent()
+
+        viewModel.onManualNoteChange("买教材")
+        assertTrue(viewModel.uiState.value.noteSuggestedTags.isEmpty())
+        assertNull(viewModel.uiState.value.selectedTagId)
+
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertEquals(listOf(learning), viewModel.uiState.value.noteSuggestedTags)
+        assertEquals(1, nlParser.generateCalls)
+    }
+
+    @Test
+    fun `note suggest skipped when user already selected a tag`() = runTest {
+        val standard = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(standard)
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = """[{"tag_name":"学习"}]"""
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser)
+        runCurrent()
+
+        viewModel.onSelectTag(2L)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+
+        viewModel.onManualNoteChange("买教材")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertTrue(viewModel.uiState.value.noteSuggestedTags.isEmpty())
+        assertEquals(0, nlParser.generateCalls)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository = FakeTagRepository(),
         txRepo: TransactionRepository = FakeTransactionRepository(),
@@ -1160,6 +1214,7 @@ class QuickAddViewModelTest {
             parseNaturalLanguageTransactionUseCase = ParseNaturalLanguageTransactionUseCase(nlParser, tagRepo),
             addParsedTransactionUseCase = AddParsedTransactionUseCase(txRepo, FakeReportRepository()),
             recordTransferUseCase = RecordTransferUseCase(transferRepo),
+            suggestTagsFromNoteUseCase = SuggestTagsFromNoteUseCase(nlParser, tagRepo),
         )
         vm.refreshSuggestedTags()
         return vm
@@ -1356,10 +1411,12 @@ class QuickAddViewModelTest {
         var generateResult: String? = "{}"
         var generateThrows: Throwable? = null
         var generateGate: CompletableDeferred<String>? = null
+        var generateCalls: Int = 0
 
         override suspend fun isAvailable(): Boolean = available
 
         override suspend fun generate(systemInstruction: String, userText: String): String? {
+            generateCalls++
             generateThrows?.let { throw it }
             generateGate?.let { return it.await() }
             return generateResult

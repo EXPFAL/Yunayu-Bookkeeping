@@ -3,6 +3,8 @@
 package com.expfal.yunayu.ui.screen.report
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -13,8 +15,10 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
@@ -29,10 +33,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextAlign
@@ -44,16 +51,15 @@ import com.expfal.yunayu.domain.report.model.LocalInsight
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
+import com.expfal.yunayu.ui.component.PIE_COLORS
 import com.expfal.yunayu.ui.component.PieChart
 import com.expfal.yunayu.ui.util.formatCents
 import java.time.Instant
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
-import java.util.Locale
-import kotlin.math.abs
 
 /**
- * 「分析报告」全屏：顶部周/月/年切换，中部按期键倒序的报告列表，点选展开详情；失败条目可重试。
+ * 「分析报告」全屏：顶部周/月切换，中部按期键倒序的报告列表，点选展开详情；失败条目可重试。
  *
  * [onDrillToTransactions]：分类下钻到收支管理（时间窗 + 可选标签）。
  */
@@ -64,7 +70,6 @@ fun ReportScreen(
     viewModel: ReportViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val budgetCents by viewModel.budgetCents.collectAsStateWithLifecycle()
     BackHandler(onBack = onBack)
 
     Scaffold(
@@ -94,10 +99,12 @@ fun ReportScreen(
                     reports = uiState.reports,
                     selectedPeriodKey = uiState.selectedPeriodKey,
                     generating = uiState.generating,
-                    budgetCents = budgetCents,
+                    categoryDetail = uiState.categoryDetail,
                     onSelect = viewModel::selectReport,
                     onRetry = viewModel::retry,
-                    onCategoryClick = { report, tagId ->
+                    onSelectCategory = viewModel::selectCategoryShare,
+                    onClearCategory = viewModel::clearCategoryDetail,
+                    onDrillToTransactions = { report, tagId ->
                         onDrillToTransactions(report.windowStartMs, report.windowEndMs, tagId)
                     },
                 )
@@ -106,7 +113,7 @@ fun ReportScreen(
     }
 }
 
-/** 周度/月度/年度切换控件，样式对齐快捷记账的收/支 [FilterChip]。 */
+/** 周度/月度切换控件，样式对齐快捷记账的收/支 [FilterChip]。 */
 @Composable
 private fun PeriodTypeToggle(selected: ReportPeriodType, onSelect: (ReportPeriodType) -> Unit) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -120,11 +127,6 @@ private fun PeriodTypeToggle(selected: ReportPeriodType, onSelect: (ReportPeriod
             onClick = { onSelect(ReportPeriodType.MONTHLY) },
             label = { Text("月度") },
         )
-        FilterChip(
-            selected = selected == ReportPeriodType.ANNUAL,
-            onClick = { onSelect(ReportPeriodType.ANNUAL) },
-            label = { Text("年度") },
-        )
     }
 }
 
@@ -134,10 +136,12 @@ private fun ReportList(
     reports: List<Report>,
     selectedPeriodKey: String?,
     generating: Boolean,
-    budgetCents: Long,
+    categoryDetail: CategoryDetailUiState?,
     onSelect: (String) -> Unit,
     onRetry: (Report) -> Unit,
-    onCategoryClick: (Report, Long?) -> Unit,
+    onSelectCategory: (CategoryShare, Boolean) -> Unit,
+    onClearCategory: () -> Unit,
+    onDrillToTransactions: (Report, Long?) -> Unit,
 ) {
     val selected = reports.firstOrNull { it.periodKey == selectedPeriodKey }
     LazyColumn(
@@ -157,8 +161,10 @@ private fun ReportList(
             item(key = "detail-${selected.periodKey}") {
                 ReportDetail(
                     report = selected,
-                    budgetCents = budgetCents,
-                    onCategoryClick = { tagId -> onCategoryClick(selected, tagId) },
+                    categoryDetail = categoryDetail,
+                    onSelectCategory = onSelectCategory,
+                    onClearCategory = onClearCategory,
+                    onDrill = { tagId -> onDrillToTransactions(selected, tagId) },
                 )
             }
         }
@@ -253,19 +259,32 @@ private fun RetryButton(generating: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * 报告详情：概览、环比、预算（周/月且预算>0）、可点击分类、本地洞察、可选 AI 点评。
+ * 报告详情：概览、可交互分类饼图与选中摘要、本地洞察。
  */
 @Composable
 private fun ReportDetail(
     report: Report,
-    budgetCents: Long,
-    onCategoryClick: (Long?) -> Unit,
+    categoryDetail: CategoryDetailUiState?,
+    onSelectCategory: (CategoryShare, Boolean) -> Unit,
+    onClearCategory: () -> Unit,
+    onDrill: (Long?) -> Unit,
 ) {
     val net = report.incomeCents - report.expenseCents
     val dayCount = remember(report.windowStartMs, report.windowEndMs) {
         windowDayCount(report.windowStartMs, report.windowEndMs)
     }
     val dailyAvg = if (dayCount > 0) report.expenseCents / dayCount else 0L
+    val sharesForChart = remember(report.topCategories, report.expenseCents) {
+        buildSharesForChart(report.topCategories, report.expenseCents)
+    }
+    var selectedIndex by remember(report.periodKey) { mutableStateOf<Int?>(null) }
+
+    fun selectIndex(index: Int) {
+        selectedIndex = index
+        val share = sharesForChart.getOrNull(index) ?: return
+        val isOther = share.tagName == "其他"
+        onSelectCategory(share, isOther)
+    }
 
     Surface(
         shape = MaterialTheme.shapes.medium,
@@ -282,40 +301,34 @@ private fun ReportDetail(
             DetailLine("净结余", formatCents(net))
             DetailLine("日均支出", formatCents(dailyAvg))
 
-            Text("环比", style = MaterialTheme.typography.titleSmall)
-            DetailLine("收入环比", momDelta(report.incomeCents, report.prevIncomeCents))
-            DetailLine("支出环比", momDelta(report.expenseCents, report.prevExpenseCents))
-
-            if (budgetCents > 0L &&
-                (report.periodType == ReportPeriodType.MONTHLY || report.periodType == ReportPeriodType.WEEKLY)
-            ) {
-                BudgetBlock(report = report, budgetCents = budgetCents)
-            }
-
             Text("支出分类占比", style = MaterialTheme.typography.titleSmall)
-            CategoryShares(
-                shares = report.topCategories,
-                onCategoryClick = onCategoryClick,
-            )
-            if (report.expenseCents > 0 && report.topCategories.isNotEmpty()) {
-                val sharesForChart = remember(report.topCategories, report.expenseCents) {
-                    val topSum = report.topCategories.sumOf { it.cents }
-                    if (topSum < report.expenseCents) {
-                        val otherCents = report.expenseCents - topSum
-                        val otherPercent = (otherCents * 100 / report.expenseCents).toInt()
-                        report.topCategories + CategoryShare(
-                            tagName = "其他",
-                            cents = otherCents,
-                            percent = otherPercent,
-                        )
-                    } else {
-                        report.topCategories
-                    }
-                }
+            if (report.expenseCents > 0 && sharesForChart.isNotEmpty()) {
                 PieChart(
                     shares = sharesForChart,
                     totalCents = report.expenseCents,
+                    selectedIndex = selectedIndex,
+                    onShareSelected = { index -> selectIndex(index) },
+                    onSelectionCleared = {
+                        selectedIndex = null
+                        onClearCategory()
+                    },
                     modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            CategoryShares(
+                shares = sharesForChart,
+                selectedIndex = selectedIndex,
+                onShareClick = { index -> selectIndex(index) },
+            )
+
+            categoryDetail?.let { detail ->
+                CategoryDetailPanel(
+                    detail = detail,
+                    onDrill = { onDrill(detail.drillTagId) },
+                    onClear = {
+                        selectedIndex = null
+                        onClearCategory()
+                    },
                 )
             }
 
@@ -325,45 +338,70 @@ private fun ReportDetail(
                     InsightCard(insight)
                 }
             }
-
-            report.analysisText?.let { text ->
-                Text("AI 点评", style = MaterialTheme.typography.titleSmall)
-                Text(
-                    text = text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
         }
     }
 }
 
-/** 月报预算进度 / 周报「本周可用额度」。 */
+/** TopN + 合成「其他」桶，供列表与饼图共用。 */
+private fun buildSharesForChart(
+    topCategories: List<CategoryShare>,
+    expenseCents: Long,
+): List<CategoryShare> {
+    if (topCategories.isEmpty() || expenseCents <= 0L) return topCategories
+    val topSum = topCategories.sumOf { it.cents }
+    return if (topSum < expenseCents) {
+        val otherCents = expenseCents - topSum
+        val otherPercent = (otherCents * 100 / expenseCents).toInt()
+        topCategories + CategoryShare(
+            tagName = "其他",
+            cents = otherCents,
+            percent = otherPercent,
+        )
+    } else {
+        topCategories
+    }
+}
+
+/** 选中分类：金额、占比，以及跳到收支管理。 */
 @Composable
-private fun BudgetBlock(report: Report, budgetCents: Long) {
-    Text("预算", style = MaterialTheme.typography.titleSmall)
-    when (report.periodType) {
-        ReportPeriodType.MONTHLY -> {
-            DetailLine("月度预算", formatCents(budgetCents))
-            DetailLine("本期支出", formatCents(report.expenseCents))
-            val remaining = (budgetCents - report.expenseCents).coerceAtLeast(0L)
-            DetailLine("剩余额度", formatCents(remaining))
-        }
-        ReportPeriodType.WEEKLY -> {
-            val daysInMonth = remember(report.windowStartMs) {
-                Instant.ofEpochMilli(report.windowStartMs)
-                    .atZone(ZoneId.systemDefault())
-                    .toLocalDate()
-                    .lengthOfMonth()
-                    .coerceAtLeast(1)
+private fun CategoryDetailPanel(
+    detail: CategoryDetailUiState,
+    onDrill: () -> Unit,
+    onClear: () -> Unit,
+) {
+    Surface(
+        shape = MaterialTheme.shapes.small,
+        color = MaterialTheme.colorScheme.surfaceVariant,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = detail.label,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f),
+                )
+                TextButton(onClick = onClear) { Text("取消选中") }
             }
-            val weeklyQuota = budgetCents * 7L / daysInMonth
-            DetailLine("本周可用额度", formatCents(weeklyQuota))
-            DetailLine("本周已花", formatCents(report.expenseCents))
-            val remaining = (weeklyQuota - report.expenseCents).coerceAtLeast(0L)
-            DetailLine("本周剩余", formatCents(remaining))
+            DetailLine("金额", formatCents(detail.expenseCents))
+            DetailLine("占比", "${detail.percent}%")
+            if (detail.isOtherBucket) {
+                Text(
+                    text = "「查看流水」将打开本期内全部交易（不按标签过滤）",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Button(
+                onClick = onDrill,
+                modifier = Modifier.align(Alignment.End),
+            ) {
+                Text("查看流水")
+            }
         }
-        ReportPeriodType.ANNUAL -> Unit
     }
 }
 
@@ -400,11 +438,12 @@ private fun DetailLine(label: String, value: String) {
     }
 }
 
-/** 可点击分类占比列表；为空时给出占位文案。 */
+/** 可点选分类占比列表（与饼图色点、选中态同步）。 */
 @Composable
 private fun CategoryShares(
     shares: List<CategoryShare>,
-    onCategoryClick: (Long?) -> Unit,
+    selectedIndex: Int?,
+    onShareClick: (Int) -> Unit,
 ) {
     if (shares.isEmpty()) {
         Text(
@@ -415,13 +454,30 @@ private fun CategoryShares(
         return
     }
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        shares.forEach { share ->
+        shares.forEachIndexed { index, share ->
+            val selected = index == selectedIndex
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onCategoryClick(share.tagId) }
-                    .padding(vertical = 4.dp),
+                    .clickable { onShareClick(index) }
+                    .then(
+                        if (selected) {
+                            Modifier
+                                .background(
+                                    MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.45f),
+                                    RoundedCornerShape(8.dp),
+                                )
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        } else {
+                            Modifier.padding(horizontal = 8.dp, vertical = 6.dp)
+                        },
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
+                Canvas(modifier = Modifier.size(10.dp)) {
+                    drawCircle(color = PIE_COLORS[index % PIE_COLORS.size])
+                }
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = share.tagName ?: "未分类",
                     style = MaterialTheme.typography.bodyMedium,
@@ -464,16 +520,6 @@ private fun EmptyState() {
             textAlign = TextAlign.Center,
         )
     }
-}
-
-/** 环比文案：无上期数据 / 持平 / 涨跌幅百分比。 */
-private fun momDelta(current: Long, previous: Long): String {
-    if (previous <= 0L) return "无上期数据"
-    val diff = current - previous
-    if (diff == 0L) return "与上期持平"
-    val ratio = abs(diff) * 100.0 / previous
-    val sign = if (diff > 0) "+" else "-"
-    return String.format(Locale.US, "%s%.1f%%", sign, ratio)
 }
 
 private fun windowDayCount(startMs: Long, endMs: Long): Int {

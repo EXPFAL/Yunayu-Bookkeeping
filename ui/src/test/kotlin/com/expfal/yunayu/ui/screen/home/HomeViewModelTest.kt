@@ -121,6 +121,7 @@ class HomeViewModelTest {
         val viewModel = createViewModel(accountRepository = accountRepo)
 
         val state = viewModel.uiState.value
+        assertTrue(state.accountsReady)
         assertEquals(2, state.heldByAccount.size)
         assertEquals("微信", state.heldByAccount.first().accountName)
         assertEquals(5_000L, state.heldByAccount.first().balanceCents)
@@ -135,6 +136,7 @@ class HomeViewModelTest {
         val viewModel = createViewModel(transactionRepository = transactionRepo, accountRepository = accountRepo)
 
         val state = viewModel.uiState.value
+        assertTrue(state.accountsReady)
         assertTrue(state.heldByAccount.isEmpty())
         assertEquals(7_500L, state.heldCents)
     }

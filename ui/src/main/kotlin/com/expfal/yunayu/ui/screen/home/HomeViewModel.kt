@@ -31,6 +31,8 @@ data class HomeUiState(
     val recent: List<RecentTransaction> = emptyList(),
     val heldCents: Long = 0L,
     val heldByAccount: List<AccountBalance> = emptyList(),
+    /** 账户余额观察已给出第一次结果（含失败降级）。在此之前首页不摆最近记录。 */
+    val accountsReady: Boolean = false,
 )
 
 /**
@@ -100,10 +102,10 @@ class HomeViewModel @Inject constructor(
                 .catch { throwable ->
                     if (throwable is CancellationException) throw throwable
                     Log.e(TAG, "Failed to observe held balances by account", throwable)
-                    _uiState.update { it.copy(heldByAccount = emptyList()) }
+                    _uiState.update { it.copy(heldByAccount = emptyList(), accountsReady = true) }
                 }
                 .collect { balances ->
-                    _uiState.update { it.copy(heldByAccount = balances) }
+                    _uiState.update { it.copy(heldByAccount = balances, accountsReady = true) }
                 }
         }
     }
