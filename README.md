@@ -42,7 +42,9 @@
 | 首页 | 月度预算看板置顶、持有资金卡片、最近记录列表，右侧垂直居中悬浮「记一笔」按钮 |
 | 记一笔 | 「手动记」数字键盘直输与「自动记」自然语言输入双模式，可切换支出 / 收入 / 转账 |
 | 收支管理 | 标签多选 + 时间快捷项 + 备注模糊搜索组合筛选；单条删除；进入编辑与「整理」 |
-| 编辑交易 | 修改金额、类型、备注、标签、账户（时间字段暂不可改） |
+| 编辑交易 | 修改金额、类型、备注、标签、账户、发生时间 |
+| 编辑转账 | 修改金额、转出/转入、备注、发生时间 |
+| 备份与恢复 | 导出 / 导入 JSON 账本（不含 API Key） |
 | 管理标签 | 根标签只读分区，子标签增 / 改 / 删与长按拖拽排序，含标签整合入口 |
 | 整理 | 对「未分类」记录分批生成分类建议，逐条接受 / 修改 / 拒绝后单事务批量应用 |
 | 分析报告 | 周 / 月 / 年切换，预算执行与分类开销，Canvas 自绘饼图，分类可下钻至收支管理 |
@@ -121,28 +123,21 @@ cd Yunayu-Bookkeeping
 
 ### 可选：配置自然语言记账与 AI 报告
 
-不配置也能正常编译和使用其余全部功能，只是「自动记」与 AI 报告不可用。有两条配置路径：
+不配置也能正常编译和使用其余全部功能，只是「自动记」与 AI 报告不可用。
 
-1. **运行期配置（推荐）** — 在应用内「API 管理」页面填写 Base URL / 模型名 / API Key。配置存放在本机 DataStore，**优先级更高**，为空时才回退到下面的编译期默认值。
-2. **编译期默认值（可选）** — 在根目录 `local.properties` 中填写，默认值为 DeepSeek：
-
-   ```properties
-   NL_API_BASE_URL=https://api.deepseek.com
-   NL_API_MODEL=deepseek-chat
-   NL_API_KEY=sk-xxxxxxxx
-   ```
-
-> **注意**：编译期写入的 key 会明文进入 `BuildConfig` 与最终 APK，仅供个人本地构建使用。若要公开分发，请留空该字段并改用应用内的「API 管理」配置。
+1. **运行期配置（推荐，公开包唯一方式）** — 在应用内「API 设置」填写 Base URL / 模型名 / API Key。配置存放在本机 DataStore。
+2. **编译期默认值（可选，仅 URL/模型）** — 根目录 `local.properties` 可写 `NL_API_BASE_URL` / `NL_API_MODEL`；**`NL_API_KEY` 不再写入 BuildConfig**，公开 APK 不会带编译期密钥。
 
 ## 项目结构
 
 ```text
 Yunayu-Bookkeeping/
-├── app/        组装层：Application（Hilt 入口）、MainActivity、周报通知 Worker
+├── app/        组装层：Application（Hilt 入口）、MainActivity
 ├── domain/     纯 Kotlin 领域层：模型、Repository 接口、UseCase、预算引擎、NL / 报告纯逻辑
 ├── data/       数据层：Room Entity / DAO / Database、RepositoryImpl、DataStore、外部 API 适配、Hilt Module
 ├── ui/         界面层：screen/ 各功能屏幕、component/ 复用组件、theme/ 品牌主题、di/ 用例装配
 ├── docs/       产品需求（PRD）与工程脚手架 / 决策留痕（SCAFFOLD）
+├── scripts/    本机签名钥匙备份等辅助脚本
 └── gradle/libs.versions.toml   版本目录：全项目唯一版本来源
 ```
 
@@ -183,14 +178,12 @@ Yunayu-Bookkeeping/
 
 ## 项目状态与已知限制
 
-- 尚未发布正式版本，仓库不提供 APK 分发，需自行构建。
-- 未接入 CI，上述三条门禁需在本地手动执行。
-- release 构建未配置签名，且未开启代码压缩（`isMinifyEnabled = false`）。
+- 当前版本 `1.1.0`（`versionCode` 2）；GitHub Release 可下载 debug 签名 APK。
+- CI：推送 / PR 到 `main` 跑 `test` + `ktlintCheck`；推送 `v*` tag 时（需 Secret `YUNAYU_DEBUG_KEYSTORE_B64`）打 debug APK 并发 Release。
+- release 构建未单独配置正式签名，且未开启代码压缩（`isMinifyEnabled = false`）；日常分发沿用可覆盖安装的 debug 钥匙。
 - 自然语言记账与 AI 报告依赖外部 OpenAI 兼容 API，解析时交易文本会上传；端侧离线模型路线经真机实测后已放弃。
-- 编译期写入的 API key 会明文进入 `BuildConfig` 与 APK。
-- 转账记录支持录入 / 查看 / 删除，暂不支持编辑。
-- 交易编辑不支持修改时间字段。
-- 周报通知受系统省电策略影响，触发时间可能延后。
+- 功能菜单「备份与恢复」导出 JSON 整库替换（不含 API Key）；导入后需在「API 设置」重填密钥。
+- 交易与转账均可编辑金额/账户/备注/发生时间；改交易时间会标脏旧、新窗口报告。
 
 ## 致谢
 

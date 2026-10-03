@@ -18,21 +18,29 @@ class TransferRepositoryImpl @Inject constructor(
     override fun observeTransfers(): Flow<List<Transfer>> =
         transferDao.observeAll().map { entities -> entities.map { it.toDomain() } }
 
+    override suspend fun getById(id: Long): Transfer? =
+        transferDao.getById(id)?.toDomain()
+
     override suspend fun insertTransfer(transfer: Transfer): Long =
-        transferDao.insert(transfer.toEntity())
+        transferDao.insert(transfer.toEntity(createdAt = System.currentTimeMillis()))
+
+    override suspend fun updateTransfer(transfer: Transfer) {
+        val existing = transferDao.getById(transfer.id) ?: return
+        transferDao.update(transfer.toEntity(createdAt = existing.createdAt))
+    }
 
     override suspend fun deleteById(id: Long) {
         transferDao.deleteById(id)
     }
 
-    private fun Transfer.toEntity(): TransferEntity = TransferEntity(
+    private fun Transfer.toEntity(createdAt: Long): TransferEntity = TransferEntity(
         id = id,
         fromAccountId = fromAccountId,
         toAccountId = toAccountId,
         amountCents = amountCents,
         note = note,
         occurredAt = occurredAt,
-        createdAt = System.currentTimeMillis(),
+        createdAt = createdAt,
     )
 
     private fun TransferEntity.toDomain(): Transfer = Transfer(

@@ -168,11 +168,11 @@ class EnsureReportsUseCaseTest {
             startInclusiveMs: Long,
             endExclusiveMs: Long,
         ): List<CategoryExpense> = emptyList()
-    
+
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
-}
+    }
 
     /** [ReportRepository] 手写 fake：按周期键返回预置报告，记录 upsert。 */
     private class FakeReportRepository : ReportRepository {

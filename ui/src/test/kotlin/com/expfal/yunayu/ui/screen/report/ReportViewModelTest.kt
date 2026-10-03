@@ -361,7 +361,7 @@ class ReportViewModelTest {
             startInclusiveMs: Long,
             endExclusiveMs: Long,
         ): List<CategoryExpense> = emptyList()
-    
+
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null

@@ -112,7 +112,7 @@ class DeleteTransactionUseCaseTest {
         override suspend fun getById(id: Long): Transaction? = null
 
         override suspend fun updateTransaction(transaction: Transaction) = Unit
-    
+
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null

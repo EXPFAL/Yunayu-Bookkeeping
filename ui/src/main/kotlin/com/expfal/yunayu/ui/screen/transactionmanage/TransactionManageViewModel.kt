@@ -41,6 +41,7 @@ enum class TimeFilter {
     LAST_7_DAYS,
     LAST_30_DAYS,
     THIS_MONTH,
+
     /** 报告下钻等外部传入的自定义半开区间。 */
     CUSTOM,
 }
@@ -124,6 +125,7 @@ class TransactionManageViewModel @Inject constructor(
     private val selectedTagIdsFlow = MutableStateFlow<Set<Long>>(emptySet())
     private val keywordFlow = MutableStateFlow("")
     private val accountFilterFlow = MutableStateFlow<AccountFilter>(AccountFilter.All)
+
     /** 非 null 时覆盖 [TimeFilter] 的预设窗口（报告下钻）。 */
     private val customWindowFlow = MutableStateFlow<Pair<Long, Long>?>(null)
 

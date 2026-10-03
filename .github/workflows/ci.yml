@@ -1,0 +1,86 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Unit tests and ktlint
+        run: ./gradlew test ktlintCheck --no-daemon
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Write local.properties
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Restore debug keystore from secret
+        env:
+          YUNAYU_DEBUG_KEYSTORE_B64: ${{ secrets.YUNAYU_DEBUG_KEYSTORE_B64 }}
+        run: |
+          if [ -z "$YUNAYU_DEBUG_KEYSTORE_B64" ]; then
+            echo "Missing secret YUNAYU_DEBUG_KEYSTORE_B64 — refuse to sign with runner default keystore." >&2
+            exit 1
+          fi
+          mkdir -p "$HOME/.android"
+          echo "$YUNAYU_DEBUG_KEYSTORE_B64" | base64 -d > "$HOME/.android/debug.keystore"
+          echo "YUNAYU_KEYSTORE_FILE=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
+
+      - name: Assemble debug APK
+        env:
+          YUNAYU_KEYSTORE_FILE: ${{ env.YUNAYU_KEYSTORE_FILE }}
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION_NAME=$(grep -E 'versionName\s*=' app/build.gradle.kts | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+          SRC=app/build/outputs/apk/debug/app-debug.apk
+          OUT="yunayu-bookkeeping-${VERSION_NAME}-debug.apk"
+          cp "$SRC" "$OUT"
+          NOTES=$(mktemp)
+          cat > "$NOTES" <<EOF
+          云屿记账 ${VERSION_NAME}（debug 签名）。与同一把 debug.keystore 安装的设备可覆盖更新。
+
+          构建自 tag \`${{ github.ref_name }}\`。
+          EOF
+          gh release create "${{ github.ref_name }}" "$OUT" \
+            --title "${{ github.ref_name }}" \
+            --notes-file "$NOTES" \
+            --latest

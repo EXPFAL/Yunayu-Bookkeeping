@@ -33,9 +33,9 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
-import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -1408,7 +1408,7 @@ class QuickAddViewModelTest {
         override suspend fun getById(id: Long): Transaction? = null
 
         override suspend fun updateTransaction(transaction: Transaction) = Unit
-    
+
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
@@ -1422,6 +1422,10 @@ class QuickAddViewModelTest {
         val deletedIds = mutableListOf<Long>()
 
         override fun observeTransfers(): Flow<List<Transfer>> = flowOf(emptyList())
+
+        override suspend fun getById(id: Long): Transfer? = null
+
+        override suspend fun updateTransfer(transfer: Transfer) = Unit
 
         override suspend fun insertTransfer(transfer: Transfer): Long {
             inserted += transfer

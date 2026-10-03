@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Update
 import com.expfal.yunayu.data.local.entity.TransferEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -21,12 +22,30 @@ interface TransferDao {
     @Query("SELECT * FROM transfers ORDER BY occurred_at DESC")
     fun observeAll(): Flow<List<TransferEntity>>
 
+    /** 一次性获取全部转账（备份导出）。 */
+    @Query("SELECT * FROM transfers ORDER BY id ASC")
+    suspend fun getAll(): List<TransferEntity>
+
+    /** 按主键查询转账；不存在返回 `null`。 */
+    @Query("SELECT * FROM transfers WHERE id = :id LIMIT 1")
+    suspend fun getById(id: Long): TransferEntity?
+
     @Insert
     suspend fun insert(transfer: TransferEntity): Long
+
+    @Insert
+    suspend fun insertAll(transfers: List<TransferEntity>): List<Long>
+
+    @Update
+    suspend fun update(transfer: TransferEntity)
 
     /** 按主键删除一笔转账。 */
     @Query("DELETE FROM transfers WHERE id = :id")
     suspend fun deleteById(id: Long)
+
+    /** 清空转账表（备份导入前使用）。 */
+    @Query("DELETE FROM transfers")
+    suspend fun deleteAll()
 
     /** 统计一个账户作为 from 或 to 涉及的转账数（账户删除影响面提示）。 */
     @Query("SELECT COUNT(*) FROM transfers WHERE from_account_id = :accountId OR to_account_id = :accountId")

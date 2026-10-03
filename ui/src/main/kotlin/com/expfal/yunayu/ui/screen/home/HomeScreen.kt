@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -58,6 +59,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.expfal.yunayu.ui.screen.accountmanage.AccountManageScreen
 import com.expfal.yunayu.ui.screen.apiconfig.ApiSettingsScreen
+import com.expfal.yunayu.ui.screen.backup.BackupScreen
 import com.expfal.yunayu.ui.screen.budget.BudgetCard
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetSheet
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetUiState
@@ -86,6 +88,7 @@ private enum class FullScreen {
     NONE,
     TAG_MANAGE,
     API_SETTINGS,
+    BACKUP,
     REPORT,
     TRANSACTIONS,
     ACCOUNT_MANAGE,
@@ -172,6 +175,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
             when (screen) {
                 FullScreen.TAG_MANAGE -> TagManageScreen(onBack = popPage)
                 FullScreen.API_SETTINGS -> ApiSettingsScreen(onBack = popPage)
+                FullScreen.BACKUP -> BackupScreen(onBack = popPage)
                 FullScreen.REPORT -> ReportScreen(
                     onBack = popPage,
                     onDrillToTransactions = { start, end, tagId ->
@@ -402,6 +406,7 @@ private fun HomeDrawerContent(
         DrawerEntry(Icons.Filled.Notifications, "订阅开支") { onItemClick(FullScreen.SUBSCRIPTION_MANAGE) }
         DrawerEntry(Icons.Filled.AccountCircle, "账户管理") { onItemClick(FullScreen.ACCOUNT_MANAGE) }
         DrawerEntry(Icons.Filled.Star, "标签管理") { onItemClick(FullScreen.TAG_MANAGE) }
+        DrawerEntry(Icons.Filled.Share, "备份与恢复") { onItemClick(FullScreen.BACKUP) }
         DrawerEntry(Icons.Filled.Settings, "API 设置") { onItemClick(FullScreen.API_SETTINGS) }
     }
 }

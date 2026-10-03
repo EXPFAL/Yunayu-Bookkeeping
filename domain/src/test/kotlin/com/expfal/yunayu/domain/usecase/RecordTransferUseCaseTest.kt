@@ -125,6 +125,10 @@ class RecordTransferUseCaseTest {
 
         override fun observeTransfers(): Flow<List<Transfer>> = flowOf(emptyList())
 
+        override suspend fun getById(id: Long): Transfer? = null
+
+        override suspend fun updateTransfer(transfer: Transfer) = Unit
+
         override suspend fun insertTransfer(transfer: Transfer): Long {
             inserted += transfer
             return nextId

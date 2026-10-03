@@ -1,6 +1,7 @@
 package com.expfal.yunayu.ui.screen.transactionmanage
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -30,8 +31,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.ui.component.DateTimePickerFlow
 import com.expfal.yunayu.ui.screen.quickadd.NumberPad
 import com.expfal.yunayu.ui.util.formatCents
+import com.expfal.yunayu.ui.util.formatTime
 import com.expfal.yunayu.ui.util.parseAmountToCents
 import com.expfal.yunayu.ui.util.vibrateSuccess
 
@@ -49,6 +52,7 @@ fun EditTransactionScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     var showTagPicker by remember { mutableStateOf(false) }
+    var showDateTimePicker by remember { mutableStateOf(false) }
 
     LaunchedEffect(transactionId) {
         viewModel.open(transactionId)
@@ -143,6 +147,18 @@ fun EditTransactionScreen(
                             note = uiState.note,
                             onNoteChange = viewModel::onNoteChange,
                         )
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = "时间  " + formatTime(uiState.occurredAt),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(enabled = !uiState.saving) {
+                                    showDateTimePicker = true
+                                }
+                                .padding(vertical = 8.dp),
+                        )
                         Spacer(Modifier.height(12.dp))
                         EditTagChipsRow(
                             selectedTagId = uiState.selectedTagId,
@@ -197,6 +213,17 @@ fun EditTransactionScreen(
                 showTagPicker = false
             },
             onDismiss = { showTagPicker = false },
+        )
+    }
+
+    if (showDateTimePicker) {
+        DateTimePickerFlow(
+            initialMillis = uiState.occurredAt,
+            onConfirm = { millis ->
+                viewModel.onOccurredAtChange(millis)
+                showDateTimePicker = false
+            },
+            onDismiss = { showDateTimePicker = false },
         )
     }
 }
