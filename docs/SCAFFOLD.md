@@ -862,7 +862,7 @@ interface SemesterBudgetEngine {
 
 ### 22.4 版本记录
 
-- `versionName` 0.1.0 → 3.25，`versionCode` 保持 1，aapt 验证生效。
+- `versionName` 改为 1.0.0（初始正式版），`versionCode` 保持 1。
 
 ### 22.5 已知限制
 

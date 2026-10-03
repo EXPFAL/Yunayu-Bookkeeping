@@ -104,7 +104,7 @@
    - 验收要点：父类仅可折叠/展开、不可选中；三宿主同时生效；历史父类标签交易照常展示；快捷推荐仅返回叶子
    - 测试：GetRecentCategoriesUseCaseTest 全量重写 11 用例
 23. 版本号（已随本次迭代交付）
-   - versionName 0.1.0 → 3.25，versionCode 保持 1，aapt 验证生效
+   - versionName 改为 1.0.0（初始正式版），versionCode 保持 1
 24. App 图标（已随本次迭代交付）
    - 方案：以用户提供的卡通图（粉色圆脸表情，与品牌主题同源）替换启动器图标——mipmap 全密度 ic_launcher / ic_launcher_round + adaptive icon（background = 品牌浅粉 #FFF8F6 颜色资源、foreground = 提取的表情线条层，因源图脸体与背景同色采用「线条前景 + 浅粉底色」方案）；AndroidManifest 新增 icon / roundIcon 引用；minSdk=26 真机恒走 adaptive
 25. 工程卫生（已随本次迭代交付）
