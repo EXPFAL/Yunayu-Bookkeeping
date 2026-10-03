@@ -25,6 +25,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SuggestionChip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -347,9 +348,17 @@ private fun QuickAddFormContent(
             onNoteChange = viewModel::onTransferNoteChange,
         )
     } else {
+        if (!uiState.nlMode) {
+            ManualNoteField(
+                note = uiState.manualNote,
+                onNoteChange = viewModel::onManualNoteChange,
+            )
+        }
         ExpenseFormBranch(
             nlMode = uiState.nlMode,
+            noteSuggestedTags = uiState.noteSuggestedTags,
             suggestedTags = uiState.suggestedTags,
+            allTagsByRoot = uiState.allTagsByRoot,
             selectedTagId = uiState.selectedTagId,
             rootNameById = uiState.rootNameById,
             nlDraftType = uiState.nlDraft?.type,
@@ -360,12 +369,6 @@ private fun QuickAddFormContent(
             onLoadAllTags = viewModel::loadAllTags,
             onSelectAccount = viewModel::onSelectAccount,
             onShowTagPicker = onShowTagPicker,
-        )
-    }
-    if (!uiState.nlMode && !uiState.transferMode) {
-        ManualNoteField(
-            note = uiState.manualNote,
-            onNoteChange = viewModel::onManualNoteChange,
         )
     }
 }
@@ -452,11 +455,30 @@ private fun TransferFormBranch(
     Spacer(modifier = Modifier.height(8.dp))
 }
 
-/** 收支表单分支块：最近分类 chips + 账户选择。 */
+/** 已选标签不在频次列表时，从备注建议或全量树解析出来插到外层 chip 行。 */
+private fun resolveOuterSelectedTag(
+    selectedTagId: Long?,
+    suggestedTags: List<Tag>,
+    noteSuggestedTags: List<Tag>,
+    allTagsByRoot: Map<Tag, List<Tag>>,
+): Tag? {
+    if (selectedTagId == null) return null
+    if (suggestedTags.any { it.id == selectedTagId }) return null
+    noteSuggestedTags.firstOrNull { it.id == selectedTagId }?.let { return it }
+    allTagsByRoot.forEach { (root, children) ->
+        if (root.id == selectedTagId) return root
+        children.firstOrNull { it.id == selectedTagId }?.let { return it }
+    }
+    return null
+}
+
+/** 收支表单分支块：备注建议分类 + 最近分类 chips + 账户选择。 */
 @Composable
 private fun ExpenseFormBranch(
     nlMode: Boolean,
+    noteSuggestedTags: List<Tag>,
     suggestedTags: List<Tag>,
+    allTagsByRoot: Map<Tag, List<Tag>>,
     selectedTagId: Long?,
     rootNameById: Map<Long, String>,
     nlDraftType: TransactionType?,
@@ -468,12 +490,44 @@ private fun ExpenseFormBranch(
     onSelectAccount: (Long?) -> Unit,
     onShowTagPicker: () -> Unit,
 ) {
+    if (!nlMode && noteSuggestedTags.isNotEmpty()) {
+        Text(
+            text = "根据备注建议",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            noteSuggestedTags.forEach { tag ->
+                SuggestionChip(
+                    onClick = { onSelectTag(tag.id) },
+                    label = { Text(tagDisplayName(tag, rootNameById)) },
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+    }
+    val extraSelectedTag = remember(selectedTagId, suggestedTags, noteSuggestedTags, allTagsByRoot) {
+        resolveOuterSelectedTag(selectedTagId, suggestedTags, noteSuggestedTags, allTagsByRoot)
+    }
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .horizontalScroll(rememberScrollState()),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
+        extraSelectedTag?.let { tag ->
+            FilterChip(
+                selected = true,
+                onClick = { onSelectTag(tag.id) },
+                label = { Text(tagDisplayName(tag, rootNameById)) },
+            )
+        }
         suggestedTags.forEach { tag ->
             FilterChip(
                 selected = selectedTagId == tag.id,

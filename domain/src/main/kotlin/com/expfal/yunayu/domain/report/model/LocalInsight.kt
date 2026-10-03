@@ -2,7 +2,7 @@ package com.expfal.yunayu.domain.report.model
 
 /** 本地规则洞察类型。 */
 enum class LocalInsightKind {
-    /** 环比升降等趋势。 */
+    /** 历史报告可能仍存环比句；新生成不再写入。 */
     TREND,
 
     /** 分类结构。 */

@@ -46,7 +46,7 @@ import com.expfal.yunayu.ui.util.filterBudgetInput
 import com.expfal.yunayu.ui.util.parseInitialBalanceToCents
 
 /**
- * 「管理账户」全屏：账户列表（名称 + 交易数），行尾编辑 / 删除入口，右上角新增账户。
+ * 「账户管理」全屏：账户列表（名称 + 交易数），行尾编辑 / 删除入口，右上角新增账户。
  *
  * 新增 / 编辑经弹窗内 [OutlinedTextField]（账户名 + 期初余额） + 内联错误，期初余额金额输入
  * 复用 [filterBudgetInput] / [parseInitialBalanceToCents] 校验；删除经「先算影响面、再二次确认」
@@ -92,7 +92,7 @@ fun AccountManageScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("管理账户") },
+                title = { Text("账户管理") },
                 navigationIcon = {
                     IconButton(onClick = handleBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")

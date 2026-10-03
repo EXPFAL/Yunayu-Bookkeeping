@@ -16,6 +16,7 @@ import com.expfal.yunayu.domain.model.Transfer
 import com.expfal.yunayu.domain.model.WindowTotals
 import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.nl.ParseNaturalLanguageTransactionUseCase
+import com.expfal.yunayu.domain.nl.SuggestTagsFromNoteUseCase
 import com.expfal.yunayu.domain.nl.model.NlParseFailure
 import com.expfal.yunayu.domain.repository.AccountRepository
 import com.expfal.yunayu.domain.repository.TagRepository
@@ -34,6 +35,8 @@ import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestDispatcher
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -1145,6 +1148,99 @@ class QuickAddViewModelTest {
         assertEquals("", viewModel.uiState.value.manualNote)
     }
 
+    @Test
+    fun `note suggest fills chips after debounce while keeping frequency preselect`() = runTest {
+        val standard = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(standard)
+        val learning = tag(1L, "学习")
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(learning)
+            rootTags = listOf(learning)
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = """[{"tag_name":"学习"}]"""
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser)
+        runCurrent()
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
+
+        viewModel.onManualNoteChange("买教材")
+        assertTrue(viewModel.uiState.value.noteSuggestedTags.isEmpty())
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
+
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertEquals(listOf(learning), viewModel.uiState.value.noteSuggestedTags)
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
+        assertEquals(1, nlParser.generateCalls)
+    }
+
+    @Test
+    fun `save with note uses frequency preselect when suggestion not tapped`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val viewModel = viewModel(tagRepo, txRepo)
+        runCurrent()
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
+
+        viewModel.onDigit('5')
+        viewModel.onManualNoteChange("午饭钱")
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals(1L, txRepo.added.single().tagId)
+        assertEquals("午饭钱", txRepo.added.single().note)
+    }
+
+    @Test
+    fun `note suggest skipped when user already selected a tag`() = runTest {
+        val standard = StandardTestDispatcher(testScheduler)
+        Dispatchers.setMain(standard)
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val nlParser = FakeNlParser().apply {
+            generateResult = """[{"tag_name":"学习"}]"""
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser)
+        runCurrent()
+
+        viewModel.onSelectTag(2L)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+
+        viewModel.onManualNoteChange("买教材")
+        advanceTimeBy(300)
+        runCurrent()
+
+        assertTrue(viewModel.uiState.value.noteSuggestedTags.isEmpty())
+        assertEquals(0, nlParser.generateCalls)
+    }
+
+    @Test
+    fun `refreshSuggestedTags keeps user chosen tag in digital mode`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+        runCurrent()
+
+        viewModel.onSelectTag(2L)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+
+        tagRepo.recentTags = listOf(tag(3L, "生活"))
+        viewModel.refreshSuggestedTags()
+        runCurrent()
+
+        assertEquals(listOf(tag(3L, "生活")), viewModel.uiState.value.suggestedTags)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+    }
+
     private fun viewModel(
         tagRepo: TagRepository = FakeTagRepository(),
         txRepo: TransactionRepository = FakeTransactionRepository(),
@@ -1160,6 +1256,7 @@ class QuickAddViewModelTest {
             parseNaturalLanguageTransactionUseCase = ParseNaturalLanguageTransactionUseCase(nlParser, tagRepo),
             addParsedTransactionUseCase = AddParsedTransactionUseCase(txRepo, FakeReportRepository()),
             recordTransferUseCase = RecordTransferUseCase(transferRepo),
+            suggestTagsFromNoteUseCase = SuggestTagsFromNoteUseCase(nlParser, tagRepo),
         )
         vm.refreshSuggestedTags()
         return vm
@@ -1356,10 +1453,12 @@ class QuickAddViewModelTest {
         var generateResult: String? = "{}"
         var generateThrows: Throwable? = null
         var generateGate: CompletableDeferred<String>? = null
+        var generateCalls: Int = 0
 
         override suspend fun isAvailable(): Boolean = available
 
         override suspend fun generate(systemInstruction: String, userText: String): String? {
+            generateCalls++
             generateThrows?.let { throw it }
             generateGate?.let { return it.await() }
             return generateResult

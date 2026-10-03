@@ -11,27 +11,25 @@ import kotlin.math.abs
 /**
  * 本地规则洞察构建器（纯函数、无 IO）。
  *
- * 入参为已聚合的窗口数据；预算相关字段可选（未设预算则跳过预算规则）。
+ * 只保留概览里没有的信息：空窗、净结余为负、分类偏重、预算节奏、未分类、大额单笔。
+ * 环比与日均已在概览中展示，不再复述。
  */
 object LocalInsightBuilder {
 
     /**
      * @param periodType 周期类型（影响预算规则措辞）
      * @param totals 当期收支
-     * @param prevTotals 上期收支
      * @param topCategories 当期 Top 分类
      * @param uncategorizedCount 窗口内未分类笔数
      * @param budgetCents 月预算（分）；≤0 表示未设置
-     * @param spentInBudgetMonthCents 当月已支出（分），用于月报/周报预算进度；周报可传本月累计
+     * @param spentInBudgetMonthCents 当月已支出（分），用于月报/周报预算进度
      * @param elapsedDaysInMonth 本月已过天数（含今天）
      * @param daysInMonth 本月总天数
      * @param largeTxnCents 窗口内最大单笔支出（分）；null 表示未知，跳过异常规则
-     * @param windowDayCount 报告窗口自然日数（半开区间折算）
      */
     fun build(
         periodType: ReportPeriodType,
         totals: WindowTotals,
-        prevTotals: WindowTotals,
         topCategories: List<CategoryShare>,
         uncategorizedCount: Int,
         budgetCents: Long = 0L,
@@ -39,7 +37,6 @@ object LocalInsightBuilder {
         elapsedDaysInMonth: Int = 1,
         daysInMonth: Int = 30,
         largeTxnCents: Long? = null,
-        windowDayCount: Int = 1,
     ): List<LocalInsight> {
         val insights = mutableListOf<LocalInsight>()
 
@@ -60,21 +57,6 @@ object LocalInsightBuilder {
                 detail = "支出比收入多 ${formatYuan(abs(net))} 元，可以留意大额或高频分类。",
             )
         }
-
-        addMoMInsight(
-            insights = insights,
-            label = "支出",
-            current = totals.expenseCents,
-            previous = prevTotals.expenseCents,
-            riseKind = LocalInsightKind.TREND,
-        )
-        addMoMInsight(
-            insights = insights,
-            label = "收入",
-            current = totals.incomeCents,
-            previous = prevTotals.incomeCents,
-            riseKind = LocalInsightKind.TREND,
-        )
 
         val top = topCategories.firstOrNull()
         if (top != null && totals.expenseCents > 0L && top.percent >= TOP_CATEGORY_HEAVY_PERCENT) {
@@ -119,36 +101,7 @@ object LocalInsightBuilder {
             }
         }
 
-        val days = windowDayCount.coerceAtLeast(1)
-        if (totals.expenseCents > 0L && days >= 3) {
-            val daily = totals.expenseCents / days
-            insights += LocalInsight(
-                kind = LocalInsightKind.SUMMARY,
-                title = "日均支出约 ${formatYuan(daily)} 元",
-                detail = "按本期 $days 天折算；可与周可用额度对照，避免前期花太猛。",
-            )
-        }
-
         return insights
-    }
-
-    private fun addMoMInsight(
-        insights: MutableList<LocalInsight>,
-        label: String,
-        current: Long,
-        previous: Long,
-        riseKind: LocalInsightKind,
-    ) {
-        if (previous <= 0L) return
-        val diff = current - previous
-        val ratio = abs(diff) * 100.0 / previous
-        if (ratio < MOM_THRESHOLD_PERCENT) return
-        val direction = if (diff > 0) "上升" else "下降"
-        insights += LocalInsight(
-            kind = riseKind,
-            title = "${label}环比$direction ${formatPercent(ratio)}",
-            detail = "相对上期${label}${direction}约 ${formatPercent(ratio)}（${formatYuan(abs(diff))} 元）。",
-        )
     }
 
     private fun addBudgetInsight(
@@ -209,7 +162,6 @@ object LocalInsightBuilder {
     private fun formatPercent(ratio: Double): String =
         String.format(Locale.US, "%.0f%%", ratio)
 
-    private const val MOM_THRESHOLD_PERCENT = 30.0
     private const val TOP_CATEGORY_HEAVY_PERCENT = 40
     private const val BUDGET_AHEAD_GAP_PERCENT = 15.0
     private const val LARGE_TXN_BUDGET_RATIO_PERCENT = 20L

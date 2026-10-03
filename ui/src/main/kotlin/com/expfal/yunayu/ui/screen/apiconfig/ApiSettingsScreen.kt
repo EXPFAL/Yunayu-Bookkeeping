@@ -40,7 +40,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
- * 「API 管理」全屏：查看/修改在线 NL 解析 API 端点、模型与密钥，并支持测试连接。
+ * 「API 设置」全屏：查看/修改在线 NL 解析 API 端点、模型与密钥，并支持测试连接。
  *
  * 内容为单个可滚动 [Column]（三个输入框 + 说明 + 操作按钮 + 结果反馈），保存与测试状态
  * 均由 [ApiSettingsViewModel] 驱动，密钥框带明文/密文切换。
@@ -57,7 +57,7 @@ fun ApiSettingsScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("API 管理") },
+                title = { Text("API 设置") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")

@@ -948,9 +948,10 @@ interface SemesterBudgetEngine {
 
 - **Canvas 自绘**：不引入第三方图表库，`PieChart.kt` 位于 `ui/component`，纯 Compose Canvas 绘制。
 - **固定色板**：8 色预定义色板（红/橙/黄/绿/蓝/紫/粉/灰），标签映射经稳定哈希（`tag.hashCode() % palette.size`）确保颜色一致性。
-- **Top5 +「其他」桶**：按金额降序取 Top5，剩余归入「其他」，闭合 360°（`total - top5Sum` 确保无浮点误差缺口）。
-- **渲染条件**：`expenseCents > 0` 且 `topCategories` 非空时显示饼状图，否则隐藏。
-- **图例**：标签名 + 占比百分数，位于饼状图下方。
+- **Top8 +「其他」桶**：按金额降序取 Top8（`ReportCategoryLimits.TOP_CATEGORIES`），剩余归入「其他」，闭合 360°（`total - topSum`）。
+- **渲染条件**：`expenseCents > 0` 且分类非空时显示饼状图，否则隐藏。
+- **交互**：扇区/图例可点选高亮；圆心显示名称/金额/占比；详情面板含笔数、日均、最近流水与「查看流水」下钻；「其他」展开剩余分类（直播查询）。
+- **图例**：标签名 + 占比百分数，位于饼状图下方，与列表色点共用 `PIE_COLORS`。
 
 ### 24.3 侧栏导航技术决策
 
@@ -1026,3 +1027,21 @@ interface SemesterBudgetEngine {
 - 报告详情：概览、双环比、预算块、可点分类、本地洞察卡、仅当有 `analysisText` 时显示 AI。
 - 分类下钻：`HomeScreen` → `TransactionManageScreen(initialStart/End/TagIds)` + `applyWindowFilter`。
 - `WeeklyReportNotifyWorker`：PeriodicWork 下周日提醒「本周消费复盘已更新」。
+
+---
+
+## 26. AI 备注抽样与记一笔分类建议
+
+> 触发时机：报告 AI 结合分类代表备注；记一笔按备注即时建议已有标签。
+
+### 26.1 记一笔备注猜分类（1A）
+
+- `SuggestTagsFromNoteUseCase`：复用 `NLTransactionParser.generate`；候选标签全名与整理同源；仅 ATTACH 已有标签，最多 3 个；失败/无 API → 空列表。
+- `QuickAddViewModel`：`onManualNoteChange` debounce 300ms；`manualNote` 非空且用户未主动选分类时触发；频次预选在输入备注时清除以便建议；结果写入 `noteSuggestedTags`，与 `suggestedTags` 分区展示。
+- UI：「根据备注建议」SuggestionChip 行；点选走 `onSelectTag`；已选分类后隐藏。
+
+### 26.2 报告备注抽样（2B）
+
+- `TransactionRepository.getExpenseNotesByCategory`：DAO 按金额降序取非空备注，仓储按 `tagId` 分组截断。
+- `GenerateReportUseCase`：仅对 Top 分类过滤抽样结果，传入 `ReportPromptBuilder`。
+- Prompt：追加「各类代表备注」；系统指令可结合备注理解场景；合计备注字符硬顶 800。
