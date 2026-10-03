@@ -213,6 +213,7 @@ class QuickAddViewModel @Inject constructor(
      * 重新加载建议分类与根标签名映射；连续调用会取消上一次尚未完成的刷新，避免陈旧结果覆盖新结果。
      * NL 模式下仅更新建议与根名映射，不触碰 [QuickAddUiState.selectedTagId] 与 [QuickAddUiState.nlTagId]，
      * 防止异步刷新抹掉解析命中或用户手动修正的标签选择。数字模式下默认预选首个建议标签；
+     * 用户已手动选分类时保留 [QuickAddUiState.selectedTagId]。
      * [preselectTagId] 非空时优先预选该标签（新建标签成功后保持新标签选中）。
      */
     fun refreshSuggestedTags(preselectTagId: Long? = null) {
@@ -235,9 +236,14 @@ class QuickAddViewModel @Inject constructor(
                     rootNameById = rootNameById,
                 )
             } else {
+                val nextSelected = when {
+                    preselectTagId != null -> preselectTagId
+                    tagChosenByUser -> state.selectedTagId
+                    else -> tags.firstOrNull()?.id
+                }
                 state.copy(
                     suggestedTags = tags,
-                    selectedTagId = preselectTagId ?: tags.firstOrNull()?.id,
+                    selectedTagId = nextSelected,
                     rootNameById = rootNameById,
                 )
             }
@@ -397,15 +403,9 @@ class QuickAddViewModel @Inject constructor(
         _uiState.update { it.copy(transferNote = note) }
     }
 
-    /** 更新数字模式收支的手动备注；非空且用户未主动选分类时触发备注猜分类。 */
+    /** 更新数字模式收支的手动备注；非空且用户未主动选分类时触发备注猜分类（不清除频次预选）。 */
     fun onManualNoteChange(note: String) {
-        _uiState.update { state ->
-            val clearPreselect = note.isNotBlank() && !tagChosenByUser && !state.nlMode && !state.transferMode
-            state.copy(
-                manualNote = note,
-                selectedTagId = if (clearPreselect) null else state.selectedTagId,
-            )
-        }
+        _uiState.update { it.copy(manualNote = note) }
         scheduleNoteSuggest(note)
     }
 
@@ -419,7 +419,7 @@ class QuickAddViewModel @Inject constructor(
         noteSuggestJob = viewModelScope.launch {
             delay(NOTE_SUGGEST_DEBOUNCE_MS)
             val state = _uiState.value
-            if (state.transferMode || state.nlMode || tagChosenByUser || state.selectedTagId != null) {
+            if (state.transferMode || state.nlMode || tagChosenByUser) {
                 _uiState.update { it.copy(noteSuggestLoading = false) }
                 return@launch
             }
@@ -434,7 +434,7 @@ class QuickAddViewModel @Inject constructor(
             }.getOrDefault(emptyList())
             // 仍满足触发条件才回写，避免用户已选手动分类后被覆盖
             val latest = _uiState.value
-            if (!tagChosenByUser && latest.selectedTagId == null &&
+            if (!tagChosenByUser &&
                 latest.manualNote.trim() == trimmed && !latest.transferMode && !latest.nlMode
             ) {
                 _uiState.update {
@@ -617,6 +617,7 @@ class QuickAddViewModel @Inject constructor(
         viewModelScope.launch {
             runCatching { tagRepository.addSubTag(parentId = rootId, name = name, icon = null) }
                 .onSuccess { newId ->
+                    tagChosenByUser = true
                     _uiState.update { current ->
                         if (current.nlMode) {
                             current.copy(selectedTagId = newId, nlTagId = newId)

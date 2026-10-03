@@ -1149,7 +1149,7 @@ class QuickAddViewModelTest {
     }
 
     @Test
-    fun `note suggest fills chips after debounce when no selected tag`() = runTest {
+    fun `note suggest fills chips after debounce while keeping frequency preselect`() = runTest {
         val standard = StandardTestDispatcher(testScheduler)
         Dispatchers.setMain(standard)
         val learning = tag(1L, "学习")
@@ -1162,16 +1162,39 @@ class QuickAddViewModelTest {
         }
         val viewModel = viewModel(tagRepo, FakeTransactionRepository(), nlParser)
         runCurrent()
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
 
         viewModel.onManualNoteChange("买教材")
         assertTrue(viewModel.uiState.value.noteSuggestedTags.isEmpty())
-        assertNull(viewModel.uiState.value.selectedTagId)
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
 
         advanceTimeBy(300)
         runCurrent()
 
         assertEquals(listOf(learning), viewModel.uiState.value.noteSuggestedTags)
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
         assertEquals(1, nlParser.generateCalls)
+    }
+
+    @Test
+    fun `save with note uses frequency preselect when suggestion not tapped`() = runTest {
+        val txRepo = FakeTransactionRepository()
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+            rootTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val viewModel = viewModel(tagRepo, txRepo)
+        runCurrent()
+        assertEquals(1L, viewModel.uiState.value.selectedTagId)
+
+        viewModel.onDigit('5')
+        viewModel.onManualNoteChange("午饭钱")
+        viewModel.onSave()
+        runCurrent()
+
+        assertEquals(1, txRepo.added.size)
+        assertEquals(1L, txRepo.added.single().tagId)
+        assertEquals("午饭钱", txRepo.added.single().note)
     }
 
     @Test
@@ -1197,6 +1220,25 @@ class QuickAddViewModelTest {
 
         assertTrue(viewModel.uiState.value.noteSuggestedTags.isEmpty())
         assertEquals(0, nlParser.generateCalls)
+    }
+
+    @Test
+    fun `refreshSuggestedTags keeps user chosen tag in digital mode`() = runTest {
+        val tagRepo = FakeTagRepository().apply {
+            recentTags = listOf(tag(1L, "学习"), tag(2L, "社交"))
+        }
+        val viewModel = viewModel(tagRepo, FakeTransactionRepository())
+        runCurrent()
+
+        viewModel.onSelectTag(2L)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
+
+        tagRepo.recentTags = listOf(tag(3L, "生活"))
+        viewModel.refreshSuggestedTags()
+        runCurrent()
+
+        assertEquals(listOf(tag(3L, "生活")), viewModel.uiState.value.suggestedTags)
+        assertEquals(2L, viewModel.uiState.value.selectedTagId)
     }
 
     private fun viewModel(
