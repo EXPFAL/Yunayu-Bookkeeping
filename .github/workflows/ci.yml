@@ -76,7 +76,7 @@ jobs:
           cp "$SRC" "$OUT"
           NOTES=$(mktemp)
           cat > "$NOTES" <<EOF
-          云屿记账 ${VERSION_NAME}（debug 签名）。与同一把 debug.keystore 安装的设备可覆盖更新。
+          云娅记账 ${VERSION_NAME}（debug 签名）。与同一把 debug.keystore 安装的设备可覆盖更新。
 
           构建自 tag \`${{ github.ref_name }}\`。
           EOF

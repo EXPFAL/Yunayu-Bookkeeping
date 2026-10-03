@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" height="96" alt="云屿记账图标" />
+  <img src="app/src/main/res/mipmap-xxxhdpi/ic_launcher.png" width="96" height="96" alt="云娅记账图标" />
 </p>
 
-<h1 align="center">云屿记账 · Yunayu Bookkeeping</h1>
+<h1 align="center">云娅记账 · Yunayu Bookkeeping</h1>
 
 <p align="center">个人独占 · 学生向 Android 原生记账应用</p>
 
@@ -16,7 +16,7 @@
 
 ## 简介
 
-云屿记账是一款**个人独占、学生向**的 Android 原生记账应用，围绕三个诉求设计：**学生财务自律**、**学业生活融合**、**极简高效记录**。
+云娅记账是一款**个人独占、学生向**的 Android 原生记账应用，围绕三个诉求设计：**学生财务自律**、**学业生活融合**、**极简高效记录**。
 
 数据全部存放在本机（Room + DataStore），单机运行、无云同步、无多用户体系——它是一件私人工具，而不是通用记账平台。
 
