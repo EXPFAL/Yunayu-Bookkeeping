@@ -20,8 +20,8 @@ interface TransactionRepository {
     suspend fun getById(id: Long): Transaction?
 
     /**
-     * 更新一笔交易（按主键整行覆盖金额 / 类型 / 备注 / 标签 / 账户），
-     * 保留原 `occurredAt` 与 `createdAt`（编辑不改变发生时间与创建时间）。
+     * 更新一笔交易（按主键整行覆盖金额 / 类型 / 备注 / 标签 / 账户 / 发生时间），
+     * 保留原 `createdAt`（编辑不改变创建时间）。
      */
     suspend fun updateTransaction(transaction: Transaction)
 

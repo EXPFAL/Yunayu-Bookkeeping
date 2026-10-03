@@ -65,6 +65,17 @@ interface TransactionDao {
     @Insert
     suspend fun insert(transaction: TransactionEntity): Long
 
+    @Insert
+    suspend fun insertAll(transactions: List<TransactionEntity>): List<Long>
+
+    /** 一次性获取全部交易（备份导出）。 */
+    @Query("SELECT * FROM transactions ORDER BY id ASC")
+    suspend fun getAll(): List<TransactionEntity>
+
+    /** 清空交易表（备份导入前使用）。 */
+    @Query("DELETE FROM transactions")
+    suspend fun deleteAll()
+
     @Update
     suspend fun update(entity: TransactionEntity)
 

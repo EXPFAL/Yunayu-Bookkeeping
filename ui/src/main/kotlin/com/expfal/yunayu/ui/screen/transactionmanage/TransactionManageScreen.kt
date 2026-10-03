@@ -77,6 +77,7 @@ fun TransactionManageScreen(
     var showTagSheet by remember { mutableStateOf(false) }
     var showOrganize by remember { mutableStateOf(false) }
     var editingTransactionId by remember { mutableStateOf<Long?>(null) }
+    var editingTransferId by remember { mutableStateOf<Long?>(null) }
 
     LaunchedEffect(initialStartMs, initialEndMs, initialTagIds) {
         val start = initialStartMs
@@ -87,19 +88,22 @@ fun TransactionManageScreen(
     }
 
     Crossfade(
-        targetState = editingTransactionId,
+        targetState = editingTransactionId to editingTransferId,
         modifier = Modifier.background(MaterialTheme.colorScheme.surface),
-    ) { targetId ->
-        if (targetId != null) {
-            EditTransactionScreen(
-                transactionId = targetId,
+    ) { (txId, tfId) ->
+        when {
+            txId != null -> EditTransactionScreen(
+                transactionId = txId,
                 onBack = { editingTransactionId = null },
                 onSaved = { editingTransactionId = null },
             )
-        } else if (showOrganize) {
-            OrganizeScreen(onBack = { showOrganize = false })
-        } else {
-            TransactionManageContent(
+            tfId != null -> EditTransferScreen(
+                transferId = tfId,
+                onBack = { editingTransferId = null },
+                onSaved = { editingTransferId = null },
+            )
+            showOrganize -> OrganizeScreen(onBack = { showOrganize = false })
+            else -> TransactionManageContent(
                 uiState = uiState,
                 viewModel = viewModel,
                 snackbarHostState = snackbarHostState,
@@ -109,6 +113,7 @@ fun TransactionManageScreen(
                 onOpenTagSheet = { showTagSheet = true },
                 onDismissTagSheet = { showTagSheet = false },
                 onEditTransaction = { editingTransactionId = it },
+                onEditTransfer = { editingTransferId = it },
             )
         }
     }
@@ -121,6 +126,7 @@ private fun ManageTabContent(
     viewModel: TransactionManageViewModel,
     onOpenTagSheet: () -> Unit,
     onEditTransaction: (Long) -> Unit,
+    onEditTransfer: (Long) -> Unit,
 ) {
     if (uiState.tab == ManageTab.TRANSFERS) {
         when {
@@ -128,6 +134,7 @@ private fun ManageTabContent(
             else -> TransferList(
                 transfers = uiState.transfers,
                 onDeleteRequest = viewModel::requestDeleteTransfer,
+                onEditRequest = onEditTransfer,
             )
         }
     } else {
@@ -168,6 +175,7 @@ private fun TransactionManageContent(
     onOpenTagSheet: () -> Unit,
     onDismissTagSheet: () -> Unit,
     onEditTransaction: (Long) -> Unit,
+    onEditTransfer: (Long) -> Unit,
 ) {
     BackHandler(onBack = onBack)
 
@@ -215,6 +223,7 @@ private fun TransactionManageContent(
                 viewModel = viewModel,
                 onOpenTagSheet = onOpenTagSheet,
                 onEditTransaction = onEditTransaction,
+                onEditTransfer = onEditTransfer,
             )
         }
     }
@@ -484,12 +493,14 @@ private fun ManageTabRow(
 private fun TransferList(
     transfers: List<TransferRow>,
     onDeleteRequest: (TransferRow) -> Unit,
+    onEditRequest: (Long) -> Unit,
 ) {
     LazyColumn(Modifier.fillMaxSize()) {
         items(transfers, key = { it.id }) { transfer ->
             TransferRowItem(
                 transfer = transfer,
                 onDelete = { onDeleteRequest(transfer) },
+                onEdit = { onEditRequest(transfer.id) },
             )
         }
     }
@@ -500,10 +511,14 @@ private fun TransferList(
 private fun TransferRowItem(
     transfer: TransferRow,
     onDelete: () -> Unit,
+    onEdit: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onEdit)
+            .padding(vertical = 8.dp),
     ) {
         Column(Modifier.weight(1f)) {
             Text(

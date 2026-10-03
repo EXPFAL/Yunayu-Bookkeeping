@@ -21,6 +21,13 @@ interface AccountDao {
     @Insert
     suspend fun insert(account: AccountEntity): Long
 
+    @Insert
+    suspend fun insertAll(accounts: List<AccountEntity>): List<Long>
+
+    /** 清空账户表（备份导入前使用，调用方须先清子表）。 */
+    @Query("DELETE FROM accounts")
+    suspend fun deleteAll()
+
     /** 统计同名账户数量（重名校验）。 */
     @Query("SELECT COUNT(*) FROM accounts WHERE name = :name")
     suspend fun countByName(name: String): Int

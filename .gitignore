@@ -22,6 +22,10 @@ captures/
 # 仓库备份 bundle（本地备份产物，不入库）
 Backups/
 
+# Android 签名私钥（永不入库）
+*.jks
+*.keystore
+
 # 系统文件
 .DS_Store
 Thumbs.db

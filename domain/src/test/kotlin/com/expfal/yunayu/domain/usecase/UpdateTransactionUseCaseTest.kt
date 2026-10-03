@@ -22,7 +22,9 @@ class UpdateTransactionUseCaseTest {
 
     @Test
     fun `updates transaction then invalidates covering reports`() = runTest {
-        val txRepo = FakeTransactionRepository()
+        val txRepo = FakeTransactionRepository().apply {
+            existingById[42L] = transaction(id = 42L, occurredAt = 900L)
+        }
         val reportRepo = FakeReportRepository()
         val useCase = UpdateTransactionUseCase(txRepo, reportRepo)
         val transaction = transaction(id = 42L, occurredAt = 900L)
@@ -31,6 +33,21 @@ class UpdateTransactionUseCaseTest {
 
         assertEquals(listOf(transaction), txRepo.updated)
         assertEquals(listOf(900L), reportRepo.invalidatedEpochMillis)
+    }
+
+    @Test
+    fun `invalidates both old and new occurredAt when time changes`() = runTest {
+        val txRepo = FakeTransactionRepository().apply {
+            existingById[42L] = transaction(id = 42L, occurredAt = 100L)
+        }
+        val reportRepo = FakeReportRepository()
+        val useCase = UpdateTransactionUseCase(txRepo, reportRepo)
+        val updated = transaction(id = 42L, occurredAt = 200L)
+
+        useCase(updated)
+
+        assertEquals(listOf(updated), txRepo.updated)
+        assertEquals(setOf(100L, 200L), reportRepo.invalidatedEpochMillis.toSet())
     }
 
     @Test
@@ -129,13 +146,14 @@ class UpdateTransactionUseCaseTest {
     private class FakeTransactionRepository : TransactionRepository {
 
         val updated = mutableListOf<Transaction>()
+        val existingById = mutableMapOf<Long, Transaction>()
         var updateError: Throwable? = null
 
         override suspend fun add(transaction: Transaction): Long = 0L
 
         override suspend fun delete(transactionId: Long) = Unit
 
-        override suspend fun getById(id: Long): Transaction? = null
+        override suspend fun getById(id: Long): Transaction? = existingById[id]
 
         override suspend fun updateTransaction(transaction: Transaction) {
             updateError?.let { throw it }
@@ -177,7 +195,7 @@ class UpdateTransactionUseCaseTest {
         override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
 
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
-    
+
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null

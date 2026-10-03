@@ -17,13 +17,12 @@ android {
         minSdk = 26
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // 在线 NL 解析配置：读取根 local.properties（缺省/空白值回退默认值），key 绝不出现在提交文件
+        // 在线 NL：URL/模型可读 local.properties；API Key 永不写入 BuildConfig（公开包只认应用内「API 管理」）
         val localProps = loadLocalProperties()
         val nlBaseUrl = localProps.getProperty("NL_API_BASE_URL")?.takeIf { it.isNotBlank() }
             ?: "https://api.deepseek.com"
         val nlModel = localProps.getProperty("NL_API_MODEL")?.takeIf { it.isNotBlank() }
             ?: "deepseek-chat"
-        val nlApiKey = localProps.getProperty("NL_API_KEY")?.takeIf { it.isNotBlank() } ?: ""
         buildConfigField(
             "String",
             "NL_API_BASE_URL",
@@ -37,7 +36,7 @@ android {
         buildConfigField(
             "String",
             "NL_API_KEY",
-            nlApiKey.asBuildConfigString(),
+            "".asBuildConfigString(),
         )
     }
 

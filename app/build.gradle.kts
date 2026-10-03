@@ -15,11 +15,29 @@ android {
         applicationId = "com.expfal.yunayu.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
+    }
+
+    // CI 可注入 YUNAYU_KEYSTORE_FILE 使用同一把 debug 钥匙签包；本地无该变量时沿用默认 debug。
+    val yunayuKeystoreFile = System.getenv("YUNAYU_KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
+    signingConfigs {
+        if (yunayuKeystoreFile != null) {
+            create("yunayuDebug") {
+                storeFile = file(yunayuKeystoreFile)
+                storePassword = System.getenv("YUNAYU_KEYSTORE_PASSWORD") ?: "android"
+                keyAlias = System.getenv("YUNAYU_KEY_ALIAS") ?: "androiddebugkey"
+                keyPassword = System.getenv("YUNAYU_KEY_PASSWORD") ?: "android"
+            }
+        }
     }
 
     buildTypes {
+        debug {
+            if (yunayuKeystoreFile != null) {
+                signingConfig = signingConfigs.getByName("yunayuDebug")
+            }
+        }
         release {
             isMinifyEnabled = false
         }

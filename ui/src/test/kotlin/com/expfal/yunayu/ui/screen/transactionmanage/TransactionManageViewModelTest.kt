@@ -580,7 +580,7 @@ class TransactionManageViewModelTest {
         override suspend fun getById(id: Long): Transaction? = null
 
         override suspend fun updateTransaction(transaction: Transaction) = Unit
-    
+
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
@@ -673,6 +673,10 @@ class TransactionManageViewModelTest {
         var deleteError: Throwable? = null
 
         override fun observeTransfers(): Flow<List<Transfer>> = transfersFlow
+
+        override suspend fun getById(id: Long): Transfer? = null
+
+        override suspend fun updateTransfer(transfer: Transfer) = Unit
 
         override suspend fun insertTransfer(transfer: Transfer): Long = 0L
 

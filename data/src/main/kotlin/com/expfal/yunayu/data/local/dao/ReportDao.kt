@@ -1,6 +1,7 @@
 package com.expfal.yunayu.data.local.dao
 
 import androidx.room.Dao
+import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Upsert
 import com.expfal.yunayu.data.local.entity.ReportEntity
@@ -14,6 +15,10 @@ interface ReportDao {
     @Query("SELECT * FROM reports WHERE report_type = :type ORDER BY period_key DESC")
     fun observeByType(type: String): Flow<List<ReportEntity>>
 
+    /** 一次性获取全部报告（备份导出）。 */
+    @Query("SELECT * FROM reports ORDER BY id ASC")
+    suspend fun getAll(): List<ReportEntity>
+
     /** 按周期类型 + 期键一次性查询报告；不存在返回 `null`。 */
     @Query("SELECT * FROM reports WHERE report_type = :type AND period_key = :periodKey LIMIT 1")
     suspend fun getByKey(type: String, periodKey: String): ReportEntity?
@@ -21,6 +26,13 @@ interface ReportDao {
     /** 插入或更新报告（冲突判定依赖唯一索引 `(report_type, period_key)`）。 */
     @Upsert
     suspend fun upsert(report: ReportEntity)
+
+    @Insert
+    suspend fun insertAll(reports: List<ReportEntity>): List<Long>
+
+    /** 清空报告表（备份导入前使用）。 */
+    @Query("DELETE FROM reports")
+    suspend fun deleteAll()
 
     /**
      * 将窗口覆盖 [epochMillis] 的报告状态置为 STALE。

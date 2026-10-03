@@ -862,7 +862,7 @@ interface SemesterBudgetEngine {
 
 ### 22.4 版本记录
 
-- `versionName` 改为 1.0.0（初始正式版），`versionCode` 保持 1。
+- `versionName` 1.0.0 → 1.1.0（备份 / 编辑时间与转账 / CI），`versionCode` 1 → 2。
 
 ### 22.5 已知限制
 
@@ -1045,3 +1045,13 @@ interface SemesterBudgetEngine {
 - `TransactionRepository.getExpenseNotesByCategory`：DAO 按金额降序取非空备注，仓储按 `tagId` 分组截断。
 - `GenerateReportUseCase`：仅对 Top 分类过滤抽样结果，传入 `ReportPromptBuilder`。
 - Prompt：追加「各类代表备注」；系统指令可结合备注理解场景；合计备注字符硬顶 800。
+
+---
+
+## 41. 1.1.0：备份、编辑时间/转账、去密钥 APK、CI
+
+- **签名**：`.gitignore` 忽略 `*.jks` / `*.keystore`；`scripts/backup-debug-keystore.*` 拷贝本机 debug 钥匙到 `Backups/`；CI Secret `YUNAYU_DEBUG_KEYSTORE_B64`；`YUNAYU_KEYSTORE_FILE` 可选注入 debug 签名。
+- **API Key**：`data/build.gradle.kts` 的 `BuildConfig.NL_API_KEY` 恒为空串，公开包只认「API 设置」DataStore。
+- **备份**：`LedgerBackup` + `LedgerBackupCodec` + `BackupRepository` 整库替换 JSON（不含 API Key）；菜单「备份与恢复」走 SAF。
+- **编辑**：`UpdateTransactionUseCase` 双窗口标脏；转账 `getById`/`update` + `UpdateTransferUseCase` + `EditTransferScreen`。
+- **CI**：`.github/workflows/ci.yml` — main PR/push 跑 `test`+`ktlintCheck`；`v*` tag 打 APK 并发 Release。

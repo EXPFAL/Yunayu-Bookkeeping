@@ -44,7 +44,7 @@ data class EditTransactionUiState(
     val allTagsByRoot: Map<Tag, List<Tag>> = emptyMap(),
     val saving: Boolean = false,
     val saveFailed: Boolean = false,
-    /** 编辑保存时保持不变的原始发生时间戳。 */
+    /** 当前编辑中的发生时间戳（可改）。 */
     val occurredAt: Long = 0L,
 )
 
@@ -61,11 +61,9 @@ sealed interface EditTransactionEvent {
 /**
  * 「交易编辑」ViewModel：打开时按主键加载交易详情并预填，保存走 [UpdateTransactionUseCase]。
  *
- * 编辑范围仅限金额 / 收支类型 / 备注 / 标签 / 账户，发生时间 [EditTransactionUiState.occurredAt]
- * 保持原值不可编辑。金额以文本维护（整数 ≤7 位、小数 ≤2 位），落库前经 [parseAmountToCents] 转
- * 「分」。成功保存后经 [events] 发出一次性 [EditTransactionEvent.Saved]，失败发出
- * [EditTransactionEvent.SaveFailed]。事件流无回放、缓冲为 1 且满时丢弃最旧，杜绝下次打开弹层
- * 回放陈旧事件。
+ * 编辑范围含金额 / 收支类型 / 备注 / 标签 / 账户 / 发生时间。金额以文本维护（整数 ≤7 位、
+ * 小数 ≤2 位），落库前经 [parseAmountToCents] 转「分」。成功保存后经 [events] 发出一次性
+ * [EditTransactionEvent.Saved]，失败发出 [EditTransactionEvent.SaveFailed]。
  */
 @HiltViewModel
 class EditTransactionViewModel @Inject constructor(
@@ -168,6 +166,12 @@ class EditTransactionViewModel @Inject constructor(
     /** 更新备注文本。 */
     fun onNoteChange(note: String) {
         _uiState.update { it.copy(note = note) }
+    }
+
+    /** 更新发生时间；saving 期间忽略。 */
+    fun onOccurredAtChange(occurredAt: Long) {
+        if (_uiState.value.saving) return
+        _uiState.update { it.copy(occurredAt = occurredAt) }
     }
 
     /** 尝试保存：金额非法或非正数、交易未加载完成时忽略；否则按当前状态更新落库。 */

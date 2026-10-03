@@ -103,26 +103,30 @@
    - 推荐契约：GetRecentCategoriesUseCase 推荐仅叶子——recent 过滤非叶子、支出补足 = 各支出根子标签平铺（排除收入根子树）、收入补足 = 仅收入子标签（不含收入根）、无子根按叶子处理、getChildren 失败降级（recent 原样保留 + 补足为空不崩）；叶子判定基于「拥有子标签」而非 parentId 字段
    - 验收要点：父类仅可折叠/展开、不可选中；三宿主同时生效；历史父类标签交易照常展示；快捷推荐仅返回叶子
    - 测试：GetRecentCategoriesUseCaseTest 全量重写 11 用例
-23. 版本号（已随本次迭代交付）
-   - versionName 改为 1.0.0（初始正式版），versionCode 保持 1
+23. 版本号（已随本次迭代交付；1.1.0 再升）
+   - versionName 1.0.0 → 1.1.0，versionCode 1 → 2
 24. App 图标（已随本次迭代交付）
    - 方案：以用户提供的卡通图（粉色圆脸表情，与品牌主题同源）替换启动器图标——mipmap 全密度 ic_launcher / ic_launcher_round + adaptive icon（background = 品牌浅粉 #FFF8F6 颜色资源、foreground = 提取的表情线条层，因源图脸体与背景同色采用「线条前景 + 浅粉底色」方案）；AndroidManifest 新增 icon / roundIcon 引用；minSdk=26 真机恒走 adaptive
 25. 工程卫生（已随本次迭代交付）
    - .gitignore 追加 androidtest_assemble.log / gate_run.log（门禁/构建日志不入库）
 
 ### 交易编辑 / 期初余额 / 转账迭代（已随本次迭代交付）
-26. 交易编辑（已随本次迭代交付）
-   - 方案：收支管理页行点击进编辑弹层；可编辑金额 / 类型 / 备注 / 标签 / 账户，时间不可编辑；保存后覆盖窗口的报告置 FAILED 可手动重试
-   - 技术要点：TransactionDao @Update 整行覆盖 + getById 保留 createdAt；UpdateTransactionUseCase 校验金额>0 / 类型合法 / id 非 0；EditTransactionSheet 复用 QuickAdd 形态（金额键盘 / 收支切换 / 备注 / 标签 / 账户 / 保存+取消）；编辑保存后报告标脏复用删除单点循环
-   - 口径：编辑仅限金额 / 类型 / 备注 / 标签 / 账户，时间字段本期不可编辑；取消编辑不产生任何写入
+26. 交易编辑（已随本次迭代交付；1.1.0 支持改时间）
+   - 方案：收支管理页行点击进编辑；可编辑金额 / 类型 / 备注 / 标签 / 账户 / 发生时间；保存后覆盖窗口的报告置 STALE 可手动重试
+   - 技术要点：UpdateTransactionUseCase 更新前读旧 occurredAt，成功后对旧、新时刻各标脏一次；DateTimePickerFlow 选日期+时间
+   - 口径：取消编辑不产生任何写入
 27. 账户期初余额（已随本次迭代交付）
    - 方案：账户可设期初余额；持有资金口径 = 含期初（总资金 = Σ账户余额 + 未指定净额 = 期初总和 + 累计净结余）
    - 技术要点：schema v6 accounts 加 initial_balance_cents（DEFAULT 0）；账户余额 = 期初 + 交易净额 + 转账净额；observeHeldCents = 期初总和 + 交易净结余
    - 口径：总资金恒等——各账户余额之和 + 未指定账户 = 期初总和 + 累计净结余；期初余额非负
-28. 转账（已随本次迭代交付）
-   - 方案：快速记账弹层 TypeToggle 三段（支出 / 收入 / 转账）；转账不计收支统计 / 预算 / 报告 / 推荐，仅影响账户余额（总资金守恒）；转账支持录入 / 查看 / 删除，编辑不做；删除账户级联删除其转账（确认弹窗含转账数提示）
-   - 技术要点：独立 transfers 表（双 FK ON DELETE CASCADE + 三索引）；RecordTransferUseCase 仅注入 TransferRepository，不触发报告标脏；收支管理页转账 Tab 查看 / 删除
-   - 口径：转账在账户间守恒不改变总额（Σ转出 = Σ转入）；NL 不支持转账
+28. 转账（已随本次迭代交付；1.1.0 支持编辑）
+   - 方案：快速记账 TypeToggle 三段（支出 / 收入 / 转账）；转账不计收支统计 / 预算 / 报告 / 推荐，仅影响账户余额；支持录入 / 查看 / 删除 / 编辑（金额、账户、备注、时间）
+   - 技术要点：UpdateTransferUseCase 校验与录入相同且不标脏报告；EditTransferScreen 对齐编辑交易形态
+   - 口径：转账在账户间守恒不改变总额；NL 不支持转账
+29. 账本备份与恢复（1.1.0）
+   - 方案：功能菜单「备份与恢复」；SAF 导出 JSON / 导入整库替换；不含 API Key
+   - 技术要点：format=yunayu-backup / formatVersion=1 / dbVersion=10；Room 单事务清空再 INSERT 指定 id；DataStore 写月度预算、上次账户、通知去重键
+   - 口径：dbVersion 不匹配则拒绝导入；导入后 API 须在设置里重填
 
 ## 二、明确砍掉的功能（scope 红线，实现任何一项即视为违规）
 - 多成员/共享记账（个人使用无需权限体系）

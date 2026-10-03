@@ -28,6 +28,15 @@ class NotificationPreferencesRepositoryImpl @Inject constructor(
         }
     }
 
+    override suspend fun getSubscriptionReminderKeys(): Set<String> =
+        readSet(KEY_SUBSCRIPTION_REMINDERS)
+
+    override suspend fun replaceSubscriptionReminderKeys(keys: Set<String>) {
+        context.notificationPrefsDataStore.edit { prefs ->
+            prefs[KEY_SUBSCRIPTION_REMINDERS] = keys
+        }
+    }
+
     private suspend fun readSet(key: androidx.datastore.preferences.core.Preferences.Key<Set<String>>): Set<String> =
         context.notificationPrefsDataStore.data.map { it[key].orEmpty() }.first()
 

@@ -48,4 +48,8 @@ interface TagDao {
     /** 按 id 删除标签（子树级联由外键 ON DELETE CASCADE 执行）。 */
     @Query("DELETE FROM tags WHERE id = :tagId")
     suspend fun deleteById(tagId: Long)
+
+    /** 清空标签表（备份导入前使用）。 */
+    @Query("DELETE FROM tags")
+    suspend fun deleteAll()
 }
