@@ -12,7 +12,16 @@ class ExpenseSeedTagsTest {
     fun `new life seed has stockpile dining-out and business stock`() {
         val life = ExpenseSeedTags.SEED_SUB_TAGS.getValue(ExpenseSeedTags.LIFE_ROOT_NAME)
         assertEquals(
-            listOf("囤货三餐", "外出就餐", "饮品", "交通", "购物", "生活缴费", "医疗", "经营进货"),
+            listOf(
+                "囤货三餐",
+                "外出就餐",
+                "饮品",
+                "交通",
+                "购物",
+                "生活缴费",
+                "医疗",
+                "经营进货",
+            ),
             life,
         )
         assertFalse("餐饮" in life)
@@ -39,8 +48,15 @@ class ExpenseSeedTagsTest {
             listOf("游戏", "运动", "出游", "骑行"),
             ExpenseSeedTags.SEED_SUB_TAGS.getValue(ExpenseSeedTags.FUN_ROOT_NAME),
         )
-        assertTrue(ExpenseSeedTags.ROOT_TAGS.map { it.first }.containsAll(
-            listOf("学习", "社交", "生活", "娱乐"),
-        ))
+        assertTrue(
+            ExpenseSeedTags.ROOT_TAGS.map { it.first }.containsAll(
+                listOf(
+                    "学习",
+                    "社交",
+                    "生活",
+                    "娱乐",
+                ),
+            ),
+        )
     }
 }
