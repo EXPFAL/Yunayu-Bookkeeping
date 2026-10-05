@@ -863,6 +863,7 @@ interface SemesterBudgetEngine {
 ### 22.4 版本记录
 
 - `versionName` 1.0.0 → 1.1.0（备份 / 编辑时间与转账 / CI），`versionCode` 1 → 2。
+- `versionName` 1.1.0 → 1.2.0（周预算余量、支出标签精简、本地生活方式洞察），`versionCode` 2 → 3。
 
 ### 22.5 已知限制
 

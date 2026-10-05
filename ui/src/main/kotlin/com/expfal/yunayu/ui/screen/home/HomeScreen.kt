@@ -101,15 +101,14 @@ private enum class FullScreen {
 @Composable
 fun HomeScreen(modifier: Modifier = Modifier) {
     var showBudgetSetup by remember { mutableStateOf(false) }
-    var pageStack by remember { mutableStateOf(listOf(FullScreen.NONE)) }
+    val pageStackHolder = remember { mutableStateOf(listOf(FullScreen.NONE)) }
+    var pageStack by pageStackHolder
     var pendingFullScreen by remember { mutableStateOf<FullScreen?>(null) }
     var drillStartMs by remember { mutableStateOf<Long?>(null) }
     var drillEndMs by remember { mutableStateOf<Long?>(null) }
     var drillTagIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val budgetViewModel: MonthlyBudgetViewModel = viewModel()
-    val budgetState by budgetViewModel.uiState.collectAsStateWithLifecycle()
     val homeViewModel: HomeViewModel = viewModel()
-    val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     // F3 修复：提升 listState 到 when 分发之外，跨全屏切换存活，避免返回时滚动位置丢失
@@ -118,21 +117,24 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(drawerState) {
         snapshotFlow { drawerState.currentValue to pendingFullScreen }
             .collect { (value, pending) ->
-                if (value == DrawerValue.Closed && pending != null && pageStack.last() == FullScreen.NONE) {
+                if (value == DrawerValue.Closed && pending != null && pageStackHolder.value.last() == FullScreen.NONE) {
                     pendingFullScreen = null
-                    pageStack = pageStack + pending
+                    pageStackHolder.value = pageStackHolder.value + pending
                 }
             }
     }
 
-    val popPage: () -> Unit = {
-        if (pageStack.size > 1) {
-            val leaving = pageStack.last()
-            pageStack = pageStack.dropLast(1)
-            if (leaving == FullScreen.TRANSACTIONS) {
-                drillStartMs = null
-                drillEndMs = null
-                drillTagIds = emptySet()
+    val popPage = remember {
+        {
+            val stack = pageStackHolder.value
+            if (stack.size > 1) {
+                val leaving = stack.last()
+                pageStackHolder.value = stack.dropLast(1)
+                if (leaving == FullScreen.TRANSACTIONS) {
+                    drillStartMs = null
+                    drillEndMs = null
+                    drillTagIds = emptySet()
+                }
             }
         }
     }
@@ -203,8 +205,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 FullScreen.NONE -> HomeMainContent(
                     modifier = Modifier.fillMaxSize(),
                     homeViewModel = homeViewModel,
-                    homeState = homeState,
-                    budgetState = budgetState,
+                    budgetViewModel = budgetViewModel,
                     drawerState = drawerState,
                     scope = scope,
                     listState = listState,
@@ -230,8 +231,7 @@ fun HomeScreen(modifier: Modifier = Modifier) {
 private fun HomeMainContent(
     modifier: Modifier,
     homeViewModel: HomeViewModel,
-    homeState: HomeUiState,
-    budgetState: MonthlyBudgetUiState,
+    budgetViewModel: MonthlyBudgetViewModel,
     drawerState: androidx.compose.material3.DrawerState,
     scope: kotlinx.coroutines.CoroutineScope,
     listState: LazyListState,
@@ -239,6 +239,8 @@ private fun HomeMainContent(
     onShowQuickAdd: () -> Unit,
     onShowBudgetSetup: () -> Unit,
 ) {
+    val homeState by homeViewModel.uiState.collectAsStateWithLifecycle()
+    val budgetState by budgetViewModel.uiState.collectAsStateWithLifecycle()
     LaunchedEffect(homeViewModel) {
         homeViewModel.events.collect { event ->
             when (event) {

@@ -1,7 +1,9 @@
 package com.expfal.yunayu.domain.util
 
+import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 
 /**
  * 时间窗口纯函数集合：统一「自然月 / 自然年」统计窗口口径（systemDefault 时区，`[start, end)` 半开区间）。
@@ -93,6 +95,47 @@ object TimeWindows {
     /** 将自然年周期键解析为年份；非法键抛 [IllegalArgumentException]。 */
     private fun parseYearKey(periodKey: String): Int =
         periodKey.toIntOrNull() ?: throw IllegalArgumentException("非法年周期键: $periodKey")
+
+    /**
+     * 预算用的「本周 ∩ 本月」起点日期：`max(本周一, 本月 1 日)`。
+     * 跨月周只从本月 1 日起算，不把上月几天摊进本月额度。
+     */
+    fun budgetWeekStart(today: LocalDate): LocalDate {
+        val monday = today.with(DayOfWeek.MONDAY)
+        val monthStart = today.withDayOfMonth(1)
+        return maxOf(monday, monthStart)
+    }
+
+    /** 预算用的「本周 ∩ 本月」不含端终点日期：`min(下周一, 下月 1 日)`。 */
+    fun budgetWeekEndExclusive(today: LocalDate): LocalDate {
+        val nextMonday = today.with(DayOfWeek.MONDAY).plusDays(7)
+        return minOf(nextMonday, monthEnd(today).plusDays(1))
+    }
+
+    fun budgetWeekStartMillis(today: LocalDate): Long =
+        startOfDayMillis(budgetWeekStart(today))
+
+    fun budgetWeekEndExclusiveMillis(today: LocalDate): Long =
+        startOfDayMillis(budgetWeekEndExclusive(today))
+
+    /** 从 [budgetWeekStart] 到月末（含）的天数，至少 1。 */
+    fun daysInMonthFromBudgetWeekStart(today: LocalDate): Int =
+        (ChronoUnit.DAYS.between(budgetWeekStart(today), monthEnd(today)).toInt() + 1)
+            .coerceAtLeast(1)
+
+    /**
+     * 本周落在本月的天数：从 [budgetWeekStart] 到 `min(本周日, 月末)`（含）。
+     * 完整周在月内时为 7；跨月周小于 7。
+     */
+    fun daysOfWeekInMonth(today: LocalDate): Int {
+        val start = budgetWeekStart(today)
+        val sunday = today.with(DayOfWeek.MONDAY).plusDays(6)
+        val last = minOf(sunday, monthEnd(today))
+        return (ChronoUnit.DAYS.between(start, last).toInt() + 1).coerceAtLeast(1)
+    }
+
+    private fun startOfDayMillis(date: LocalDate): Long =
+        date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
     /** 本周一 00:00（系统默认时区）对应的毫秒，作为周窗口含端点起点。 */
     fun weekStartMillis(today: LocalDate): Long {

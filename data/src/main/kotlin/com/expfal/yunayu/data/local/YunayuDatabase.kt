@@ -17,6 +17,7 @@ import com.expfal.yunayu.data.local.entity.TagEntity
 import com.expfal.yunayu.data.local.entity.TransactionEntity
 import com.expfal.yunayu.data.local.entity.TransferEntity
 import com.expfal.yunayu.domain.model.AccountPresets
+import com.expfal.yunayu.domain.model.ExpenseSeedTags
 
 /**
  * Yunayu 数据库。包含 accounts / tags / transactions / transfers / reports / subscriptions
@@ -54,28 +55,14 @@ abstract class YunayuDatabase : RoomDatabase() {
     companion object {
         const val NAME = "yunayu.db"
 
-        /** PRD P0-3 内置四大类根标签（学习/社交/生活/娱乐）。 */
-        private val ROOT_TAGS = listOf(
-            "学习" to "📚",
-            "社交" to "🤝",
-            "生活" to "🏠",
-            "娱乐" to "🎮",
-        )
+        /** PRD P0-3 内置四大类根标签；名与图标见 [ExpenseSeedTags.ROOT_TAGS]。 */
+        private val ROOT_TAGS = ExpenseSeedTags.ROOT_TAGS
 
         /**
-         * 种子子标签：根类名 → 子标签名列表（列表顺序即 sortOrder 递增）。
-         *
-         * v2 来源：用户 2026-06~08 三个月真实账单（307 笔）的消费分类结构归纳，2026-08 决策。
-         * v3 扩充：基于半年账单分析（832 条）追加 4 个子标签——生活「洗衣/水果/医疗」、
-         * 娱乐「骑行」（与「运动」并存），2026-08 决策。
-         * 仅首次建库（onCreate）执行一次，存量库需卸载重装（或经标签管理界面手工添加）才会生效。
+         * 种子子标签：与 [ExpenseSeedTags.SEED_SUB_TAGS] 同一数据源。
+         * 仅首次建库（onCreate）执行一次；存量库由 [com.expfal.yunayu.domain.usecase.EnsureExpenseTagsUseCase] 补增量叶子。
          */
-        private val SEED_SUB_TAGS = mapOf(
-            "学习" to listOf("课本教辅", "考证", "实习", "订阅"),
-            "社交" to listOf("聚餐"),
-            "生活" to listOf("餐饮", "饮品", "交通", "购物", "生活缴费", "洗衣", "水果", "医疗"),
-            "娱乐" to listOf("游戏", "运动", "出游", "骑行"),
-        )
+        private val SEED_SUB_TAGS = ExpenseSeedTags.SEED_SUB_TAGS
 
         /**
          * Schema v1 → v2 迁移（见 SCAFFOLD.md「Schema v2 增强记录」）。
@@ -475,8 +462,8 @@ abstract class YunayuDatabase : RoomDatabase() {
         /**
          * 首次建库种子化四大类根节点及其子标签（SCAFFOLD.md 4.4 / §12）。
          *
-         * 子标签来源：2026-06~08 三个月账单（307 笔）+ 半年账单分析（832 条）扩充（2026-08 决策）。
-         * 本回调仅在 onCreate 首次建库事务内执行一次，存量库需卸载重装才会生效。
+         * 子标签来源：[ExpenseSeedTags]（生活类为囤货三餐 / 外出就餐 / 经营进货等）。
+         * 本回调仅在 onCreate 首次建库事务内执行一次。
          */
         fun seedCallback(): Callback = object : Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {

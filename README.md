@@ -178,7 +178,7 @@ Yunayu-Bookkeeping/
 
 ## 项目状态与已知限制
 
-- 当前版本 `1.1.0`（`versionCode` 2）；GitHub Release 可下载 debug 签名 APK。
+- 当前版本 `1.2.0`（`versionCode` 3）；GitHub Release 可下载 debug 签名 APK。
 - CI：推送 / PR 到 `main` 跑 `test` + `ktlintCheck`；推送 `v*` tag 时（需 Secret `YUNAYU_DEBUG_KEYSTORE_B64`）打 debug APK 并发 Release。
 - release 构建未单独配置正式签名，且未开启代码压缩（`isMinifyEnabled = false`）；日常分发沿用可覆盖安装的 debug 钥匙。
 - 自然语言记账与 AI 报告依赖外部 OpenAI 兼容 API，解析时交易文本会上传；端侧离线模型路线经真机实测后已放弃。

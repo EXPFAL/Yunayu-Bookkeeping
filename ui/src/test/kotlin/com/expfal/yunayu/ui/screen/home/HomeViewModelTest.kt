@@ -269,6 +269,8 @@ class HomeViewModelTest {
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+
+        override suspend fun getBetween(startInclusiveMs: Long, endExclusiveMs: Long): List<RecentTransaction> = emptyList()
     }
 
     /** [AccountRepository] 手写 fake：以 MutableStateFlow 驱动按账户分组余额。 */

@@ -52,10 +52,14 @@ class MonthlyBudgetEngineImplTest {
         assertEquals(3_000L, snapshot.spentCents)
         assertEquals(97_000L, snapshot.remainingCents)
 
-        // 支出窗口应为 [当月 1 日 00:00, 下月 1 日 00:00)
-        val (start, end) = transactionRepository.expenseSumWindows.single()
-        assertEquals(startOfDayMillis(LocalDate.of(2026, 3, 1)), start)
-        assertEquals(startOfDayMillis(LocalDate.of(2026, 4, 1)), end)
+        // 月窗口 [当月 1 日 00:00, 下月 1 日 00:00)；周窗口为本周 ∩ 本月
+        assertEquals(2, transactionRepository.expenseSumWindows.size)
+        val (monthStart, monthEnd) = transactionRepository.expenseSumWindows[0]
+        assertEquals(startOfDayMillis(LocalDate.of(2026, 3, 1)), monthStart)
+        assertEquals(startOfDayMillis(LocalDate.of(2026, 4, 1)), monthEnd)
+        val (weekStart, weekEnd) = transactionRepository.expenseSumWindows[1]
+        assertEquals(startOfDayMillis(LocalDate.of(2026, 3, 9)), weekStart)
+        assertEquals(startOfDayMillis(LocalDate.of(2026, 3, 16)), weekEnd)
     }
 
     @Test
@@ -88,7 +92,7 @@ class MonthlyBudgetEngineImplTest {
 
         assertEquals(150_000L, snapshot.spentCents)
         assertEquals(0L, snapshot.remainingCents)
-        assertEquals(0L, snapshot.weeklyQuotaCents)
+        assertEquals(0L, snapshot.weeklyRemainingCents)
     }
 
     @Test
@@ -104,17 +108,105 @@ class MonthlyBudgetEngineImplTest {
     }
 
     @Test
-    fun `weekly quota uses integer division semantics`() = runTest {
+    fun `weekly quota on month-start sunday uses one intersecting day`() = runTest {
         val engine = MonthlyBudgetEngineImpl(
             FakeMonthlyBudgetRepository(MutableStateFlow(100_000L)),
             FakeTransactionRepository(MutableStateFlow(emptyList())),
         )
 
-        // today = 3/1，remainingDays = 31；100_000 * 7 / 31 = 700_000 / 31 = 22_580
+        // 2026-03-01 周日：本周 ∩ 本月仅 1 天；100_000 * 1 / 31 = 3_225
         val snapshot = engine.observeSnapshot(LocalDate.of(2026, 3, 1)).first()
 
         assertEquals(31, snapshot.remainingDays)
-        assertEquals(22_580L, snapshot.weeklyQuotaCents)
+        assertEquals(3_225L, snapshot.weeklyQuotaCents)
+        assertEquals(3_225L, snapshot.weeklyRemainingCents)
+        assertEquals(0L, snapshot.spentThisWeekCents)
+    }
+
+    @Test
+    fun `full week inside month freezes quota from monday remaining`() = runTest {
+        val monday = LocalDate.of(2026, 3, 9)
+        val engine = MonthlyBudgetEngineImpl(
+            FakeMonthlyBudgetRepository(MutableStateFlow(100_000L)),
+            FakeTransactionRepository(MutableStateFlow(emptyList())),
+        )
+
+        // remainingDays from Monday = 23；100_000 * 7 / 23 = 30_434
+        val snapshot = engine.observeSnapshot(monday).first()
+
+        assertEquals(23, snapshot.remainingDays)
+        assertEquals(30_434L, snapshot.weeklyQuotaCents)
+        assertEquals(30_434L, snapshot.weeklyRemainingCents)
+    }
+
+    @Test
+    fun `this week expense decreases weekly remaining one to one`() = runTest {
+        val today = LocalDate.of(2026, 3, 11)
+        val engine = MonthlyBudgetEngineImpl(
+            FakeMonthlyBudgetRepository(MutableStateFlow(100_000L)),
+            FakeTransactionRepository(
+                MutableStateFlow(listOf(expense(2_000L, LocalDate.of(2026, 3, 10)))),
+            ),
+        )
+
+        val snapshot = engine.observeSnapshot(today).first()
+
+        assertEquals(2_000L, snapshot.spentThisWeekCents)
+        assertEquals(30_434L, snapshot.weeklyQuotaCents)
+        assertEquals(28_434L, snapshot.weeklyRemainingCents)
+        assertEquals(98_000L, snapshot.remainingCents)
+    }
+
+    @Test
+    fun `expense before this monday only shrinks frozen quota`() = runTest {
+        val today = LocalDate.of(2026, 3, 11)
+        val engine = MonthlyBudgetEngineImpl(
+            FakeMonthlyBudgetRepository(MutableStateFlow(100_000L)),
+            FakeTransactionRepository(
+                MutableStateFlow(listOf(expense(10_000L, LocalDate.of(2026, 3, 2)))),
+            ),
+        )
+
+        val snapshot = engine.observeSnapshot(today).first()
+
+        assertEquals(0L, snapshot.spentThisWeekCents)
+        // remaining at Monday = 90_000；90_000 * 7 / 23 = 27_391
+        assertEquals(27_391L, snapshot.weeklyQuotaCents)
+        assertEquals(27_391L, snapshot.weeklyRemainingCents)
+        assertEquals(90_000L, snapshot.remainingCents)
+    }
+
+    @Test
+    fun `late month week quota does not exceed remaining at week start`() = runTest {
+        val monday = LocalDate.of(2026, 3, 30)
+        val engine = MonthlyBudgetEngineImpl(
+            FakeMonthlyBudgetRepository(MutableStateFlow(100_000L)),
+            FakeTransactionRepository(MutableStateFlow(emptyList())),
+        )
+
+        val snapshot = engine.observeSnapshot(monday).first()
+
+        assertEquals(2, snapshot.remainingDays)
+        assertEquals(100_000L, snapshot.weeklyQuotaCents)
+        assertEquals(100_000L, snapshot.weeklyRemainingCents)
+        assert(snapshot.weeklyQuotaCents <= snapshot.remainingCents)
+    }
+
+    @Test
+    fun `overspent week clamps weekly remaining to zero`() = runTest {
+        val today = LocalDate.of(2026, 3, 11)
+        val engine = MonthlyBudgetEngineImpl(
+            FakeMonthlyBudgetRepository(MutableStateFlow(100_000L)),
+            FakeTransactionRepository(
+                MutableStateFlow(listOf(expense(50_000L, LocalDate.of(2026, 3, 10)))),
+            ),
+        )
+
+        val snapshot = engine.observeSnapshot(today).first()
+
+        assertEquals(50_000L, snapshot.spentThisWeekCents)
+        assertEquals(30_434L, snapshot.weeklyQuotaCents)
+        assertEquals(0L, snapshot.weeklyRemainingCents)
     }
 
     @Test
@@ -131,6 +223,7 @@ class MonthlyBudgetEngineImplTest {
         assertEquals(5_000L, snapshot.spentCents)
         assertEquals(0L, snapshot.remainingCents)
         assertEquals(0L, snapshot.weeklyQuotaCents)
+        assertEquals(0L, snapshot.weeklyRemainingCents)
     }
 
     @Test
@@ -251,5 +344,7 @@ class MonthlyBudgetEngineImplTest {
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+
+        override suspend fun getBetween(startInclusiveMs: Long, endExclusiveMs: Long): List<RecentTransaction> = emptyList()
     }
 }

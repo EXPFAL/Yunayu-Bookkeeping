@@ -68,6 +68,15 @@ interface TransactionRepository {
     suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long?
 
     /**
+     * 单次查询时间窗内交易摘要（含标签名与备注），按发生时间倒序；
+     * 供报告本地洞察做生活方式启发式。无匹配时返回空列表。
+     */
+    suspend fun getBetween(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): List<RecentTransaction>
+
+    /**
      * 观察按时间窗、账户、标签集合与备注关键字过滤的交易摘要（含标签名），按发生时间倒序。
      *
      * `accountFilter` 控制账户维度过滤（全部 / 仅未指定 / 指定账户）；`tagIds` 为空表示不按标签过滤；

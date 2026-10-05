@@ -145,6 +145,7 @@ class SubscriptionManageViewModelTest {
                 override suspend fun updateTransaction(transaction: Transaction) = Unit
                 override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
                 override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+                override suspend fun getBetween(startInclusiveMs: Long, endExclusiveMs: Long): List<RecentTransaction> = emptyList()
             },
             object : ReportRepository {
                 override fun observeByType(type: ReportPeriodType): Flow<List<Report>> = flowOf(emptyList())

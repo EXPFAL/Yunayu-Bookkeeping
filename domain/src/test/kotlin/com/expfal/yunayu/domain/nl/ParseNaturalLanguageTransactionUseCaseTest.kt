@@ -23,11 +23,11 @@ class ParseNaturalLanguageTransactionUseCaseTest {
     @Test
     fun `parses successfully and backfills tagId`() = runTest {
         val parser = FakeNlParser().apply {
-            generateResult = "{\"amount\":\"20\",\"tag\":\"生活·餐饮\"}"
+            generateResult = "{\"amount\":\"20\",\"tag\":\"生活·外出就餐\"}"
         }
         val repository = FakeTagRepository().apply {
             childrenByParent[null] = listOf(tag(1L, "生活"))
-            childrenByParent[1L] = listOf(tag(11L, "餐饮", 1L))
+            childrenByParent[1L] = listOf(tag(11L, "外出就餐", 1L))
         }
         val useCase = ParseNaturalLanguageTransactionUseCase(parser, repository)
 
@@ -36,7 +36,7 @@ class ParseNaturalLanguageTransactionUseCaseTest {
         assertEquals(2000L, draft.amountCents)
         assertEquals(TransactionType.EXPENSE, draft.type)
         assertEquals(11L, draft.tagId)
-        assertEquals("生活·餐饮", draft.tagPhrase)
+        assertEquals("生活·外出就餐", draft.tagPhrase)
     }
 
     @Test
@@ -124,7 +124,7 @@ class ParseNaturalLanguageTransactionUseCaseTest {
         val parser = FakeNlParser()
         val repository = FakeTagRepository().apply {
             childrenByParent[null] = listOf(tag(1L, "生活"))
-            childrenByParent[1L] = listOf(tag(11L, "餐饮", 1L))
+            childrenByParent[1L] = listOf(tag(11L, "外出就餐", 1L))
         }
         val useCase = ParseNaturalLanguageTransactionUseCase(parser, repository)
 
@@ -133,17 +133,17 @@ class ParseNaturalLanguageTransactionUseCaseTest {
         val call = parser.generateCalls.single()
         assertEquals("午饭20", call.second)
         assertTrue(call.first.contains("生活"))
-        assertTrue(call.first.contains("生活·餐饮"))
+        assertTrue(call.first.contains("生活·外出就餐"))
     }
 
     @Test
     fun `backfills note via fallback when model omits note`() = runTest {
         val parser = FakeNlParser().apply {
-            generateResult = "{\"amount\":\"20\",\"tag\":\"生活·餐饮\"}"
+            generateResult = "{\"amount\":\"20\",\"tag\":\"生活·外出就餐\"}"
         }
         val repository = FakeTagRepository().apply {
             childrenByParent[null] = listOf(tag(1L, "生活"))
-            childrenByParent[1L] = listOf(tag(11L, "餐饮", 1L))
+            childrenByParent[1L] = listOf(tag(11L, "外出就餐", 1L))
         }
         val useCase = ParseNaturalLanguageTransactionUseCase(parser, repository)
 

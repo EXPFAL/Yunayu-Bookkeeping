@@ -19,7 +19,7 @@ import com.expfal.yunayu.domain.model.MonthlyBudgetSnapshot
 import com.expfal.yunayu.ui.util.formatCents
 
 /**
- * 首页月度预算看板卡片：有预算时展示周额度与进度，未设置时引导设置，加载中显示占位。
+ * 首页月度预算看板卡片：有预算时展示本周结余与月度进度，未设置时引导设置，加载中显示占位。
  *
  * 三态：loading 占位；budgetCents == 0 引导态；否则激活态（整卡可点进入编辑）。
  */
@@ -86,7 +86,7 @@ private fun ActiveCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Text(
-                "¥ " + formatCents(snapshot.weeklyQuotaCents),
+                "¥ " + formatCents(snapshot.weeklyRemainingCents),
                 style = MaterialTheme.typography.headlineLarge,
                 fontWeight = FontWeight.Bold,
             )
@@ -98,7 +98,13 @@ private fun ActiveCard(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "本月已花 ¥${formatCents(snapshot.spentCents)} · 剩余 ${snapshot.remainingDays} 天",
+                "本周已花 ¥${formatCents(snapshot.spentThisWeekCents)} / 额度 ¥${formatCents(snapshot.weeklyQuotaCents)}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                "本月已花 ¥${formatCents(snapshot.spentCents)} · 本月还剩 ${snapshot.remainingDays} 天",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )

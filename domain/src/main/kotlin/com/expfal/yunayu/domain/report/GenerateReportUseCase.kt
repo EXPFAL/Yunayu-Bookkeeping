@@ -43,6 +43,7 @@ class GenerateReportUseCase(
         val uncategorizedCount =
             transactionRepository.countUncategorizedBetween(windowStartMs, windowEndMs)
         val largeTxn = transactionRepository.getMaxExpenseCentsBetween(windowStartMs, windowEndMs)
+        val windowTransactions = transactionRepository.getBetween(windowStartMs, windowEndMs)
 
         val zone = ZoneId.systemDefault()
         val today = Instant.ofEpochMilli(generatedAtMs).atZone(zone).toLocalDate()
@@ -63,6 +64,7 @@ class GenerateReportUseCase(
             elapsedDaysInMonth = elapsedDays,
             daysInMonth = daysInMonth,
             largeTxnCents = largeTxn,
+            windowTransactions = windowTransactions,
         )
 
         val existingId = reportRepository.getByKey(periodType, periodKey)?.id ?: 0L

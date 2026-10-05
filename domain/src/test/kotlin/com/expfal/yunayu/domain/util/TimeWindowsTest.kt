@@ -162,6 +162,33 @@ class TimeWindowsTest {
     }
 
     @Test
+    fun `budget week equals ISO week when week sits inside month`() {
+        val wednesday = LocalDate.of(2026, 3, 11)
+        assertEquals(LocalDate.of(2026, 3, 9), TimeWindows.budgetWeekStart(wednesday))
+        assertEquals(LocalDate.of(2026, 3, 16), TimeWindows.budgetWeekEndExclusive(wednesday))
+        assertEquals(7, TimeWindows.daysOfWeekInMonth(wednesday))
+        assertEquals(23, TimeWindows.daysInMonthFromBudgetWeekStart(wednesday))
+    }
+
+    @Test
+    fun `budget week starts on month first when monday is previous month`() {
+        val sunday = LocalDate.of(2026, 3, 1)
+        assertEquals(LocalDate.of(2026, 3, 1), TimeWindows.budgetWeekStart(sunday))
+        assertEquals(LocalDate.of(2026, 3, 2), TimeWindows.budgetWeekEndExclusive(sunday))
+        assertEquals(1, TimeWindows.daysOfWeekInMonth(sunday))
+        assertEquals(31, TimeWindows.daysInMonthFromBudgetWeekStart(sunday))
+    }
+
+    @Test
+    fun `budget week ends at next month when week crosses month end`() {
+        val monday = LocalDate.of(2026, 3, 30)
+        assertEquals(monday, TimeWindows.budgetWeekStart(monday))
+        assertEquals(LocalDate.of(2026, 4, 1), TimeWindows.budgetWeekEndExclusive(monday))
+        assertEquals(2, TimeWindows.daysOfWeekInMonth(monday))
+        assertEquals(2, TimeWindows.daysInMonthFromBudgetWeekStart(monday))
+    }
+
+    @Test
     fun `week window is half-open interval monday to next monday`() {
         val today = LocalDate.of(2026, 8, 19) // 周三
         val window = TimeWindows.weekWindow(today)

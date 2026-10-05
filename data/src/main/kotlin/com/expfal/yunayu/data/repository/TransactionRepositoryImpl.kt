@@ -81,6 +81,13 @@ class TransactionRepositoryImpl @Inject constructor(
         endExclusiveMs: Long,
     ): Long? = transactionDao.getMaxExpenseCentsBetween(startInclusiveMs, endExclusiveMs)
 
+    override suspend fun getBetween(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): List<RecentTransaction> =
+        transactionDao.getBetween(startInclusiveMs, endExclusiveMs)
+            .mapNotNull { it.toRecentDomainOrNull() }
+
     override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> =
         transactionDao.observeRecent(limit)
             .map { rows -> rows.mapNotNull { it.toRecentDomainOrNull() } }

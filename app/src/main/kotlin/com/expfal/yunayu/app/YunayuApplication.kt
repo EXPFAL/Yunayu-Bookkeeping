@@ -5,6 +5,7 @@ import android.util.Log
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.usecase.EnsureAccountsUseCase
+import com.expfal.yunayu.domain.usecase.EnsureExpenseTagsUseCase
 import com.expfal.yunayu.domain.usecase.EnsureIncomeTagsUseCase
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +29,9 @@ class YunayuApplication : Application() {
     lateinit var ensureIncomeTagsUseCase: EnsureIncomeTagsUseCase
 
     @Inject
+    lateinit var ensureExpenseTagsUseCase: EnsureExpenseTagsUseCase
+
+    @Inject
     lateinit var ensureAccountsUseCase: EnsureAccountsUseCase
 
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -37,6 +41,7 @@ class YunayuApplication : Application() {
         verifyDatabase()
         ensureReports()
         ensureIncomeTags()
+        ensureExpenseTags()
         ensureAccounts()
     }
 
@@ -68,6 +73,18 @@ class YunayuApplication : Application() {
         }
     }
 
+    /** 启动时给生活根补齐囤货三餐 / 外出就餐 / 经营进货（独立协程，失败仅记日志）。 */
+    private fun ensureExpenseTags() {
+        applicationScope.launch {
+            runCatching {
+                val result = ensureExpenseTagsUseCase()
+                if (!result.rootFound) {
+                    Log.w(EXPENSE_TAGS_TAG, "生活根缺失，跳过支出种子补齐")
+                }
+            }.onFailure { Log.e(EXPENSE_TAGS_TAG, "支出标签补齐失败", it) }
+        }
+    }
+
     /** 启动时补齐预置账户体系（独立协程，不阻塞建库校验，失败仅记日志）。 */
     private fun ensureAccounts() {
         applicationScope.launch {
@@ -80,6 +97,7 @@ class YunayuApplication : Application() {
         private const val TAG = "YunayuDB"
         private const val REPORT_TAG = "YunayuReport"
         private const val INCOME_TAGS_TAG = "YunayuIncomeTags"
+        private const val EXPENSE_TAGS_TAG = "YunayuExpenseTags"
         private const val ACCOUNTS_TAG = "YunayuAccounts"
     }
 }

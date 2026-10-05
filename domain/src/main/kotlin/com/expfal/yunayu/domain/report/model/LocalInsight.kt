@@ -19,6 +19,9 @@ enum class LocalInsightKind {
 
     /** 异常消费（B 期规则）。 */
     ANOMALY,
+
+    /** 生活方式模式（囤货三餐 / 外出就餐 / 兼职经营等）。 */
+    PATTERN,
 }
 
 /**

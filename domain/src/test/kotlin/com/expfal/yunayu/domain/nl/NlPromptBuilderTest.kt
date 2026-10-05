@@ -9,7 +9,7 @@ class NlPromptBuilderTest {
 
     @Test
     fun `contains schema keywords`() {
-        val instruction = NlPromptBuilder.build(listOf("学习", "生活·餐饮"))
+        val instruction = NlPromptBuilder.build(listOf("学习", "生活·外出就餐"))
 
         assertTrue(instruction.contains("amount"))
         assertTrue(instruction.contains("expense"))
@@ -23,10 +23,18 @@ class NlPromptBuilderTest {
 
     @Test
     fun `contains passed tag names`() {
-        val instruction = NlPromptBuilder.build(listOf("学习", "生活·餐饮"))
+        val instruction = NlPromptBuilder.build(listOf("学习", "生活·外出就餐"))
 
         assertTrue(instruction.contains("学习"))
-        assertTrue(instruction.contains("生活·餐饮"))
+        assertTrue(instruction.contains("生活·外出就餐"))
+    }
+
+    @Test
+    fun `few shot examples use stockpile and dining-out tags`() {
+        val instruction = NlPromptBuilder.build(emptyList())
+
+        assertTrue(instruction.contains("生活·外出就餐"))
+        assertTrue(instruction.contains("生活·囤货三餐"))
     }
 
     @Test
@@ -38,7 +46,7 @@ class NlPromptBuilderTest {
 
     @Test
     fun `every few-shot example demonstrates note field`() {
-        val instruction = NlPromptBuilder.build(listOf("学习", "生活·餐饮"))
+        val instruction = NlPromptBuilder.build(listOf("学习", "生活·外出就餐"))
         val exampleCount = Regex("→\\{").findAll(instruction).count()
         val noteCount = Regex("\"note\":").findAll(instruction).count()
 

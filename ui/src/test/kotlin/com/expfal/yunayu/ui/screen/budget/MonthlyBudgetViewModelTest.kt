@@ -147,6 +147,8 @@ class MonthlyBudgetViewModelTest {
         remainingCents = 50_000L,
         remainingDays = 30,
         weeklyQuotaCents = weeklyQuotaCents,
+        spentThisWeekCents = 0L,
+        weeklyRemainingCents = weeklyQuotaCents,
     )
 
     /** [MonthlyBudgetRepository] 手写 fake：以 MutableStateFlow 驱动额度，记录 save 入参并可配置异常。 */
@@ -174,6 +176,8 @@ class MonthlyBudgetViewModelTest {
             remainingCents = 0L,
             remainingDays = 1,
             weeklyQuotaCents = 0L,
+            spentThisWeekCents = 0L,
+            weeklyRemainingCents = 0L,
         )
 
         override fun observeSnapshot(today: LocalDate): Flow<MonthlyBudgetSnapshot> =

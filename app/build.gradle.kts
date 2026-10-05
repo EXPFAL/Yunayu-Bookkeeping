@@ -15,8 +15,8 @@ android {
         applicationId = "com.expfal.yunayu.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
     }
 
     // CI 可注入 YUNAYU_KEYSTORE_FILE 使用同一把 debug 钥匙签包；本地无该变量时沿用默认 debug。

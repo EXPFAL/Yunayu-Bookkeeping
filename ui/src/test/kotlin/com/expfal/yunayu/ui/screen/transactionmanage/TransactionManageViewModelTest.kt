@@ -584,6 +584,8 @@ class TransactionManageViewModelTest {
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+
+        override suspend fun getBetween(startInclusiveMs: Long, endExclusiveMs: Long): List<RecentTransaction> = emptyList()
     }
 
     /** [AccountRepository] 手写 fake：账户观察流由 [accountsFlow] 驱动，可注入加载异常。 */

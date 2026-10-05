@@ -167,6 +167,22 @@ interface TransactionDao {
     )
     suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long?
 
+    /**
+     * 时间窗内交易摘要（含标签名、图标与账户名），按发生时间倒序；
+     * 供报告本地洞察做生活方式启发式。
+     */
+    @Query(
+        "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon, acc.name AS account_name " +
+            "FROM transactions t LEFT JOIN tags tag ON tag.id = t.tag_id " +
+            "LEFT JOIN accounts acc ON acc.id = t.account_id " +
+            "WHERE t.occurred_at >= :startInclusiveMs AND t.occurred_at < :endExclusiveMs " +
+            "ORDER BY t.occurred_at DESC, t.id DESC",
+    )
+    suspend fun getBetween(
+        startInclusiveMs: Long,
+        endExclusiveMs: Long,
+    ): List<RecentTransactionRow>
+
     /** 观察最近 [limit] 笔交易（含标签名、图标与账户名），按发生时间倒序。 */
     @Query(
         "SELECT t.*, tag.name AS tag_name, tag.icon AS tag_icon, acc.name AS account_name " +

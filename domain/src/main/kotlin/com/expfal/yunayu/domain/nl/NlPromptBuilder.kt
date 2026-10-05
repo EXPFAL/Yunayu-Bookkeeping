@@ -24,6 +24,7 @@ object NlPromptBuilder {
     private const val NO_TAGS = "无"
 
     private const val EXAMPLES_SECTION =
-        "午饭花了20块→{\"amount\":\"20\",\"type\":\"expense\",\"tag\":\"生活·餐饮\",\"note\":\"午饭\",\"date\":\"今天\"}\n" +
+        "食堂午饭花了20块→{\"amount\":\"20\",\"type\":\"expense\",\"tag\":\"生活·外出就餐\",\"note\":\"食堂午饭\",\"date\":\"今天\"}\n" +
+            "买了一箱泡面80→{\"amount\":\"80\",\"type\":\"expense\",\"tag\":\"生活·囤货三餐\",\"note\":\"一箱泡面\",\"date\":\"今天\"}\n" +
             "收到奖学金2000→{\"amount\":\"2000\",\"type\":\"income\",\"tag\":\"学习\",\"note\":\"奖学金\",\"date\":\"今天\"}"
 }

@@ -83,6 +83,42 @@ class GenerateReportUseCaseTest {
         assertNull(report.analysisText)
     }
 
+    @Test
+    fun `passes window transactions into local insights for stockpile pattern`() = runTest {
+        val txs = listOf(
+            RecentTransaction(
+                id = 1L,
+                amountCents = 20_000L,
+                type = com.expfal.yunayu.domain.model.TransactionType.EXPENSE,
+                tagName = "餐饮",
+                occurredAt = 150L,
+                note = "买罐头泡面",
+            ),
+            RecentTransaction(
+                id = 2L,
+                amountCents = 5_000L,
+                type = com.expfal.yunayu.domain.model.TransactionType.EXPENSE,
+                tagName = "餐饮",
+                occurredAt = 160L,
+                note = "方便面囤货",
+            ),
+        )
+        val transactionRepository = FakeTransactionRepository(
+            currentTotals = WindowTotals(0L, 25_000L),
+            prevTotals = WindowTotals(0L, 0L),
+            categoryExpenses = listOf(CategoryExpense("餐饮", 25_000L, tagId = 1L)),
+            windowTransactions = txs,
+        )
+        val reportRepository = FakeReportRepository()
+        val useCase = newUseCase(transactionRepository, reportRepository)
+
+        useCase(MONTHLY, "2026-07", 100L, 200L, 0L, 100L)
+
+        val report = reportRepository.upserted.single()
+        assertEquals(listOf(100L to 200L), transactionRepository.getBetweenCalls)
+        assertTrue(report.localInsights.any { it.title.contains("囤货") })
+    }
+
     private fun newUseCase(
         tx: TransactionRepository,
         reports: ReportRepository,
@@ -106,9 +142,11 @@ class GenerateReportUseCaseTest {
         private val currentTotals: WindowTotals = WindowTotals(0L, 0L),
         private val prevTotals: WindowTotals = WindowTotals(0L, 0L),
         private val categoryExpenses: List<CategoryExpense> = emptyList(),
+        private val windowTransactions: List<RecentTransaction> = emptyList(),
     ) : TransactionRepository {
 
         val windowTotalsCalls = mutableListOf<Pair<Long, Long>>()
+        val getBetweenCalls = mutableListOf<Pair<Long, Long>>()
 
         override suspend fun add(transaction: Transaction): Long = 0L
 
@@ -165,6 +203,11 @@ class GenerateReportUseCaseTest {
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
 
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
+
+        override suspend fun getBetween(startInclusiveMs: Long, endExclusiveMs: Long): List<RecentTransaction> {
+            getBetweenCalls += startInclusiveMs to endExclusiveMs
+            return windowTransactions
+        }
     }
 
     /** [ReportRepository] 手写 fake：按 period 键存取，记录 upsert 入参。 */
