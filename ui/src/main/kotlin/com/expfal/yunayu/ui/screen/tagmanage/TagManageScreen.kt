@@ -323,10 +323,14 @@ private fun TagRow(
     val latestRename = rememberUpdatedState(onRename)
     val latestDelete = rememberUpdatedState(onDelete)
     val onDragStart = remember(tagId, parentId, dragState) {
-        { dragState.start(parentId, tagId, latestIndex.value, dragState.childrenOf(parentId)) }
+        {
+            dragState.start(parentId, tagId, latestIndex.value, dragState.childrenOf(parentId))
+        }
     }
     val onDrag = remember(tagId, dragState) {
-        { amount: Float -> dragState.onDrag(amount, tagId) }
+        { amount: Float ->
+            dragState.onDrag(amount, tagId)
+        }
     }
     val onDragEnd = remember(dragState) { dragState::end }
     val onDragCancel = remember(dragState) { dragState::cancel }
