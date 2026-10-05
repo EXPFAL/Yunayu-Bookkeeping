@@ -18,12 +18,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+          cache: gradle
 
       - name: Write local.properties
-        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+        run: echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
 
       - name: Unit tests and ktlint
         run: ./gradlew test ktlintCheck --no-daemon
@@ -42,12 +40,10 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+          cache: gradle
 
       - name: Write local.properties
-        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+        run: echo "sdk.dir=${ANDROID_HOME:-$ANDROID_SDK_ROOT}" > local.properties
 
       - name: Restore debug keystore from secret
         env:
@@ -74,13 +70,18 @@ jobs:
           SRC=app/build/outputs/apk/debug/app-debug.apk
           OUT="yunayu-bookkeeping-${VERSION_NAME}-debug.apk"
           cp "$SRC" "$OUT"
+          TAG="${{ github.ref_name }}"
           NOTES=$(mktemp)
           cat > "$NOTES" <<EOF
           云娅记账 ${VERSION_NAME}（debug 签名）。与同一把 debug.keystore 安装的设备可覆盖更新。
 
-          构建自 tag \`${{ github.ref_name }}\`。
+          构建自 tag \`${TAG}\`。
           EOF
-          gh release create "${{ github.ref_name }}" "$OUT" \
-            --title "${{ github.ref_name }}" \
-            --notes-file "$NOTES" \
-            --latest
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$OUT" --clobber
+          else
+            gh release create "$TAG" "$OUT" \
+              --title "$TAG" \
+              --notes-file "$NOTES" \
+              --latest
+          fi
