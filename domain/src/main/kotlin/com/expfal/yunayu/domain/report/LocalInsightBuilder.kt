@@ -342,7 +342,7 @@ private data class LifestyleSnapshot(
                 (
                     personalExpenseCents > 0L &&
                         diningOutCents * 100 >= personalExpenseCents * DINING_PERSONAL_PERCENT
-                )
+                    )
             return LifestyleSnapshot(
                 stockpileCents = stockpileCents,
                 stockpileCount = stockpileCount,
@@ -362,14 +362,14 @@ private data class LifestyleSnapshot(
                         (
                             tx.tagName == ExpenseSeedTags.TAG_STOCKPILE ||
                                 tx.tagName == ExpenseSeedTags.TAG_FRUIT_LEGACY
-                        )
+                            )
                 },
                 taggedDining = classified.any { (tx, kind) ->
                     kind == LifestyleKind.DINING_OUT &&
                         (
                             tx.tagName == ExpenseSeedTags.TAG_DINING_OUT ||
                                 tx.tagName == ExpenseSeedTags.TAG_GATHERING
-                        )
+                            )
                 },
             )
         }
@@ -398,4 +398,3 @@ private const val DINING_COUNT_THRESHOLD = 3
 private const val DINING_PERSONAL_PERCENT = 15L
 private const val BUSINESS_DRIVES_NET_PERCENT = 50L
 private const val BUSINESS_IN_SPENT_PERCENT = 20L
-
