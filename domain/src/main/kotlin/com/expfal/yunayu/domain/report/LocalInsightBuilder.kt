@@ -339,8 +339,10 @@ private data class LifestyleSnapshot(
             val hasStockpilePattern = stockpileCents >= STOCKPILE_AMOUNT_THRESHOLD_CENTS ||
                 stockpileCount >= STOCKPILE_COUNT_THRESHOLD
             val hasDiningOut = diningOutCount >= DINING_COUNT_THRESHOLD ||
-                (personalExpenseCents > 0L &&
-                    diningOutCents * 100 >= personalExpenseCents * DINING_PERSONAL_PERCENT)
+                (
+                    personalExpenseCents > 0L &&
+                        diningOutCents * 100 >= personalExpenseCents * DINING_PERSONAL_PERCENT
+                )
             return LifestyleSnapshot(
                 stockpileCents = stockpileCents,
                 stockpileCount = stockpileCount,
@@ -357,13 +359,17 @@ private data class LifestyleSnapshot(
                 hasBusiness = businessExpenseCents > 0L || businessIncomeCents > 0L,
                 taggedStockpile = classified.any { (tx, kind) ->
                     kind == LifestyleKind.STOCKPILE &&
-                        (tx.tagName == ExpenseSeedTags.TAG_STOCKPILE ||
-                            tx.tagName == ExpenseSeedTags.TAG_FRUIT_LEGACY)
+                        (
+                            tx.tagName == ExpenseSeedTags.TAG_STOCKPILE ||
+                                tx.tagName == ExpenseSeedTags.TAG_FRUIT_LEGACY
+                        )
                 },
                 taggedDining = classified.any { (tx, kind) ->
                     kind == LifestyleKind.DINING_OUT &&
-                        (tx.tagName == ExpenseSeedTags.TAG_DINING_OUT ||
-                            tx.tagName == ExpenseSeedTags.TAG_GATHERING)
+                        (
+                            tx.tagName == ExpenseSeedTags.TAG_DINING_OUT ||
+                                tx.tagName == ExpenseSeedTags.TAG_GATHERING
+                        )
                 },
             )
         }

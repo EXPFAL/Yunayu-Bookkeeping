@@ -21,15 +21,36 @@ object LifestyleHeuristics {
     }
 
     private val STOCKPILE_KEYWORDS = listOf(
-        "罐头", "泡面", "方便面", "速食", "自热", "螺蛳粉", "囤货",
+        "罐头",
+        "泡面",
+        "方便面",
+        "速食",
+        "自热",
+        "螺蛳粉",
+        "囤货",
     )
 
     private val DINING_OUT_KEYWORDS = listOf(
-        "食堂", "餐厅", "餐馆", "聚餐", "外卖", "堂食", "火锅", "烧烤",
+        "食堂",
+        "餐厅",
+        "餐馆",
+        "聚餐",
+        "外卖",
+        "堂食",
+        "火锅",
+        "烧烤",
     )
 
     private val BUSINESS_EXPENSE_KEYWORDS = listOf(
-        "配件", "内胎", "外胎", "链条", "飞轮", "补胎", "修车", "扳手", "螺丝刀",
+        "配件",
+        "内胎",
+        "外胎",
+        "链条",
+        "飞轮",
+        "补胎",
+        "修车",
+        "扳手",
+        "螺丝刀",
     )
 
     private val BUSINESS_INCOME_TAG = IncomeTags.INCOME_SEED_SUB_TAGS.first { it == "兼职经营" }
