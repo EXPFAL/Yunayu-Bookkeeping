@@ -330,7 +330,7 @@ private fun TagRow(
     val onDrag = remember(tagId, dragState) {
         {
                 amount: Float ->
-                dragState.onDrag(amount, tagId)
+            dragState.onDrag(amount, tagId)
         }
     }
     val onDragEnd = remember(dragState) { dragState::end }
