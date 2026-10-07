@@ -3,8 +3,14 @@ package com.expfal.yunayu.data.nlparse
 import com.expfal.yunayu.domain.model.NlApiConfig
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import java.io.InputStream
+import java.io.OutputStream
 import java.net.ServerSocket
+import java.nio.charset.StandardCharsets
+import java.util.concurrent.ArrayBlockingQueue
+import java.util.concurrent.TimeUnit
 
 /** [CompletionRequester] 失败路径行为验证：非 2xx、连接异常、超时均降级为 `null`。 */
 class CompletionRequesterTest {
@@ -69,143 +75,57 @@ class CompletionRequesterTest {
 
     @Test
     fun `request returns content on success and includes api-key header`() {
-        // 启动一个验证请求头并返回成功响应的 mock 服务器
-        val serverSocket = ServerSocket(0)
-        val port = serverSocket.localPort
-        Thread {
-            try {
-                val socket = serverSocket.accept()
-                val reader = socket.getInputStream().bufferedReader()
-                val headers = mutableListOf<String>()
-                // 读取请求头直到空行
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    if (line.isEmpty()) break
-                    headers.add(line)
-                }
-                // 读取并丢弃请求体
-                reader.readLines()
-
-                // 验证是否包含 api-key 头
-                val hasApiKeyHeader = headers.any { it.startsWith("api-key:") }
-                // 验证是否包含 Authorization 头
-                val hasAuthHeader = headers.any { it.startsWith("Authorization:") }
-
-                // 构造成功响应
-                val body = """{"choices":[{"message":{"content":"success"}}]}"""
-                val bodyBytes = body.toByteArray(Charsets.UTF_8)
-                val response = buildString {
-                    append("HTTP/1.1 200 OK\r\n")
-                    append("Content-Length: ${bodyBytes.size}\r\n")
-                    append("Connection: close\r\n")
-                    append("\r\n")
-                }
-                socket.getOutputStream().use { out ->
-                    out.write(response.toByteArray(Charsets.UTF_8))
-                    out.write(bodyBytes)
-                    out.flush()
-                }
-                // 如果缺少任一认证头，抛出异常使测试失败
-                if (!hasApiKeyHeader || !hasAuthHeader) {
-                    throw AssertionError("Missing required auth headers: api-key=$hasApiKeyHeader, Authorization=$hasAuthHeader")
-                }
-                socket.close()
-            } finally {
-                serverSocket.close()
-            }
-        }.apply {
-            isDaemon = true
-            start()
-        }
+        val captured = ArrayBlockingQueue<HttpRequest>(1)
+        val port = startCapturingMockServer(
+            statusLine = "HTTP/1.1 200 OK",
+            body = """{"choices":[{"message":{"content":"success"}}]}""",
+            captured = captured,
+        )
 
         val requester = CompletionRequester(connectTimeoutMillis = 2000, readTimeoutMillis = 2000)
         val result = requester.request(testConfig(port), "system", "user")
 
-        // 验证返回内容
         assertEquals("success", result)
+        val request = requireNotNull(captured.poll(2, TimeUnit.SECONDS))
+        assertTrue(request.headers.any { it.startsWith("api-key:", ignoreCase = true) })
+        assertTrue(request.headers.any { it.startsWith("Authorization:", ignoreCase = true) })
     }
 
     @Test
     fun `request includes max_completion_tokens in request body`() {
-        // 启动一个读取请求体并验证参数的 mock 服务器
-        val serverSocket = ServerSocket(0)
-        val port = serverSocket.localPort
-        Thread {
-            try {
-                val socket = serverSocket.accept()
-                val reader = socket.getInputStream().bufferedReader()
-                // 读取请求头直到空行
-                while (true) {
-                    val line = reader.readLine() ?: break
-                    if (line.isEmpty()) break
-                }
-                // 读取请求体
-                val requestBody = reader.readText()
-
-                // 验证请求体包含 max_completion_tokens
-                if (!requestBody.contains("max_completion_tokens")) {
-                    throw AssertionError("Request body missing max_completion_tokens: $requestBody")
-                }
-
-                // 构造成功响应
-                val body = """{"choices":[{"message":{"content":"ok"}}]}"""
-                val bodyBytes = body.toByteArray(Charsets.UTF_8)
-                val response = buildString {
-                    append("HTTP/1.1 200 OK\r\n")
-                    append("Content-Length: ${bodyBytes.size}\r\n")
-                    append("Connection: close\r\n")
-                    append("\r\n")
-                }
-                socket.getOutputStream().use { out ->
-                    out.write(response.toByteArray(Charsets.UTF_8))
-                    out.write(bodyBytes)
-                    out.flush()
-                }
-                // 验证完成后关闭 socket
-                socket.close()
-            } finally {
-                serverSocket.close()
-            }
-        }.apply {
-            isDaemon = true
-            start()
-        }
+        val captured = ArrayBlockingQueue<HttpRequest>(1)
+        val port = startCapturingMockServer(
+            statusLine = "HTTP/1.1 200 OK",
+            body = """{"choices":[{"message":{"content":"ok"}}]}""",
+            captured = captured,
+        )
 
         val requester = CompletionRequester(connectTimeoutMillis = 2000, readTimeoutMillis = 2000)
         val result = requester.request(testConfig(port), "system", "user")
 
-        // 验证请求成功
         assertEquals("ok", result)
+        val request = requireNotNull(captured.poll(2, TimeUnit.SECONDS))
+        assertTrue(request.body.contains("max_completion_tokens"), request.body)
     }
 
     /** 启动单次响应的 mock HTTP 服务器，返回指定状态码与响应体。 */
-    private fun startMockServer(statusLine: String, body: String): Int {
+    private fun startMockServer(statusLine: String, body: String): Int =
+        startCapturingMockServer(statusLine, body, captured = null)
+
+    private fun startCapturingMockServer(
+        statusLine: String,
+        body: String,
+        captured: ArrayBlockingQueue<HttpRequest>?,
+    ): Int {
         val serverSocket = ServerSocket(0)
         val port = serverSocket.localPort
         Thread {
             try {
                 val socket = serverSocket.accept()
-                // 读取并丢弃请求体
-                socket.getInputStream().bufferedReader().use { reader ->
-                    // 读取请求头直到空行
-                    while (true) {
-                        val line = reader.readLine() ?: break
-                        if (line.isEmpty()) break
-                    }
-                }
-                val bodyBytes = body.toByteArray(Charsets.UTF_8)
-                val response = buildString {
-                    append("$statusLine\r\n")
-                    append("Content-Length: ${bodyBytes.size}\r\n")
-                    append("Connection: close\r\n")
-                    append("\r\n")
-                }
-                socket.getOutputStream().use { out ->
-                    out.write(response.toByteArray(Charsets.UTF_8))
-                    out.write(bodyBytes)
-                    out.flush()
-                }
+                val request = readHttpRequest(socket.getInputStream())
+                writeHttpResponse(socket.getOutputStream(), statusLine, body)
                 socket.close()
+                captured?.offer(request)
             } finally {
                 serverSocket.close()
             }
@@ -224,19 +144,11 @@ class CompletionRequesterTest {
             try {
                 val socket = serverSocket.accept()
                 Thread.sleep(delayMillis)
-                val body = """{"choices":[{"message":{"content":"late"}}]}"""
-                val bodyBytes = body.toByteArray(Charsets.UTF_8)
-                val response = buildString {
-                    append("HTTP/1.1 200 OK\r\n")
-                    append("Content-Length: ${bodyBytes.size}\r\n")
-                    append("Connection: close\r\n")
-                    append("\r\n")
-                }
-                socket.getOutputStream().use { out ->
-                    out.write(response.toByteArray(Charsets.UTF_8))
-                    out.write(bodyBytes)
-                    out.flush()
-                }
+                writeHttpResponse(
+                    socket.getOutputStream(),
+                    "HTTP/1.1 200 OK",
+                    """{"choices":[{"message":{"content":"late"}}]}""",
+                )
                 socket.close()
             } finally {
                 serverSocket.close()
@@ -253,4 +165,64 @@ class CompletionRequesterTest {
         model = "test-model",
         apiKey = "test-key",
     )
+
+    private data class HttpRequest(val headers: List<String>, val body: String)
+
+    /**
+     * 按 Content-Length 读完一次 HTTP 请求，避免 readText/readLines 阻塞等 EOF
+     *（HttpURLConnection 常 keep-alive，mock 端等不到流结束）。
+     */
+    private fun readHttpRequest(input: InputStream): HttpRequest {
+        val headers = mutableListOf<String>()
+        while (true) {
+            val line = readLineCrLf(input) ?: break
+            if (line.isEmpty()) break
+            headers.add(line)
+        }
+        val contentLength = headers
+            .firstOrNull { it.startsWith("Content-Length:", ignoreCase = true) }
+            ?.substringAfter(':')
+            ?.trim()
+            ?.toIntOrNull()
+            ?: 0
+        val bodyBytes = ByteArray(contentLength)
+        var offset = 0
+        while (offset < contentLength) {
+            val read = input.read(bodyBytes, offset, contentLength - offset)
+            if (read < 0) break
+            offset += read
+        }
+        return HttpRequest(headers, String(bodyBytes, 0, offset, StandardCharsets.UTF_8))
+    }
+
+    private fun readLineCrLf(input: InputStream): String? {
+        val bytes = ArrayList<Byte>(64)
+        while (true) {
+            val b = input.read()
+            if (b < 0) {
+                return if (bytes.isEmpty()) null else String(bytes.toByteArray(), StandardCharsets.US_ASCII)
+            }
+            if (b == '\n'.code) {
+                if (bytes.isNotEmpty() && bytes.last() == '\r'.code.toByte()) {
+                    bytes.removeAt(bytes.lastIndex)
+                }
+                return String(bytes.toByteArray(), StandardCharsets.US_ASCII)
+            }
+            bytes.add(b.toByte())
+        }
+    }
+
+    private fun writeHttpResponse(output: OutputStream, statusLine: String, body: String) {
+        val bodyBytes = body.toByteArray(Charsets.UTF_8)
+        val response = buildString {
+            append(statusLine)
+            append("\r\n")
+            append("Content-Length: ${bodyBytes.size}\r\n")
+            append("Connection: close\r\n")
+            append("\r\n")
+        }
+        output.write(response.toByteArray(Charsets.UTF_8))
+        output.write(bodyBytes)
+        output.flush()
+    }
 }
