@@ -5,8 +5,11 @@ import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.WindowTotals
+import com.expfal.yunayu.domain.nl.NLTransactionParser
+import com.expfal.yunayu.domain.report.DeepReadReportUseCase
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.report.GenerateReportUseCase
+import com.expfal.yunayu.domain.report.LoadReportSeriesUseCase
 import com.expfal.yunayu.domain.report.model.CategoryShare
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
@@ -19,10 +22,12 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.Assertions.assertNull
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
@@ -87,6 +92,28 @@ class ReportViewModelTest {
 
         assertTrue(viewModel.uiState.value.reports.isEmpty())
         assertFalse(viewModel.uiState.value.loading)
+    }
+
+    @Test
+    fun `select report loads series snapshot`() = runTest {
+        val repo = FakeReportRepository().apply {
+            setReports(
+                ReportPeriodType.MONTHLY,
+                listOf(report(periodKey = "2026-07", status = ReportStatus.SUCCESS)),
+            )
+        }
+        val txRepo = FakeTransactionRepository().apply {
+            windowTotalsResult = WindowTotals(1_000L, 500L)
+        }
+        val viewModel = newViewModel(repo, txRepo)
+
+        viewModel.selectReport("2026-07")
+        advanceUntilIdle()
+
+        assertEquals("2026-07", viewModel.uiState.value.selectedPeriodKey)
+        assertNotNull(viewModel.uiState.value.series)
+        assertFalse(viewModel.uiState.value.seriesLoading)
+        assertTrue(txRepo.windowTotalsCalls.size >= 6)
     }
 
     @Test
@@ -177,10 +204,8 @@ class ReportViewModelTest {
         val upserted = repo.upserted.single()
         assertEquals(ReportPeriodType.WEEKLY, upserted.periodType)
         assertEquals("2026-W34", upserted.periodKey)
-        // 2026-W34 起于 2026-08-17（周一），止于 2026-08-24
         assertEquals(startOfDay(LocalDate.of(2026, 8, 17)), upserted.windowStartMs)
         assertEquals(startOfDay(LocalDate.of(2026, 8, 24)), upserted.windowEndMs)
-        // 上周窗口 2026-W33 起于 2026-08-10，止于 2026-08-17
         assertEquals(
             listOf(
                 startOfDay(LocalDate.of(2026, 8, 17)) to startOfDay(LocalDate.of(2026, 8, 24)),
@@ -226,9 +251,43 @@ class ReportViewModelTest {
         assertEquals(false, detail?.isOtherBucket)
     }
 
+    @Test
+    fun `deep read unavailable hides capability`() = runTest {
+        val viewModel = newViewModel(
+            FakeReportRepository(),
+            FakeTransactionRepository(),
+            parser = FakeParser(available = false),
+        )
+        advanceUntilIdle()
+        assertFalse(viewModel.uiState.value.deepReadAvailable)
+    }
+
+    @Test
+    fun `deep read success clears loading`() = runTest {
+        val r = report(periodKey = "2026-07", status = ReportStatus.SUCCESS).copy(id = 3L)
+        val repo = FakeReportRepository().apply {
+            setReports(ReportPeriodType.MONTHLY, listOf(r))
+        }
+        val viewModel = newViewModel(
+            repo,
+            FakeTransactionRepository(),
+            parser = FakeParser(available = true, reply = "深读正文"),
+        )
+        advanceUntilIdle()
+        assertTrue(viewModel.uiState.value.deepReadAvailable)
+
+        viewModel.deepRead(r)
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.deepReading)
+        assertNull(viewModel.uiState.value.deepReadMessage)
+        assertEquals("深读正文", repo.upserted.last().analysisText)
+    }
+
     private fun newViewModel(
         repo: ReportRepository,
         txRepo: TransactionRepository,
+        parser: FakeParser = FakeParser(available = false),
     ): ReportViewModel {
         val budgetRepo = FakeMonthlyBudgetRepository()
         val generate = GenerateReportUseCase(txRepo, repo, budgetRepo)
@@ -244,6 +303,9 @@ class ReportViewModelTest {
             reportRepository = repo,
             generateReportUseCase = generate,
             ensureReportsUseCase = ensure,
+            loadReportSeriesUseCase = LoadReportSeriesUseCase(txRepo),
+            deepReadReportUseCase = DeepReadReportUseCase(parser, repo),
+            nlTransactionParser = parser,
         )
     }
 
@@ -271,6 +333,14 @@ class ReportViewModelTest {
     private fun startOfDay(date: LocalDate): Long =
         date.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
 
+    private class FakeParser(
+        private val available: Boolean,
+        private val reply: String? = null,
+    ) : NLTransactionParser {
+        override suspend fun isAvailable(): Boolean = available
+        override suspend fun generate(systemInstruction: String, userText: String): String? = reply
+    }
+
     private class FakeMonthlyBudgetRepository : com.expfal.yunayu.domain.repository.MonthlyBudgetRepository {
         override fun observeMonthlyBudgetCents(): Flow<Long> = MutableStateFlow(0L)
         override suspend fun saveMonthlyBudgetCents(cents: Long) = Unit
@@ -294,6 +364,7 @@ class ReportViewModelTest {
 
         override suspend fun getByKey(periodType: ReportPeriodType, periodKey: String): Report? =
             flows[periodType]?.value?.firstOrNull { it.periodKey == periodKey }
+                ?: upserted.lastOrNull { it.periodType == periodType && it.periodKey == periodKey }
 
         override suspend fun upsert(report: Report) {
             upserted += report

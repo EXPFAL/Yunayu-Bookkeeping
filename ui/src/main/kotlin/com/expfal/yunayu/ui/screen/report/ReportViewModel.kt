@@ -3,11 +3,15 @@ package com.expfal.yunayu.ui.screen.report
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.expfal.yunayu.domain.nl.NLTransactionParser
+import com.expfal.yunayu.domain.report.DeepReadReportUseCase
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.report.GenerateReportUseCase
+import com.expfal.yunayu.domain.report.LoadReportSeriesUseCase
 import com.expfal.yunayu.domain.report.model.CategoryShare
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
+import com.expfal.yunayu.domain.report.model.ReportSeriesSnapshot
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.util.TimeWindow
 import com.expfal.yunayu.domain.util.TimeWindows
@@ -41,17 +45,25 @@ data class ReportUiState(
     val loading: Boolean = true,
     val generating: Boolean = false,
     val categoryDetail: CategoryDetailUiState? = null,
+    val series: ReportSeriesSnapshot? = null,
+    val seriesLoading: Boolean = false,
+    val deepReadAvailable: Boolean = false,
+    val deepReading: Boolean = false,
+    val deepReadMessage: String? = null,
 )
 
 /**
  * 「分析报告」ViewModel：按周期类型观察报告列表、切换类型、失败报告重试，
- * 并记录饼图选中分类（金额 / 占比 / 下钻标签）。
+ * 并记录饼图选中分类；详情展开时现算近 N 期序列，可选 AI 深读。
  */
 @HiltViewModel
 class ReportViewModel @Inject constructor(
     private val reportRepository: ReportRepository,
     private val generateReportUseCase: GenerateReportUseCase,
     private val ensureReportsUseCase: EnsureReportsUseCase,
+    private val loadReportSeriesUseCase: LoadReportSeriesUseCase,
+    private val deepReadReportUseCase: DeepReadReportUseCase,
+    private val nlTransactionParser: NLTransactionParser,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReportUiState())
@@ -60,32 +72,73 @@ class ReportViewModel @Inject constructor(
     /** 当前报告列表观察协程，切换类型时取消重订阅。 */
     private var observeJob: Job? = null
 
+    /** 序列加载协程，切换选中报告时取消。 */
+    private var seriesJob: Job? = null
+
     init {
         observeReports(ReportPeriodType.MONTHLY)
         ensureCurrentPeriods()
+        refreshDeepReadAvailability()
     }
 
     /** 切换周期类型并重新订阅对应列表；重复选择同一类型不做任何事。 */
     fun selectPeriodType(type: ReportPeriodType) {
         if (_uiState.value.periodType == type || type == ReportPeriodType.ANNUAL) return
+        seriesJob?.cancel()
         _uiState.update {
-            it.copy(periodType = type, selectedPeriodKey = null, categoryDetail = null)
+            it.copy(
+                periodType = type,
+                selectedPeriodKey = null,
+                categoryDetail = null,
+                series = null,
+                seriesLoading = false,
+            )
         }
         observeReports(type)
         ensureCurrentPeriods()
     }
 
-    /** 点选 / 取消点选某份报告，用于展开或收起详情。 */
+    /** 点选 / 取消点选某份报告，用于展开或收起详情；展开时现算序列。 */
     fun selectReport(periodKey: String) {
+        val current = _uiState.value
+        val nextKey = if (current.selectedPeriodKey == periodKey) null else periodKey
         _uiState.update {
-            val nextKey = if (it.selectedPeriodKey == periodKey) null else periodKey
-            it.copy(selectedPeriodKey = nextKey, categoryDetail = null)
+            it.copy(
+                selectedPeriodKey = nextKey,
+                categoryDetail = null,
+                series = null,
+                seriesLoading = nextKey != null,
+                deepReadMessage = null,
+            )
+        }
+        seriesJob?.cancel()
+        if (nextKey == null) return
+        val report = current.reports.firstOrNull { it.periodKey == nextKey } ?: return
+        seriesJob = viewModelScope.launch {
+            val snapshot = runCatching {
+                loadReportSeriesUseCase(report.periodType, report.periodKey)
+            }.getOrElse { e ->
+                if (e is CancellationException) throw e
+                Log.e(TAG, "Failed to load series for ${report.periodKey}", e)
+                null
+            }
+            _uiState.update {
+                if (it.selectedPeriodKey != nextKey) {
+                    it
+                } else {
+                    it.copy(series = snapshot, seriesLoading = false)
+                }
+            }
         }
     }
 
     /** 清空分类选中详情。 */
     fun clearCategoryDetail() {
         _uiState.update { it.copy(categoryDetail = null) }
+    }
+
+    fun consumeDeepReadMessage() {
+        _uiState.update { it.copy(deepReadMessage = null) }
     }
 
     /**
@@ -128,12 +181,42 @@ class ReportViewModel @Inject constructor(
                     prevWindowStartMs = previous.startInclusiveMs,
                     prevWindowEndMs = previous.endExclusiveMs,
                 )
+                if (_uiState.value.selectedPeriodKey == report.periodKey) {
+                    val snapshot = runCatching {
+                        loadReportSeriesUseCase(report.periodType, report.periodKey)
+                    }.getOrNull()
+                    _uiState.update { it.copy(series = snapshot, seriesLoading = false) }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to regenerate report ${report.periodType}/${report.periodKey}", e)
             } finally {
                 _uiState.update { it.copy(generating = false) }
+            }
+        }
+    }
+
+    /** 按需 AI 深读；无配置或失败时写提示，不改报告 status。 */
+    fun deepRead(report: Report) {
+        if (_uiState.value.deepReading || !_uiState.value.deepReadAvailable) return
+        _uiState.update { it.copy(deepReading = true, deepReadMessage = null) }
+        viewModelScope.launch {
+            try {
+                val text = deepReadReportUseCase(report, _uiState.value.series)
+                _uiState.update {
+                    it.copy(
+                        deepReading = false,
+                        deepReadMessage = if (text == null) "深度解读失败，请稍后重试" else null,
+                    )
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e(TAG, "Deep read failed for ${report.periodKey}", e)
+                _uiState.update {
+                    it.copy(deepReading = false, deepReadMessage = "深度解读失败，请稍后重试")
+                }
             }
         }
     }
@@ -169,6 +252,13 @@ class ReportViewModel @Inject constructor(
                     if (e is CancellationException) throw e
                     Log.e(TAG, "Failed to ensure current reports", e)
                 }
+        }
+    }
+
+    private fun refreshDeepReadAvailability() {
+        viewModelScope.launch {
+            val available = runCatching { nlTransactionParser.isAvailable() }.getOrDefault(false)
+            _uiState.update { it.copy(deepReadAvailable = available) }
         }
     }
 

@@ -31,25 +31,36 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.domain.report.model.CategoryChange
 import com.expfal.yunayu.domain.report.model.CategoryShare
 import com.expfal.yunayu.domain.report.model.LocalInsight
+import com.expfal.yunayu.domain.report.model.LocalInsightKind
+import com.expfal.yunayu.domain.report.model.MomComparison
+import com.expfal.yunayu.domain.report.model.PeriodTotalsPoint
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
+import com.expfal.yunayu.domain.report.model.ReportSeriesSnapshot
 import com.expfal.yunayu.domain.report.model.ReportStatus
 import com.expfal.yunayu.ui.component.PIE_COLORS
 import com.expfal.yunayu.ui.component.PieChart
@@ -70,7 +81,14 @@ fun ReportScreen(
     viewModel: ReportViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
     BackHandler(onBack = onBack)
+
+    LaunchedEffect(uiState.deepReadMessage) {
+        val msg = uiState.deepReadMessage ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(msg)
+        viewModel.consumeDeepReadMessage()
+    }
 
     Scaffold(
         topBar = {
@@ -83,6 +101,7 @@ fun ReportScreen(
                 },
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -100,10 +119,15 @@ fun ReportScreen(
                     selectedPeriodKey = uiState.selectedPeriodKey,
                     generating = uiState.generating,
                     categoryDetail = uiState.categoryDetail,
+                    series = uiState.series,
+                    seriesLoading = uiState.seriesLoading,
+                    deepReadAvailable = uiState.deepReadAvailable,
+                    deepReading = uiState.deepReading,
                     onSelect = viewModel::selectReport,
                     onRetry = viewModel::retry,
                     onSelectCategory = viewModel::selectCategoryShare,
                     onClearCategory = viewModel::clearCategoryDetail,
+                    onDeepRead = viewModel::deepRead,
                     onDrillToTransactions = { report, tagId ->
                         onDrillToTransactions(report.windowStartMs, report.windowEndMs, tagId)
                     },
@@ -137,10 +161,15 @@ private fun ReportList(
     selectedPeriodKey: String?,
     generating: Boolean,
     categoryDetail: CategoryDetailUiState?,
+    series: ReportSeriesSnapshot?,
+    seriesLoading: Boolean,
+    deepReadAvailable: Boolean,
+    deepReading: Boolean,
     onSelect: (String) -> Unit,
     onRetry: (Report) -> Unit,
     onSelectCategory: (CategoryShare, Boolean) -> Unit,
     onClearCategory: () -> Unit,
+    onDeepRead: (Report) -> Unit,
     onDrillToTransactions: (Report, Long?) -> Unit,
 ) {
     val selected = reports.firstOrNull { it.periodKey == selectedPeriodKey }
@@ -162,8 +191,13 @@ private fun ReportList(
                 ReportDetail(
                     report = selected,
                     categoryDetail = categoryDetail,
+                    series = series,
+                    seriesLoading = seriesLoading,
+                    deepReadAvailable = deepReadAvailable,
+                    deepReading = deepReading,
                     onSelectCategory = onSelectCategory,
                     onClearCategory = onClearCategory,
+                    onDeepRead = { onDeepRead(selected) },
                     onDrill = { tagId -> onDrillToTransactions(selected, tagId) },
                 )
             }
@@ -171,7 +205,7 @@ private fun ReportList(
     }
 }
 
-/** 单份报告行：期键标题 + 状态标识 + 净结余与首条洞察；失败条目附「重试」按钮。 */
+/** 单份报告行：期键标题 + 状态标识 + 净结余与首条故事/洞察。 */
 @Composable
 private fun ReportRow(
     report: Report,
@@ -181,7 +215,10 @@ private fun ReportRow(
     onRetry: () -> Unit,
 ) {
     val net = report.incomeCents - report.expenseCents
-    val insightTitle = report.localInsights.firstOrNull()?.title
+    val insightTitle = report.localInsights
+        .firstOrNull { it.kind == LocalInsightKind.STORY }
+        ?.title
+        ?: report.localInsights.firstOrNull()?.title
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
@@ -259,14 +296,19 @@ private fun RetryButton(generating: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * 报告详情：概览、可交互分类饼图与选中摘要、本地洞察。
+ * 报告详情：故事、建议、趋势/环比、概览、饼图、折叠细节、可选深读。
  */
 @Composable
 private fun ReportDetail(
     report: Report,
     categoryDetail: CategoryDetailUiState?,
+    series: ReportSeriesSnapshot?,
+    seriesLoading: Boolean,
+    deepReadAvailable: Boolean,
+    deepReading: Boolean,
     onSelectCategory: (CategoryShare, Boolean) -> Unit,
     onClearCategory: () -> Unit,
+    onDeepRead: () -> Unit,
     onDrill: (Long?) -> Unit,
 ) {
     val net = report.incomeCents - report.expenseCents
@@ -278,6 +320,13 @@ private fun ReportDetail(
         buildSharesForChart(report.topCategories, report.expenseCents)
     }
     var selectedIndex by remember(report.periodKey) { mutableStateOf<Int?>(null) }
+    var detailsExpanded by remember(report.periodKey) { mutableStateOf(false) }
+
+    val story = report.localInsights.firstOrNull { it.kind == LocalInsightKind.STORY }
+    val advice = report.localInsights.filter { it.kind == LocalInsightKind.ADVICE }
+    val detailInsights = report.localInsights.filter {
+        it.kind != LocalInsightKind.STORY && it.kind != LocalInsightKind.ADVICE
+    }
 
     fun selectIndex(index: Int) {
         selectedIndex = index
@@ -295,6 +344,25 @@ private fun ReportDetail(
             modifier = Modifier.padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
+            story?.let { InsightCard(it, emphasize = true) }
+            advice.forEach { InsightCard(it) }
+
+            if (seriesLoading) {
+                Text(
+                    text = "加载趋势…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            series?.let { snap ->
+                if (snap.points.isNotEmpty()) {
+                    Text("近 ${snap.points.size} 期支出", style = MaterialTheme.typography.titleSmall)
+                    ExpenseTrendBars(snap.points)
+                    MomSection(snap.mom, report)
+                    CategoryChangeSection(snap.topIncreases, snap.topDecreases)
+                }
+            }
+
             Text("概览", style = MaterialTheme.typography.titleSmall)
             DetailLine("收入", formatCents(report.incomeCents))
             DetailLine("支出", formatCents(report.expenseCents))
@@ -332,11 +400,112 @@ private fun ReportDetail(
                 )
             }
 
-            if (report.localInsights.isNotEmpty()) {
-                Text("本地洞察", style = MaterialTheme.typography.titleSmall)
-                report.localInsights.forEach { insight ->
-                    InsightCard(insight)
+            if (detailInsights.isNotEmpty()) {
+                TextButton(onClick = { detailsExpanded = !detailsExpanded }) {
+                    Text(if (detailsExpanded) "收起细节洞察" else "展开细节洞察（${detailInsights.size}）")
                 }
+                if (detailsExpanded) {
+                    detailInsights.forEach { InsightCard(it) }
+                }
+            }
+
+            report.analysisText?.takeIf { it.isNotBlank() }?.let { text ->
+                Text("深度解读", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (deepReadAvailable) {
+                Button(
+                    onClick = onDeepRead,
+                    enabled = !deepReading,
+                    modifier = Modifier.align(Alignment.End),
+                ) {
+                    if (deepReading) {
+                        CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                    } else {
+                        Text(if (report.analysisText.isNullOrBlank()) "深度解读" else "重新解读")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MomSection(mom: MomComparison, report: Report) {
+    Text("环比", style = MaterialTheme.typography.titleSmall)
+    DetailLine("收入", signedCents(mom.incomeDeltaCents))
+    DetailLine(
+        "支出",
+        buildString {
+            append(signedCents(mom.expenseDeltaCents))
+            mom.expenseDeltaPercent?.let { append("（${signedPercent(it)}）") }
+        },
+    )
+    DetailLine("净结余", signedCents(mom.netDeltaCents))
+    // 落库 prev* 作交叉核对展示（上期绝对值）
+    DetailLine("上期支出", formatCents(report.prevExpenseCents))
+}
+
+@Composable
+private fun CategoryChangeSection(
+    increases: List<CategoryChange>,
+    decreases: List<CategoryChange>,
+) {
+    if (increases.isEmpty() && decreases.isEmpty()) return
+    Text("分类增减", style = MaterialTheme.typography.titleSmall)
+    increases.forEach { change ->
+        DetailLine(
+            "↑ ${change.tagName ?: "未分类"}",
+            signedCents(change.deltaCents),
+        )
+    }
+    decreases.forEach { change ->
+        DetailLine(
+            "↓ ${change.tagName ?: "未分类"}",
+            signedCents(change.deltaCents),
+        )
+    }
+}
+
+@Composable
+private fun ExpenseTrendBars(points: List<PeriodTotalsPoint>) {
+    val maxExpense = points.maxOf { it.expenseCents }.coerceAtLeast(1L)
+    val barColor = MaterialTheme.colorScheme.primary
+    val trackColor = MaterialTheme.colorScheme.surfaceVariant
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        points.forEach { point ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = shortPeriodLabel(point.periodKey),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(56.dp),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Canvas(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(12.dp),
+                ) {
+                    val radius = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                    drawRoundRect(color = trackColor, cornerRadius = radius)
+                    val fraction = point.expenseCents.toFloat() / maxExpense.toFloat()
+                    drawRoundRect(
+                        color = barColor,
+                        size = Size(size.width * fraction, size.height),
+                        cornerRadius = radius,
+                        topLeft = Offset.Zero,
+                    )
+                }
+                Text(
+                    text = formatCents(point.expenseCents),
+                    style = MaterialTheme.typography.labelSmall,
+                    modifier = Modifier.width(72.dp),
+                    textAlign = TextAlign.End,
+                )
             }
         }
     }
@@ -406,10 +575,14 @@ private fun CategoryDetailPanel(
 }
 
 @Composable
-private fun InsightCard(insight: LocalInsight) {
+private fun InsightCard(insight: LocalInsight, emphasize: Boolean = false) {
     Surface(
         shape = MaterialTheme.shapes.small,
-        color = MaterialTheme.colorScheme.surfaceVariant,
+        color = if (emphasize) {
+            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        },
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(modifier = Modifier.padding(12.dp)) {
@@ -528,3 +701,22 @@ private fun windowDayCount(startMs: Long, endMs: Long): Int {
     val end = Instant.ofEpochMilli(endMs).atZone(zone).toLocalDate()
     return ChronoUnit.DAYS.between(start, end).toInt().coerceAtLeast(1)
 }
+
+private fun signedCents(delta: Long): String {
+    val abs = formatCents(kotlin.math.abs(delta))
+    return when {
+        delta > 0L -> "+$abs"
+        delta < 0L -> "-$abs"
+        else -> abs
+    }
+}
+
+private fun signedPercent(value: Int): String =
+    if (value > 0) "+$value%" else "$value%"
+
+private fun shortPeriodLabel(periodKey: String): String =
+    when {
+        periodKey.contains("-W") -> periodKey.substringAfterLast('-')
+        periodKey.length >= 7 -> periodKey.takeLast(5)
+        else -> periodKey
+    }

@@ -1,7 +1,10 @@
 package com.expfal.yunayu.data.di
 
+import com.expfal.yunayu.domain.nl.NLTransactionParser
+import com.expfal.yunayu.domain.report.DeepReadReportUseCase
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.report.GenerateReportUseCase
+import com.expfal.yunayu.domain.report.LoadReportSeriesUseCase
 import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
@@ -36,4 +39,17 @@ object ReportModule {
         reportRepository: ReportRepository,
         generateReportUseCase: GenerateReportUseCase,
     ): EnsureReportsUseCase = EnsureReportsUseCase(reportRepository, generateReportUseCase)
+
+    @Provides
+    @Singleton
+    fun provideLoadReportSeriesUseCase(
+        transactionRepository: TransactionRepository,
+    ): LoadReportSeriesUseCase = LoadReportSeriesUseCase(transactionRepository)
+
+    @Provides
+    @Singleton
+    fun provideDeepReadReportUseCase(
+        nlTransactionParser: NLTransactionParser,
+        reportRepository: ReportRepository,
+    ): DeepReadReportUseCase = DeepReadReportUseCase(nlTransactionParser, reportRepository)
 }

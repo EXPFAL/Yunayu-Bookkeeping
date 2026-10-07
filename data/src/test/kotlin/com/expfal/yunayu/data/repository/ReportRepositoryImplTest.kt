@@ -331,6 +331,17 @@ class ReportRepositoryImplTest {
             upserted += report
         }
 
+        override suspend fun getAll(): List<ReportEntity> = upserted.toList()
+
+        override suspend fun insertAll(reports: List<ReportEntity>): List<Long> {
+            upserted += reports
+            return reports.map { it.id }
+        }
+
+        override suspend fun deleteAll() {
+            upserted.clear()
+        }
+
         override suspend fun invalidateWhereWindowContains(epochMillis: Long) {
             invalidateCalls += epochMillis
         }

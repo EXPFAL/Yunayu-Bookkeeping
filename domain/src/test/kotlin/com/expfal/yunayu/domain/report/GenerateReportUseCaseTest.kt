@@ -5,6 +5,7 @@ import com.expfal.yunayu.domain.model.CategoryExpense
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.WindowTotals
+import com.expfal.yunayu.domain.report.model.LocalInsightKind
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
@@ -27,7 +28,7 @@ class GenerateReportUseCaseTest {
     private val prevTotals = WindowTotals(incomeCents = 4_000L, expenseCents = 2_500L)
 
     @Test
-    fun `persists success report with structured data and null analysis`() = runTest {
+    fun `persists success report with story and null analysis`() = runTest {
         val transactionRepository = FakeTransactionRepository(
             currentTotals = currentTotals,
             prevTotals = prevTotals,
@@ -50,12 +51,13 @@ class GenerateReportUseCaseTest {
         assertEquals(2_500L, report.prevExpenseCents)
         assertEquals(listOf("餐饮", null), report.topCategories.map { it.tagName })
         assertEquals(listOf(50, 16), report.topCategories.map { it.percent })
-        assertTrue(report.localInsights.isNotEmpty())
+        assertEquals(LocalInsightKind.STORY, report.localInsights.first().kind)
+        assertTrue(report.localInsights.any { it.kind != LocalInsightKind.STORY })
         assertTrue(transactionRepository.windowTotalsCalls.size >= 2)
     }
 
     @Test
-    fun `regenerate reuses existing report id and clears analysis text`() = runTest {
+    fun `regenerate reuses existing report id and clears deep-read analysis text`() = runTest {
         val existing = Report(
             id = 42L,
             periodType = MONTHLY,

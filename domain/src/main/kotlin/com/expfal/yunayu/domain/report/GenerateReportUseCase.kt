@@ -1,6 +1,8 @@
 package com.expfal.yunayu.domain.report
 
 import com.expfal.yunayu.domain.report.model.CategoryShare
+import com.expfal.yunayu.domain.report.model.LocalInsight
+import com.expfal.yunayu.domain.report.model.LocalInsightKind
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
@@ -15,8 +17,9 @@ import java.time.ZoneId
 /**
  * 生成一份周期报告的编排用例。
  *
- * 链路：聚合当期/上期 + Top 分类 → 本地洞察 → 落库。
- * 结构化数据与本地洞察齐全即 [ReportStatus.SUCCESS]。
+ * 链路：聚合当期/上期 + Top 分类 → 近 N 期序列（供评分）→ 细节洞察 →
+ * 建议 / 叙事 → 落库。结构化数据与本地洞察齐全即 [ReportStatus.SUCCESS]。
+ * 重生成成功后清空 [Report.analysisText]（旧 AI 深读作废）。
  */
 class GenerateReportUseCase(
     private val transactionRepository: TransactionRepository,
@@ -26,7 +29,6 @@ class GenerateReportUseCase(
 
     /**
      * 生成并持久化报告；[prevWindowStartMs]/[prevWindowEndMs] 为环比基期窗口（半开区间）。
-     * 上期金额仍写入报告行，供以后需要时使用；界面不再单独展示环比。
      */
     suspend operator fun invoke(
         periodType: ReportPeriodType,
@@ -54,7 +56,7 @@ class GenerateReportUseCase(
         val daysInMonth = today.lengthOfMonth()
         val elapsedDays = today.dayOfMonth
 
-        val localInsights = LocalInsightBuilder.build(
+        val detailInsights = LocalInsightBuilder.build(
             periodType = periodType,
             totals = totals,
             topCategories = topCategories,
@@ -66,6 +68,32 @@ class GenerateReportUseCase(
             largeTxnCents = largeTxn,
             windowTransactions = windowTransactions,
         )
+
+        val series = loadSeriesForScoring(periodType, periodKey)
+        val advice = ReportAdviceBuilder.build(
+            totals = totals,
+            topCategories = topCategories,
+            topIncreases = series.topIncreases,
+            uncategorizedCount = uncategorizedCount,
+            budgetCents = budgetCents,
+            spentInBudgetMonthCents = spentInMonth,
+            elapsedDaysInMonth = elapsedDays,
+            daysInMonth = daysInMonth,
+        )
+        val scored = ReportFactScorer.score(
+            totals = totals,
+            mom = series.mom,
+            points = series.points,
+            topCategories = topCategories,
+            detailInsights = detailInsights,
+            series = series,
+        )
+        val story = ReportNarrativeBuilder.build(
+            totals = totals,
+            scoredFacts = scored,
+            adviceTitles = advice.map { it.title },
+        )
+        val localInsights = composeInsights(story, advice, detailInsights)
 
         val existingId = reportRepository.getByKey(periodType, periodKey)?.id ?: 0L
         reportRepository.upsert(
@@ -88,6 +116,34 @@ class GenerateReportUseCase(
         )
     }
 
+    private suspend fun loadSeriesForScoring(
+        periodType: ReportPeriodType,
+        periodKey: String,
+    ) = when (periodType) {
+        ReportPeriodType.ANNUAL ->
+            ReportSeriesCalculator.snapshot(
+                points = emptyList(),
+                currentCategories = emptyList(),
+                previousCategories = emptyList(),
+            )
+        else -> LoadReportSeriesUseCase(transactionRepository)(periodType, periodKey)
+    }
+
+    private fun composeInsights(
+        story: LocalInsight,
+        advice: List<LocalInsight>,
+        detailInsights: List<LocalInsight>,
+    ): List<LocalInsight> {
+        val details = detailInsights.filter {
+            it.kind != LocalInsightKind.STORY && it.kind != LocalInsightKind.ADVICE
+        }
+        return buildList {
+            add(story)
+            addAll(advice)
+            addAll(details)
+        }
+    }
+
     private suspend fun buildTopCategories(
         windowStartMs: Long,
         windowEndMs: Long,
@@ -99,11 +155,12 @@ class GenerateReportUseCase(
                 CategoryShare(
                     tagName = it.tagName,
                     cents = it.cents,
-                    percent = percentOf(it.cents, expenseCents),
+                    percent = if (expenseCents > 0L) {
+                        (it.cents * 100 / expenseCents).toInt()
+                    } else {
+                        0
+                    },
                     tagId = it.tagId,
                 )
             }
-
-    private fun percentOf(partCents: Long, totalCents: Long): Int =
-        if (totalCents <= 0L) 0 else ((partCents * 100) / totalCents).toInt()
 }

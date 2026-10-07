@@ -38,6 +38,16 @@ class FakeAccountDao : AccountDao {
         return nextInsertId
     }
 
+    override suspend fun insertAll(accounts: List<AccountEntity>): List<Long> {
+        insertError?.let { throw it }
+        return accounts.map { insert(it) }
+    }
+
+    override suspend fun deleteAll() {
+        allAccounts = emptyList()
+        insertedAccounts.clear()
+    }
+
     override suspend fun countByName(name: String): Int {
         countByNameCalls += name
         return countByNameResult
@@ -106,6 +116,12 @@ class FakeTagDao : TagDao {
     override suspend fun deleteById(tagId: Long) {
         deleteCalls += tagId
     }
+
+    override suspend fun deleteAll() {
+        allTags = emptyList()
+        insertedTags.clear()
+        childrenByParent = emptyMap()
+    }
 }
 
 /** [TransactionDao] 手写 fake：记录 insert/聚合查询入参、观察流简单实现。 */
@@ -113,6 +129,7 @@ class FakeTransactionDao : TransactionDao {
 
     val inserted = mutableListOf<TransactionEntity>()
     var nextInsertId: Long = 1L
+    var allTransactions: List<TransactionEntity> = emptyList()
     var recentTagRows: List<TransactionDao.RecentTagRow> = emptyList()
     val recentFrequentTagsCalls = mutableListOf<Triple<Long, String, Int>>()
     var expenseSumFlow: Flow<Long> = flowOf(0L)
@@ -135,6 +152,17 @@ class FakeTransactionDao : TransactionDao {
     override suspend fun insert(transaction: TransactionEntity): Long {
         inserted += transaction
         return nextInsertId
+    }
+
+    override suspend fun insertAll(transactions: List<TransactionEntity>): List<Long> =
+        transactions.map { insert(it) }
+
+    override suspend fun getAll(): List<TransactionEntity> = allTransactions
+
+    override suspend fun deleteAll() {
+        allTransactions = emptyList()
+        inserted.clear()
+        entityById = emptyMap()
     }
 
     var entityById: Map<Long, TransactionEntity> = emptyMap()
@@ -283,22 +311,42 @@ class FakeTransactionDao : TransactionDao {
 class FakeTransferDao : TransferDao {
 
     var observeAllFlow: Flow<List<TransferEntity>> = flowOf(emptyList())
+    var allTransfers: List<TransferEntity> = emptyList()
     val inserted = mutableListOf<TransferEntity>()
     var nextInsertId: Long = 1L
     val deletedByIdCalls = mutableListOf<Long>()
     var netByAccountFlow: Flow<List<TransferDao.TransferNetRow>> = flowOf(emptyList())
     var countByAccountIdResult: Int = 0
     val countByAccountIdCalls = mutableListOf<Long>()
+    var entityById: Map<Long, TransferEntity> = emptyMap()
+    val updated = mutableListOf<TransferEntity>()
 
     override fun observeAll(): Flow<List<TransferEntity>> = observeAllFlow
+
+    override suspend fun getAll(): List<TransferEntity> = allTransfers
+
+    override suspend fun getById(id: Long): TransferEntity? = entityById[id]
 
     override suspend fun insert(transfer: TransferEntity): Long {
         inserted += transfer
         return nextInsertId
     }
 
+    override suspend fun insertAll(transfers: List<TransferEntity>): List<Long> =
+        transfers.map { insert(it) }
+
+    override suspend fun update(transfer: TransferEntity) {
+        updated += transfer
+    }
+
     override suspend fun deleteById(id: Long) {
         deletedByIdCalls += id
+    }
+
+    override suspend fun deleteAll() {
+        allTransfers = emptyList()
+        inserted.clear()
+        entityById = emptyMap()
     }
 
     override suspend fun countByAccountId(accountId: Long): Int {

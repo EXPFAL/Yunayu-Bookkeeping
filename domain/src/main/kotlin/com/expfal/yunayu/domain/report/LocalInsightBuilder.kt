@@ -16,7 +16,8 @@ import kotlin.math.abs
  * 本地规则洞察构建器（纯函数、无 IO）。
  *
  * 只保留概览里没有的信息：空窗、净结余、分类结构、预算节奏、未分类、大额、
- * 以及囤货三餐 / 外出就餐 / 兼职经营等生活方式模式。环比与日均已在概览中展示，不再复述。
+ * 以及囤货三餐 / 外出就餐 / 兼职经营等生活方式模式。
+ * 环比/趋势由报告纵深层展示；本构建器不再产出 TREND / STORY / ADVICE。
  */
 object LocalInsightBuilder {
 
@@ -338,11 +339,9 @@ private data class LifestyleSnapshot(
             val personalExpenseCents = (expenseCents - businessExpenseCents).coerceAtLeast(0L)
             val hasStockpilePattern = stockpileCents >= STOCKPILE_AMOUNT_THRESHOLD_CENTS ||
                 stockpileCount >= STOCKPILE_COUNT_THRESHOLD
-            val hasDiningOut = diningOutCount >= DINING_COUNT_THRESHOLD ||
-                (
-                    personalExpenseCents > 0L &&
-                        diningOutCents * 100 >= personalExpenseCents * DINING_PERSONAL_PERCENT
-                    )
+            val diningShareHit = personalExpenseCents > 0L &&
+                diningOutCents * 100 >= personalExpenseCents * DINING_PERSONAL_PERCENT
+            val hasDiningOut = diningOutCount >= DINING_COUNT_THRESHOLD || diningShareHit
             return LifestyleSnapshot(
                 stockpileCents = stockpileCents,
                 stockpileCount = stockpileCount,
@@ -358,18 +357,14 @@ private data class LifestyleSnapshot(
                 hasFoodMix = hasStockpilePattern && hasDiningOut,
                 hasBusiness = businessExpenseCents > 0L || businessIncomeCents > 0L,
                 taggedStockpile = classified.any { (tx, kind) ->
-                    kind == LifestyleKind.STOCKPILE &&
-                        (
-                            tx.tagName == ExpenseSeedTags.TAG_STOCKPILE ||
-                                tx.tagName == ExpenseSeedTags.TAG_FRUIT_LEGACY
-                            )
+                    val stockpileTag = tx.tagName == ExpenseSeedTags.TAG_STOCKPILE ||
+                        tx.tagName == ExpenseSeedTags.TAG_FRUIT_LEGACY
+                    kind == LifestyleKind.STOCKPILE && stockpileTag
                 },
                 taggedDining = classified.any { (tx, kind) ->
-                    kind == LifestyleKind.DINING_OUT &&
-                        (
-                            tx.tagName == ExpenseSeedTags.TAG_DINING_OUT ||
-                                tx.tagName == ExpenseSeedTags.TAG_GATHERING
-                            )
+                    val diningTag = tx.tagName == ExpenseSeedTags.TAG_DINING_OUT ||
+                        tx.tagName == ExpenseSeedTags.TAG_GATHERING
+                    kind == LifestyleKind.DINING_OUT && diningTag
                 },
             )
         }
