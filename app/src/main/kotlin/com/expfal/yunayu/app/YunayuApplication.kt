@@ -2,6 +2,7 @@ package com.expfal.yunayu.app
 
 import android.app.Application
 import android.util.Log
+import com.expfal.yunayu.app.notify.WeeklyReportNotifyWorker
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
 import com.expfal.yunayu.domain.repository.TagRepository
 import com.expfal.yunayu.domain.usecase.EnsureAccountsUseCase
@@ -43,6 +44,7 @@ class YunayuApplication : Application() {
         ensureIncomeTags()
         ensureExpenseTags()
         ensureAccounts()
+        WeeklyReportNotifyWorker.schedule(this)
     }
 
     /** 查询种子化根标签，经 Logcat（tag: YunayuDB）确认 Room 初始化成功。 */

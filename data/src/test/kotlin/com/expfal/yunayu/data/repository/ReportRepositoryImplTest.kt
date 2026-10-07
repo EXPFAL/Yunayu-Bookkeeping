@@ -66,8 +66,8 @@ class ReportRepositoryImplTest {
         assertEquals(2_500L, entity.prevExpenseCents)
         assertEquals("分析文本", entity.analysisText)
         assertEquals("SUCCESS", entity.status)
-        assertEquals("api", entity.engine)
-        assertEquals("1", entity.contentVersion)
+        assertEquals("local", entity.engine)
+        assertEquals("2", entity.contentVersion)
         assertEquals(999L, entity.generatedAt)
     }
 

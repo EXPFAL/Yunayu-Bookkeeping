@@ -1041,11 +1041,12 @@ interface SemesterBudgetEngine {
 - `QuickAddViewModel`：`onManualNoteChange` debounce 300ms；`manualNote` 非空且用户未主动选分类时触发；频次预选在输入备注时清除以便建议；结果写入 `noteSuggestedTags`，与 `suggestedTags` 分区展示。
 - UI：「根据备注建议」SuggestionChip 行；点选走 `onSelectTag`；已选分类后隐藏。
 
-### 26.2 报告备注抽样（2B）
+### 26.2 报告生成（已演进）
 
-- `TransactionRepository.getExpenseNotesByCategory`：DAO 按金额降序取非空备注，仓储按 `tagId` 分组截断。
-- `GenerateReportUseCase`：仅对 Top 分类过滤抽样结果，传入 `ReportPromptBuilder`。
-- Prompt：追加「各类代表备注」；系统指令可结合备注理解场景；合计备注字符硬顶 800。
+- 主路径本地：`GenerateReportUseCase` → 结构化 + `LocalInsightBuilder` + 叙事/建议；恒 SUCCESS。
+- 时间纵深：详情现算近 6 期；生活费额度 Hero 复用今日 `MonthlyBudgetSnapshot`。
+- 按需深读：`DeepReadReportUseCase` + 薄 prompt，经 `NLTransactionParser.generate`；写入 `analysisText`。
+- 旧 `ReportPromptBuilder` / 全量备注抽样链路已移除。
 
 ---
 

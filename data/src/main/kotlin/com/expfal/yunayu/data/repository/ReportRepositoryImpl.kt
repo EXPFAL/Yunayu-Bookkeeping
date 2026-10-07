@@ -75,11 +75,11 @@ class ReportRepositoryImpl @Inject constructor(
     )
 
     companion object {
-        /** 生成引擎标识（当前为 OpenAI 兼容在线 API）。 */
-        const val ENGINE = "api"
+        /** 生成引擎标识：本地结构化 + 叙事（深读另写 analysisText）。 */
+        const val ENGINE = "local"
 
-        /** 报告提示词 / 内容版本。 */
-        const val CONTENT_VERSION = "1"
+        /** 报告内容版本（本地事实核 + 额度 Hero 口径）。 */
+        const val CONTENT_VERSION = "2"
 
         /** JSON 序列化前缀，与 legacy `name:cents:percent;` 区分。 */
         private const val JSON_PREFIX = "j1:"

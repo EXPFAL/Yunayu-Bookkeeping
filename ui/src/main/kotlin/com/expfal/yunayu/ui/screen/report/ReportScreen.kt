@@ -35,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
@@ -59,6 +60,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.expfal.yunayu.domain.model.MonthlyBudgetSnapshot
+import com.expfal.yunayu.domain.report.ReportAllowanceCopy
 import com.expfal.yunayu.domain.report.model.CategoryChange
 import com.expfal.yunayu.domain.report.model.CategoryShare
 import com.expfal.yunayu.domain.report.model.LocalInsight
@@ -69,33 +72,26 @@ import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportSeriesSnapshot
 import com.expfal.yunayu.domain.report.model.ReportStatus
+import com.expfal.yunayu.domain.util.TimeWindows
 import com.expfal.yunayu.ui.component.PIE_COLORS
 import com.expfal.yunayu.ui.component.PieChart
 import com.expfal.yunayu.ui.util.formatCents
-import java.time.Instant
-import java.time.ZoneId
-import java.time.temporal.ChronoUnit
+import java.time.LocalDate
 
 /**
- * 「分析报告」全屏：顶部周/月切换，中部按期键倒序的报告列表，点选展开详情；失败条目可重试。
+ * 「分析报告」列表：周/月切换 + 期键摘要行；点行进入独立详情页。
  *
- * [onDrillToTransactions]：分类下钻到收支管理（时间窗 + 可选标签）。
+ * [onOpenDetail]：打开详情全屏；[onSetupBudget]：无预算引导去设置。
  */
 @Composable
 fun ReportScreen(
     onBack: () -> Unit,
-    onDrillToTransactions: (startMs: Long, endMs: Long, tagId: Long?) -> Unit = { _, _, _ -> },
+    onOpenDetail: (periodKey: String) -> Unit,
+    onSetupBudget: () -> Unit = {},
     viewModel: ReportViewModel = viewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val snackbarHostState = remember { SnackbarHostState() }
     BackHandler(onBack = onBack)
-
-    LaunchedEffect(uiState.deepReadMessage) {
-        val msg = uiState.deepReadMessage ?: return@LaunchedEffect
-        snackbarHostState.showSnackbar(msg)
-        viewModel.consumeDeepReadMessage()
-    }
 
     Scaffold(
         topBar = {
@@ -108,7 +104,6 @@ fun ReportScreen(
                 },
             )
         },
-        snackbarHost = { SnackbarHost(snackbarHostState) },
     ) { innerPadding ->
         Column(
             modifier = Modifier
@@ -123,22 +118,107 @@ fun ReportScreen(
                 uiState.reports.isEmpty() -> EmptyState()
                 else -> ReportList(
                     reports = uiState.reports,
+                    periodType = uiState.periodType,
                     selectedPeriodKey = uiState.selectedPeriodKey,
                     generating = uiState.generating,
-                    categoryDetail = uiState.categoryDetail,
-                    series = uiState.series,
-                    seriesLoading = uiState.seriesLoading,
-                    deepReadAvailable = uiState.deepReadAvailable,
-                    deepReading = uiState.deepReading,
-                    onSelect = viewModel::selectReport,
-                    onRetry = viewModel::retry,
-                    onSelectCategory = viewModel::selectCategoryShare,
-                    onClearCategory = viewModel::clearCategoryDetail,
-                    onDeepRead = viewModel::deepRead,
-                    onDrillToTransactions = { report, tagId ->
-                        onDrillToTransactions(report.windowStartMs, report.windowEndMs, tagId)
+                    budgetCents = uiState.budgetCents,
+                    budgetSnapshot = uiState.budgetSnapshot,
+                    onSelect = { key ->
+                        viewModel.openDetail(key)
+                        onOpenDetail(key)
                     },
+                    onRetry = viewModel::retry,
                 )
+            }
+        }
+    }
+}
+
+/**
+ * 报告详情全屏：额度 Hero → 故事 → 建议 → 趋势/分类/细节/深读。
+ */
+@Composable
+fun ReportDetailScreen(
+    onBack: () -> Unit,
+    onDrillToTransactions: (startMs: Long, endMs: Long, tagId: Long?) -> Unit = { _, _, _ -> },
+    onSetupBudget: () -> Unit = {},
+    viewModel: ReportViewModel = viewModel(),
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    BackHandler(onBack = onBack)
+
+    LaunchedEffect(uiState.selectedPeriodKey) {
+        val key = uiState.selectedPeriodKey
+        if (key != null && uiState.series == null && !uiState.seriesLoading) {
+            viewModel.openDetail(key)
+        }
+    }
+
+    LaunchedEffect(uiState.deepReadMessage) {
+        val msg = uiState.deepReadMessage ?: return@LaunchedEffect
+        snackbarHostState.showSnackbar(msg)
+        viewModel.consumeDeepReadMessage()
+    }
+
+    val report = uiState.reports.firstOrNull { it.periodKey == uiState.selectedPeriodKey }
+
+    Scaffold(
+        topBar = {
+            TopAppBar(
+                title = {
+                    Text(
+                        text = report?.periodKey
+                            ?: uiState.selectedPeriodKey
+                            ?: "报告详情",
+                    )
+                },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+            )
+        },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
+    ) { innerPadding ->
+        if (report == null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("报告不存在或已切换周期", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .padding(horizontal = 24.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                item(key = "detail-${report.periodKey}") {
+                    ReportDetail(
+                        report = report,
+                        categoryDetail = uiState.categoryDetail,
+                        series = uiState.series,
+                        seriesLoading = uiState.seriesLoading,
+                        deepReadAvailable = uiState.deepReadAvailable,
+                        deepReading = uiState.deepReading,
+                        budgetCents = uiState.budgetCents,
+                        budgetSnapshot = uiState.budgetSnapshot,
+                        onSelectCategory = viewModel::selectCategoryShare,
+                        onClearCategory = viewModel::clearCategoryDetail,
+                        onDeepRead = { viewModel.deepRead(report) },
+                        onSetupBudget = onSetupBudget,
+                        onDrill = { tagId ->
+                            onDrillToTransactions(report.windowStartMs, report.windowEndMs, tagId)
+                        },
+                    )
+                }
+                item { Spacer(modifier = Modifier.height(24.dp)) }
             }
         }
     }
@@ -161,25 +241,26 @@ private fun PeriodTypeToggle(selected: ReportPeriodType, onSelect: (ReportPeriod
     }
 }
 
-/** 报告列表：按期键倒序渲染每行，选中报告的详情作为尾随 item 展开。 */
+/** 报告列表：仅期键摘要行，点选进详情。 */
 @Composable
 private fun ReportList(
     reports: List<Report>,
+    periodType: ReportPeriodType,
     selectedPeriodKey: String?,
     generating: Boolean,
-    categoryDetail: CategoryDetailUiState?,
-    series: ReportSeriesSnapshot?,
-    seriesLoading: Boolean,
-    deepReadAvailable: Boolean,
-    deepReading: Boolean,
+    budgetCents: Long,
+    budgetSnapshot: MonthlyBudgetSnapshot?,
     onSelect: (String) -> Unit,
     onRetry: (Report) -> Unit,
-    onSelectCategory: (CategoryShare, Boolean) -> Unit,
-    onClearCategory: () -> Unit,
-    onDeepRead: (Report) -> Unit,
-    onDrillToTransactions: (Report, Long?) -> Unit,
 ) {
-    val selected = reports.firstOrNull { it.periodKey == selectedPeriodKey }
+    val today = remember { LocalDate.now() }
+    val currentPeriodKey = remember(periodType, today) {
+        when (periodType) {
+            ReportPeriodType.WEEKLY -> TimeWindows.weekPeriodKey(today)
+            ReportPeriodType.MONTHLY -> TimeWindows.monthPeriodKey(today)
+            ReportPeriodType.ANNUAL -> TimeWindows.yearPeriodKey(today.year)
+        }
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -189,43 +270,45 @@ private fun ReportList(
                 report = report,
                 selected = report.periodKey == selectedPeriodKey,
                 generating = generating,
+                showLiveAllowance = report.periodKey == currentPeriodKey &&
+                    budgetCents > 0L &&
+                    budgetSnapshot != null,
+                budgetSnapshot = budgetSnapshot,
                 onClick = { onSelect(report.periodKey) },
                 onRetry = { onRetry(report) },
             )
         }
-        if (selected != null) {
-            item(key = "detail-${selected.periodKey}") {
-                ReportDetail(
-                    report = selected,
-                    categoryDetail = categoryDetail,
-                    series = series,
-                    seriesLoading = seriesLoading,
-                    deepReadAvailable = deepReadAvailable,
-                    deepReading = deepReading,
-                    onSelectCategory = onSelectCategory,
-                    onClearCategory = onClearCategory,
-                    onDeepRead = { onDeepRead(selected) },
-                    onDrill = { tagId -> onDrillToTransactions(selected, tagId) },
-                )
-            }
-        }
     }
 }
 
-/** 单份报告行：期键标题 + 状态标识 + 净结余与首条故事/洞察。 */
+/** 单份报告行：期键 + 净结余；仅「本期」行附带今日还可花。 */
 @Composable
 private fun ReportRow(
     report: Report,
     selected: Boolean,
     generating: Boolean,
+    showLiveAllowance: Boolean,
+    budgetSnapshot: MonthlyBudgetSnapshot?,
     onClick: () -> Unit,
     onRetry: () -> Unit,
 ) {
     val net = report.incomeCents - report.expenseCents
-    val insightTitle = report.localInsights
-        .firstOrNull { it.kind == LocalInsightKind.STORY }
-        ?.title
-        ?: report.localInsights.firstOrNull()?.title
+    val summary = buildString {
+        if (showLiveAllowance && budgetSnapshot != null) {
+            when (report.periodType) {
+                ReportPeriodType.WEEKLY -> {
+                    append("本周还可花 ${formatCents(budgetSnapshot.weeklyRemainingCents)}")
+                    append(" · ")
+                }
+                ReportPeriodType.MONTHLY -> {
+                    append("本月还可花 ${formatCents(budgetSnapshot.remainingCents)}")
+                    append(" · ")
+                }
+                ReportPeriodType.ANNUAL -> Unit
+            }
+        }
+        append("净结余 ${formatCents(net)}")
+    }
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         colors = CardDefaults.cardColors(
@@ -247,13 +330,7 @@ private fun ReportRow(
             }
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = buildString {
-                    append("净结余 ${formatCents(net)}")
-                    if (insightTitle != null) {
-                        append(" · ")
-                        append(insightTitle)
-                    }
-                },
+                text = summary,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -303,7 +380,7 @@ private fun RetryButton(generating: Boolean, onClick: () -> Unit) {
 }
 
 /**
- * 报告详情：Hero 数字区、故事段、建议条、趋势柱、环比对比、分类增减、饼图、折叠细节、可选深读。
+ * 报告详情内容：额度 Hero → 故事 → 建议 → 趋势 / 分类 / 细节 / 深读。
  */
 @Composable
 private fun ReportDetail(
@@ -313,16 +390,14 @@ private fun ReportDetail(
     seriesLoading: Boolean,
     deepReadAvailable: Boolean,
     deepReading: Boolean,
+    budgetCents: Long,
+    budgetSnapshot: MonthlyBudgetSnapshot?,
     onSelectCategory: (CategoryShare, Boolean) -> Unit,
     onClearCategory: () -> Unit,
     onDeepRead: () -> Unit,
+    onSetupBudget: () -> Unit,
     onDrill: (Long?) -> Unit,
 ) {
-    val net = report.incomeCents - report.expenseCents
-    val dayCount = remember(report.windowStartMs, report.windowEndMs) {
-        windowDayCount(report.windowStartMs, report.windowEndMs)
-    }
-    val dailyAvg = if (dayCount > 0) report.expenseCents / dayCount else 0L
     val sharesForChart = remember(report.topCategories, report.expenseCents) {
         buildSharesForChart(report.topCategories, report.expenseCents)
     }
@@ -330,10 +405,32 @@ private fun ReportDetail(
     var detailsExpanded by remember(report.periodKey) { mutableStateOf(false) }
 
     val story = report.localInsights.firstOrNull { it.kind == LocalInsightKind.STORY }
-    val advice = report.localInsights.filter { it.kind == LocalInsightKind.ADVICE }
+    val allAdvice = report.localInsights.filter { it.kind == LocalInsightKind.ADVICE }
+    val advice = if (report.periodType == ReportPeriodType.WEEKLY) {
+        allAdvice.take(1)
+    } else {
+        allAdvice.take(2)
+    }
+    val adviceTitle = if (report.periodType == ReportPeriodType.WEEKLY) {
+        "下周目标"
+    } else {
+        "行动建议"
+    }
     val detailInsights = report.localInsights.filter {
         it.kind != LocalInsightKind.STORY && it.kind != LocalInsightKind.ADVICE
     }
+    val storyPrefix = ReportAllowanceCopy.storyPrefix(
+        periodType = report.periodType,
+        hasBudget = budgetCents > 0L,
+        snapshot = budgetSnapshot,
+    )
+    val storyText = buildString {
+        if (storyPrefix != null) append(storyPrefix)
+        if (story != null) {
+            if (isNotEmpty()) append(' ')
+            append(story.detail)
+        }
+    }.ifBlank { null }
 
     fun selectIndex(index: Int) {
         selectedIndex = index
@@ -346,20 +443,18 @@ private fun ReportDetail(
         modifier = Modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        HeroSection(
+        AllowanceHero(
+            periodType = report.periodType,
             periodKey = report.periodKey,
-            incomeCents = report.incomeCents,
-            expenseCents = report.expenseCents,
-            netCents = net,
-            dailyAvgCents = dailyAvg,
-            mom = series?.mom,
-            prevNetCents = report.prevIncomeCents - report.prevExpenseCents,
+            budgetCents = budgetCents,
+            snapshot = budgetSnapshot,
+            onSetupBudget = onSetupBudget,
         )
 
-        story?.let { StoryBlock(it.detail) }
+        storyText?.let { StoryBlock(it) }
 
         if (advice.isNotEmpty()) {
-            AdviceSection(advice)
+            AdviceSection(title = adviceTitle, advice = advice)
         }
 
         if (seriesLoading) {
@@ -446,22 +541,16 @@ private fun ReportDetail(
     }
 }
 
-/** Hero 数字区：周期标签 + 净结余主数字 + 收支副行 + 环比徽章。 */
+/** 生活费额度 Hero：周报主数字=本周还可花；月报=本月剩余；无预算引导。 */
 @Composable
-private fun HeroSection(
+private fun AllowanceHero(
+    periodType: ReportPeriodType,
     periodKey: String,
-    incomeCents: Long,
-    expenseCents: Long,
-    netCents: Long,
-    dailyAvgCents: Long,
-    mom: MomComparison?,
-    prevNetCents: Long,
+    budgetCents: Long,
+    snapshot: MonthlyBudgetSnapshot?,
+    onSetupBudget: () -> Unit,
 ) {
-    val netColor = when {
-        netCents > 0L -> MaterialTheme.colorScheme.primary
-        netCents < 0L -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurface
-    }
+    val hasBudget = budgetCents > 0L && snapshot != null
     Surface(
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f),
@@ -475,94 +564,80 @@ private fun HeroSection(
                 color = MaterialTheme.colorScheme.primary,
             )
             Spacer(modifier = Modifier.height(4.dp))
+            val snap = snapshot
+            if (!hasBudget || snap == null) {
+                Text(
+                    text = ReportAllowanceCopy.statusLine(false, null),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                TextButton(onClick = onSetupBudget) { Text("去设置") }
+                return@Column
+            }
+            val primaryLabel = if (periodType == ReportPeriodType.MONTHLY) {
+                "本月还可花"
+            } else {
+                "本周还可花"
+            }
+            val primaryCents = if (periodType == ReportPeriodType.MONTHLY) {
+                snap.remainingCents
+            } else {
+                snap.weeklyRemainingCents
+            }
+            val overWeek = snap.spentThisWeekCents > snap.weeklyQuotaCents &&
+                snap.weeklyQuotaCents > 0L
             Text(
-                text = "净结余",
+                text = primaryLabel,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
-            Row(verticalAlignment = Alignment.Bottom) {
-                Text(
-                    text = formatCents(netCents),
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = netColor,
-                    modifier = Modifier.weight(1f),
-                )
-                mom?.let { MoMBadge(it, prevNetCents = prevNetCents) }
-            }
-            Spacer(modifier = Modifier.height(10.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                HeroMetric("收入", formatCents(incomeCents))
-                HeroMetric("支出", formatCents(expenseCents))
-                HeroMetric("日均", formatCents(dailyAvgCents))
-            }
-        }
-    }
-}
-
-@Composable
-private fun HeroMetric(label: String, value: String) {
-    Column {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            text = value,
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Medium,
-        )
-    }
-}
-
-/** 环比徽章：净结余 ±% 优先，否则支出 ±%；以净结余变化方向着色。 */
-@Composable
-private fun MoMBadge(mom: MomComparison, prevNetCents: Long) {
-    val positive = mom.netDeltaCents > 0L
-    val neutral = mom.netDeltaCents == 0L
-    val bg = when {
-        neutral -> MaterialTheme.colorScheme.surfaceVariant
-        positive -> MaterialTheme.colorScheme.primary.copy(alpha = 0.14f)
-        else -> MaterialTheme.colorScheme.error.copy(alpha = 0.14f)
-    }
-    val fg = when {
-        neutral -> MaterialTheme.colorScheme.onSurfaceVariant
-        positive -> MaterialTheme.colorScheme.primary
-        else -> MaterialTheme.colorScheme.error
-    }
-    val percentText = netDeltaPercent(mom.netDeltaCents, prevNetCents)?.let { signedPercent(it) }
-        ?: mom.expenseDeltaPercent?.let { signedPercent(it) }
-    val label = if (percentText != null) {
-        "较上期 $percentText"
-    } else {
-        "较上期 ${signedCents(mom.netDeltaCents)}"
-    }
-    Surface(shape = RoundedCornerShape(50), color = bg) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            Icon(
-                imageVector = when {
-                    neutral -> Icons.Filled.Star
-                    positive -> Icons.Filled.KeyboardArrowUp
-                    else -> Icons.Filled.KeyboardArrowDown
+            Text(
+                text = formatCents(primaryCents),
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.SemiBold,
+                color = if (overWeek) {
+                    MaterialTheme.colorScheme.error
+                } else {
+                    MaterialTheme.colorScheme.primary
                 },
-                contentDescription = null,
-                tint = fg,
-                modifier = Modifier.size(14.dp),
             )
-            Text(text = label, style = MaterialTheme.typography.labelMedium, color = fg)
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "本月还剩 ¥${formatCents(snap.remainingCents)} · ${snap.remainingDays} 天",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            val daily = ReportAllowanceCopy.dailySpendableCents(snap)
+            Text(
+                text = "日均可花 ¥${formatCents(daily)}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (snap.weeklyQuotaCents > 0L) {
+                Spacer(modifier = Modifier.height(8.dp))
+                val weekRatio = (snap.spentThisWeekCents.toFloat() / snap.weeklyQuotaCents.toFloat())
+                    .coerceIn(0f, 1.2f)
+                LinearProgressIndicator(
+                    progress = { weekRatio.coerceIn(0f, 1f) },
+                    color = if (overWeek) {
+                        MaterialTheme.colorScheme.error
+                    } else {
+                        MaterialTheme.colorScheme.primary
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Text(
+                    text = "本周已花 ¥${formatCents(snap.spentThisWeekCents)} / 额度 ¥${formatCents(snap.weeklyQuotaCents)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = ReportAllowanceCopy.statusLine(true, snap),
+                style = MaterialTheme.typography.bodyMedium,
+            )
         }
     }
-}
-
-/** 净结余环比百分比；上期净结余为 0 时返回 null。 */
-private fun netDeltaPercent(deltaCents: Long, prevNetCents: Long): Int? {
-    if (prevNetCents == 0L) return null
-    return ((deltaCents * 100) / kotlin.math.abs(prevNetCents)).toInt()
 }
 
 /** 本期故事：大字号正文段，左侧主色竖条，非卡片。 */
@@ -597,12 +672,12 @@ private fun StoryBlock(detail: String) {
     }
 }
 
-/** 建议区：行动提示条，区别于洞察卡。 */
+/** 建议区：周报称「下周目标」，月报称「行动建议」。 */
 @Composable
-private fun AdviceSection(advice: List<LocalInsight>) {
+private fun AdviceSection(title: String, advice: List<LocalInsight>) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(
-            text = "行动建议",
+            text = title,
             style = MaterialTheme.typography.titleSmall,
             fontWeight = FontWeight.SemiBold,
         )
@@ -1088,13 +1163,6 @@ private fun EmptyState() {
             textAlign = TextAlign.Center,
         )
     }
-}
-
-private fun windowDayCount(startMs: Long, endMs: Long): Int {
-    val zone = ZoneId.systemDefault()
-    val start = Instant.ofEpochMilli(startMs).atZone(zone).toLocalDate()
-    val end = Instant.ofEpochMilli(endMs).atZone(zone).toLocalDate()
-    return ChronoUnit.DAYS.between(start, end).toInt().coerceAtLeast(1)
 }
 
 private fun signedCents(delta: Long): String {

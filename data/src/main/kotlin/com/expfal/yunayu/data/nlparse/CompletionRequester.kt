@@ -9,7 +9,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * 通用 OpenAI 兼容 `POST {baseUrl}/chat/completions` 请求器（在线解析与报告分析共用）。
+ * 通用 OpenAI 兼容 `POST {baseUrl}/chat/completions` 请求器（NL 记账 / 整理 / 按需报告深读共用）。
  *
  * 封装连接建立、请求体组装与响应 `choices[0].message.content` 抽取。任何网络、协议或配置异常
  * 均降级为 `null`，仅 [CancellationException] 向上重抛；连接超时由 [connectTimeoutMillis]、读取超时由
@@ -160,7 +160,7 @@ internal class CompletionRequester(
          * 逐字段解析生效配置：保存值 trim 后非空白则优先采用，否则回退对应默认值。
          *
          * 统一 trim 防移动端粘贴带入首尾空格打挂 URL 或 Authorization 头。
-         * 纯函数、无副作用，供在线解析 / 报告分析实现与单元测试复用。
+         * 纯函数、无副作用，供 NL 解析与单元测试复用。
          */
         internal fun resolveConfig(
             saved: NlApiConfig,

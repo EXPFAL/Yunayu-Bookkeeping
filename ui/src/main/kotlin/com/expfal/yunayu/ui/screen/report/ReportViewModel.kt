@@ -3,6 +3,7 @@ package com.expfal.yunayu.ui.screen.report
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.expfal.yunayu.domain.model.MonthlyBudgetSnapshot
 import com.expfal.yunayu.domain.nl.NLTransactionParser
 import com.expfal.yunayu.domain.report.DeepReadReportUseCase
 import com.expfal.yunayu.domain.report.EnsureReportsUseCase
@@ -12,7 +13,9 @@ import com.expfal.yunayu.domain.report.model.CategoryShare
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportSeriesSnapshot
+import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
+import com.expfal.yunayu.domain.usecase.MonthlyBudgetEngine
 import com.expfal.yunayu.domain.util.TimeWindow
 import com.expfal.yunayu.domain.util.TimeWindows
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -22,6 +25,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.LocalDate
@@ -39,7 +43,7 @@ data class CategoryDetailUiState(
 
 /** 分析报告屏 UI 状态快照。 */
 data class ReportUiState(
-    val periodType: ReportPeriodType = ReportPeriodType.MONTHLY,
+    val periodType: ReportPeriodType = ReportPeriodType.WEEKLY,
     val reports: List<Report> = emptyList(),
     val selectedPeriodKey: String? = null,
     val loading: Boolean = true,
@@ -50,11 +54,15 @@ data class ReportUiState(
     val deepReadAvailable: Boolean = false,
     val deepReading: Boolean = false,
     val deepReadMessage: String? = null,
+    /** 今日预算额度（分）；0 表示未设置。 */
+    val budgetCents: Long = 0L,
+    /** 今日生活费快照（与首页同源）。 */
+    val budgetSnapshot: MonthlyBudgetSnapshot? = null,
 )
 
 /**
- * 「分析报告」ViewModel：按周期类型观察报告列表、切换类型、失败报告重试，
- * 并记录饼图选中分类；详情展开时现算近 N 期序列，可选 AI 深读。
+ * 「分析报告」ViewModel：默认本周列表；点选进独立详情；观察今日预算快照；
+ * 详情现算近 N 期序列，可选 AI 深读。
  */
 @HiltViewModel
 class ReportViewModel @Inject constructor(
@@ -64,21 +72,24 @@ class ReportViewModel @Inject constructor(
     private val loadReportSeriesUseCase: LoadReportSeriesUseCase,
     private val deepReadReportUseCase: DeepReadReportUseCase,
     private val nlTransactionParser: NLTransactionParser,
+    private val monthlyBudgetRepository: MonthlyBudgetRepository,
+    private val monthlyBudgetEngine: MonthlyBudgetEngine,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReportUiState())
     val uiState: StateFlow<ReportUiState> = _uiState.asStateFlow()
 
-    /** 当前报告列表观察协程，切换类型时取消重订阅。 */
     private var observeJob: Job? = null
-
-    /** 序列加载协程，切换选中报告时取消。 */
     private var seriesJob: Job? = null
 
+    /** 通知深链：等本周列表到达后再 openDetail。 */
+    private var pendingOpenDetailKey: String? = null
+
     init {
-        observeReports(ReportPeriodType.MONTHLY)
+        observeReports(ReportPeriodType.WEEKLY)
         ensureCurrentPeriods()
         refreshDeepReadAvailability()
+        observeBudget()
     }
 
     /** 切换周期类型并重新订阅对应列表；重复选择同一类型不做任何事。 */
@@ -98,22 +109,29 @@ class ReportViewModel @Inject constructor(
         ensureCurrentPeriods()
     }
 
-    /** 点选 / 取消点选某份报告，用于展开或收起详情；展开时现算序列。 */
-    fun selectReport(periodKey: String) {
+    /**
+     * 打开详情：固定选中 [periodKey]（不再点按切换收起），并加载序列。
+     * 由列表页导航到 [ReportDetailScreen] 前调用。
+     */
+    fun openDetail(periodKey: String) {
         val current = _uiState.value
-        val nextKey = if (current.selectedPeriodKey == periodKey) null else periodKey
+        if (current.selectedPeriodKey == periodKey && current.series != null && !current.seriesLoading) {
+            return
+        }
         _uiState.update {
             it.copy(
-                selectedPeriodKey = nextKey,
+                selectedPeriodKey = periodKey,
                 categoryDetail = null,
                 series = null,
-                seriesLoading = nextKey != null,
+                seriesLoading = true,
                 deepReadMessage = null,
             )
         }
         seriesJob?.cancel()
-        if (nextKey == null) return
-        val report = current.reports.firstOrNull { it.periodKey == nextKey } ?: return
+        val report = current.reports.firstOrNull { it.periodKey == periodKey } ?: run {
+            _uiState.update { it.copy(seriesLoading = false) }
+            return
+        }
         seriesJob = viewModelScope.launch {
             val snapshot = runCatching {
                 loadReportSeriesUseCase(report.periodType, report.periodKey)
@@ -123,7 +141,7 @@ class ReportViewModel @Inject constructor(
                 null
             }
             _uiState.update {
-                if (it.selectedPeriodKey != nextKey) {
+                if (it.selectedPeriodKey != periodKey) {
                     it
                 } else {
                     it.copy(series = snapshot, seriesLoading = false)
@@ -132,7 +150,18 @@ class ReportViewModel @Inject constructor(
         }
     }
 
-    /** 清空分类选中详情。 */
+    /** 通知入口：切到本周并打开今日对应期键详情（列表未就绪则挂起等待）。 */
+    fun openThisWeekDetail() {
+        val key = TimeWindows.weekPeriodKey(LocalDate.now())
+        pendingOpenDetailKey = key
+        if (_uiState.value.periodType != ReportPeriodType.WEEKLY) {
+            selectPeriodType(ReportPeriodType.WEEKLY)
+        } else if (_uiState.value.reports.any { it.periodKey == key }) {
+            pendingOpenDetailKey = null
+            openDetail(key)
+        }
+    }
+
     fun clearCategoryDetail() {
         _uiState.update { it.copy(categoryDetail = null) }
     }
@@ -141,10 +170,6 @@ class ReportViewModel @Inject constructor(
         _uiState.update { it.copy(deepReadMessage = null) }
     }
 
-    /**
-     * 记录选中分类。[isOtherBucket] 表示饼图合成的「其他」残差桶。
-     * 金额与占比直接取自报告快照，不再另查流水。
-     */
     fun selectCategoryShare(share: CategoryShare, isOtherBucket: Boolean) {
         val label = if (isOtherBucket) "其他" else share.tagName ?: "未分类"
         _uiState.update {
@@ -160,9 +185,6 @@ class ReportViewModel @Inject constructor(
         }
     }
 
-    /**
-     * 重新生成指定报告；[Report.status] 为 FAILED / STALE 的条目才可重试（UI 已收敛，此处不重复校验）。
-     */
     fun retry(report: Report) {
         if (_uiState.value.generating) return
         val (current, previous) = runCatching { retryWindows(report) }
@@ -197,7 +219,6 @@ class ReportViewModel @Inject constructor(
         }
     }
 
-    /** 按需 AI 深读；无配置或失败时写提示，不改报告 status。 */
     fun deepRead(report: Report) {
         if (_uiState.value.deepReading || !_uiState.value.deepReadAvailable) return
         _uiState.update { it.copy(deepReading = true, deepReadMessage = null) }
@@ -221,7 +242,6 @@ class ReportViewModel @Inject constructor(
         }
     }
 
-    /** 订阅指定类型的报告列表；观察失败降级为空列表并记日志。 */
     private fun observeReports(type: ReportPeriodType) {
         observeJob?.cancel()
         observeJob = viewModelScope.launch {
@@ -240,11 +260,40 @@ class ReportViewModel @Inject constructor(
                                 ?.takeIf { key -> reports.any { it.periodKey == key } },
                         )
                     }
+                    val pending = pendingOpenDetailKey
+                    if (pending != null && reports.any { it.periodKey == pending }) {
+                        pendingOpenDetailKey = null
+                        openDetail(pending)
+                    }
                 }
         }
     }
 
-    /** 补齐本周 / 本月等缺失报告（失败仅记日志）。 */
+    private fun observeBudget() {
+        viewModelScope.launch {
+            val today = LocalDate.now()
+            combine(
+                monthlyBudgetRepository.observeMonthlyBudgetCents(),
+                monthlyBudgetEngine.observeSnapshot(today),
+            ) { budgetCents, snapshot ->
+                budgetCents to snapshot
+            }
+                .catch { e ->
+                    if (e is CancellationException) throw e
+                    Log.e(TAG, "Failed to observe budget for reports", e)
+                    emit(0L to MonthlyBudgetSnapshot(0, 0, 0, 1, 0, 0, 0))
+                }
+                .collect { (budgetCents, snapshot) ->
+                    _uiState.update {
+                        it.copy(
+                            budgetCents = budgetCents,
+                            budgetSnapshot = snapshot.takeIf { budgetCents > 0L },
+                        )
+                    }
+                }
+        }
+    }
+
     private fun ensureCurrentPeriods() {
         viewModelScope.launch {
             runCatching { ensureReportsUseCase.ensure(LocalDate.now()) }
@@ -262,7 +311,6 @@ class ReportViewModel @Inject constructor(
         }
     }
 
-    /** 由报告期键反推「当期窗口、上期窗口」，作为重试的统计口径。 */
     private fun retryWindows(report: Report): Pair<TimeWindow, TimeWindow> = when (report.periodType) {
         ReportPeriodType.WEEKLY ->
             TimeWindows.weekWindowByKey(report.periodKey) to

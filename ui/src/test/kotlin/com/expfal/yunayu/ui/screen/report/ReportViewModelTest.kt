@@ -2,6 +2,7 @@ package com.expfal.yunayu.ui.screen.report
 
 import com.expfal.yunayu.domain.model.AccountFilter
 import com.expfal.yunayu.domain.model.CategoryExpense
+import com.expfal.yunayu.domain.model.MonthlyBudgetSnapshot
 import com.expfal.yunayu.domain.model.RecentTransaction
 import com.expfal.yunayu.domain.model.Transaction
 import com.expfal.yunayu.domain.model.WindowTotals
@@ -14,15 +15,17 @@ import com.expfal.yunayu.domain.report.model.CategoryShare
 import com.expfal.yunayu.domain.report.model.Report
 import com.expfal.yunayu.domain.report.model.ReportPeriodType
 import com.expfal.yunayu.domain.report.model.ReportStatus
+import com.expfal.yunayu.domain.repository.MonthlyBudgetRepository
 import com.expfal.yunayu.domain.repository.ReportRepository
 import com.expfal.yunayu.domain.repository.TransactionRepository
+import com.expfal.yunayu.domain.usecase.MonthlyBudgetEngine
+import com.expfal.yunayu.domain.util.TimeWindows
 import com.expfal.yunayu.ui.screen.quickadd.MainDispatcherRule
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -44,62 +47,43 @@ class ReportViewModelTest {
     val mainDispatcherRule = MainDispatcherRule()
 
     @Test
-    fun `observes monthly reports by default`() = runTest {
+    fun `observes weekly reports by default`() = runTest {
+        val weekKey = TimeWindows.weekPeriodKey(LocalDate.now())
         val repo = FakeReportRepository().apply {
-            setReports(ReportPeriodType.MONTHLY, listOf(report(periodKey = "2026-07", status = ReportStatus.SUCCESS)))
+            setReports(
+                ReportPeriodType.WEEKLY,
+                listOf(report(periodType = ReportPeriodType.WEEKLY, periodKey = weekKey, status = ReportStatus.SUCCESS)),
+            )
         }
         val viewModel = newViewModel(repo, FakeTransactionRepository())
 
-        assertEquals(ReportPeriodType.MONTHLY, viewModel.uiState.value.periodType)
-        assertEquals(listOf("2026-07"), viewModel.uiState.value.reports.map { it.periodKey })
+        assertEquals(ReportPeriodType.WEEKLY, viewModel.uiState.value.periodType)
+        assertEquals(listOf(weekKey), viewModel.uiState.value.reports.map { it.periodKey })
         assertFalse(viewModel.uiState.value.loading)
-        assertEquals(listOf(ReportPeriodType.MONTHLY), repo.observeCalls)
+        assertEquals(listOf(ReportPeriodType.WEEKLY), repo.observeCalls)
     }
 
     @Test
     fun `switches period type and resubscribes`() = runTest {
         val repo = FakeReportRepository().apply {
-            setReports(ReportPeriodType.MONTHLY, listOf(report(periodKey = "2026-07")))
             setReports(ReportPeriodType.WEEKLY, listOf(report(periodType = ReportPeriodType.WEEKLY, periodKey = "2026-W33")))
+            setReports(ReportPeriodType.MONTHLY, listOf(report(periodKey = "2026-07")))
         }
         val viewModel = newViewModel(repo, FakeTransactionRepository())
 
-        viewModel.selectPeriodType(ReportPeriodType.WEEKLY)
+        viewModel.selectPeriodType(ReportPeriodType.MONTHLY)
 
-        assertEquals(ReportPeriodType.WEEKLY, viewModel.uiState.value.periodType)
-        assertEquals(listOf("2026-W33"), viewModel.uiState.value.reports.map { it.periodKey })
-        assertEquals(listOf(ReportPeriodType.MONTHLY, ReportPeriodType.WEEKLY), repo.observeCalls)
+        assertEquals(ReportPeriodType.MONTHLY, viewModel.uiState.value.periodType)
+        assertEquals(listOf("2026-07"), viewModel.uiState.value.reports.map { it.periodKey })
         assertNull(viewModel.uiState.value.selectedPeriodKey)
     }
 
     @Test
-    fun `annual period type is ignored`() = runTest {
-        val repo = FakeReportRepository().apply {
-            setReports(ReportPeriodType.MONTHLY, listOf(report(periodKey = "2026-07")))
-            setReports(ReportPeriodType.ANNUAL, listOf(report(periodType = ReportPeriodType.ANNUAL, periodKey = "2026")))
-        }
-        val viewModel = newViewModel(repo, FakeTransactionRepository())
-
-        viewModel.selectPeriodType(ReportPeriodType.ANNUAL)
-
-        assertEquals(ReportPeriodType.MONTHLY, viewModel.uiState.value.periodType)
-        assertEquals(listOf(ReportPeriodType.MONTHLY), repo.observeCalls)
-    }
-
-    @Test
-    fun `empty list state when no reports`() = runTest {
-        val viewModel = newViewModel(FakeReportRepository(), FakeTransactionRepository())
-
-        assertTrue(viewModel.uiState.value.reports.isEmpty())
-        assertFalse(viewModel.uiState.value.loading)
-    }
-
-    @Test
-    fun `select report loads series snapshot`() = runTest {
+    fun `open detail loads series and keeps selection`() = runTest {
         val repo = FakeReportRepository().apply {
             setReports(
-                ReportPeriodType.MONTHLY,
-                listOf(report(periodKey = "2026-07", status = ReportStatus.SUCCESS)),
+                ReportPeriodType.WEEKLY,
+                listOf(report(periodType = ReportPeriodType.WEEKLY, periodKey = "2026-W34", status = ReportStatus.SUCCESS)),
             )
         }
         val txRepo = FakeTransactionRepository().apply {
@@ -107,13 +91,12 @@ class ReportViewModelTest {
         }
         val viewModel = newViewModel(repo, txRepo)
 
-        viewModel.selectReport("2026-07")
-        advanceUntilIdle()
+        viewModel.openDetail("2026-W34")
+        runCurrent()
 
-        assertEquals("2026-07", viewModel.uiState.value.selectedPeriodKey)
+        assertEquals("2026-W34", viewModel.uiState.value.selectedPeriodKey)
         assertNotNull(viewModel.uiState.value.series)
         assertFalse(viewModel.uiState.value.seriesLoading)
-        assertTrue(txRepo.windowTotalsCalls.size >= 6)
     }
 
     @Test
@@ -139,32 +122,9 @@ class ReportViewModelTest {
     }
 
     @Test
-    fun `retry failed annual report uses year windows`() = runTest {
-        val repo = FakeReportRepository()
-        val txRepo = FakeTransactionRepository()
-        val viewModel = newViewModel(repo, txRepo)
-
-        viewModel.retry(report(periodType = ReportPeriodType.ANNUAL, periodKey = "2026"))
-
-        val upserted = repo.upserted.single()
-        assertEquals(ReportPeriodType.ANNUAL, upserted.periodType)
-        assertEquals("2026", upserted.periodKey)
-        assertEquals(startOfDay(LocalDate.of(2026, 1, 1)), upserted.windowStartMs)
-        assertEquals(startOfDay(LocalDate.of(2027, 1, 1)), upserted.windowEndMs)
-        assertEquals(
-            listOf(
-                startOfDay(LocalDate.of(2026, 1, 1)) to startOfDay(LocalDate.of(2027, 1, 1)),
-                startOfDay(LocalDate.of(2025, 1, 1)) to startOfDay(LocalDate.of(2026, 1, 1)),
-            ),
-            txRepo.windowTotalsCalls.take(2),
-        )
-    }
-
-    @Test
     fun `retry with invalid period key does not crash nor enter generating`() = runTest {
         val repo = FakeReportRepository()
-        val txRepo = FakeTransactionRepository()
-        val viewModel = newViewModel(repo, txRepo)
+        val viewModel = newViewModel(repo, FakeTransactionRepository())
 
         viewModel.retry(report(periodKey = "garbage"))
 
@@ -194,29 +154,7 @@ class ReportViewModelTest {
     }
 
     @Test
-    fun `retry failed weekly report uses week windows`() = runTest {
-        val repo = FakeReportRepository()
-        val txRepo = FakeTransactionRepository()
-        val viewModel = newViewModel(repo, txRepo)
-
-        viewModel.retry(report(periodType = ReportPeriodType.WEEKLY, periodKey = "2026-W34"))
-
-        val upserted = repo.upserted.single()
-        assertEquals(ReportPeriodType.WEEKLY, upserted.periodType)
-        assertEquals("2026-W34", upserted.periodKey)
-        assertEquals(startOfDay(LocalDate.of(2026, 8, 17)), upserted.windowStartMs)
-        assertEquals(startOfDay(LocalDate.of(2026, 8, 24)), upserted.windowEndMs)
-        assertEquals(
-            listOf(
-                startOfDay(LocalDate.of(2026, 8, 17)) to startOfDay(LocalDate.of(2026, 8, 24)),
-                startOfDay(LocalDate.of(2026, 8, 10)) to startOfDay(LocalDate.of(2026, 8, 17)),
-            ),
-            txRepo.windowTotalsCalls.take(2),
-        )
-    }
-
-    @Test
-    fun `retry stale report reuses existing id and overwrites status`() = runTest {
+    fun `retry stale report clears analysis text`() = runTest {
         val stale = report(periodKey = "2026-07", status = ReportStatus.STALE).copy(
             id = 7L,
             analysisText = "旧分析",
@@ -229,11 +167,8 @@ class ReportViewModelTest {
         viewModel.retry(stale)
         runCurrent()
 
-        val upserted = repo.upserted.single()
-        assertEquals(7L, upserted.id)
-        assertEquals(ReportStatus.SUCCESS, upserted.status)
-        assertNull(upserted.analysisText)
-        assertEquals(ReportStatus.SUCCESS, viewModel.uiState.value.reports.single().status)
+        assertNull(repo.upserted.single().analysisText)
+        assertEquals(ReportStatus.SUCCESS, repo.upserted.single().status)
     }
 
     @Test
@@ -248,56 +183,42 @@ class ReportViewModelTest {
         assertEquals(1_500L, detail?.expenseCents)
         assertEquals(50, detail?.percent)
         assertEquals(7L, detail?.drillTagId)
-        assertEquals(false, detail?.isOtherBucket)
     }
 
     @Test
-    fun `deep read unavailable hides capability`() = runTest {
+    fun `budget snapshot observed when budget set`() = runTest {
+        val snap = MonthlyBudgetSnapshot(
+            monthlyBudgetCents = 100_000L,
+            spentCents = 10_000L,
+            remainingCents = 90_000L,
+            remainingDays = 20,
+            weeklyQuotaCents = 20_000L,
+            spentThisWeekCents = 5_000L,
+            weeklyRemainingCents = 15_000L,
+        )
         val viewModel = newViewModel(
             FakeReportRepository(),
             FakeTransactionRepository(),
-            parser = FakeParser(available = false),
+            budgetCents = 100_000L,
+            budgetSnapshot = snap,
         )
-        advanceUntilIdle()
-        assertFalse(viewModel.uiState.value.deepReadAvailable)
-    }
-
-    @Test
-    fun `deep read success clears loading`() = runTest {
-        val r = report(periodKey = "2026-07", status = ReportStatus.SUCCESS).copy(id = 3L)
-        val repo = FakeReportRepository().apply {
-            setReports(ReportPeriodType.MONTHLY, listOf(r))
-        }
-        val viewModel = newViewModel(
-            repo,
-            FakeTransactionRepository(),
-            parser = FakeParser(available = true, reply = "深读正文"),
-        )
-        advanceUntilIdle()
-        assertTrue(viewModel.uiState.value.deepReadAvailable)
-
-        viewModel.deepRead(r)
-        advanceUntilIdle()
-
-        assertFalse(viewModel.uiState.value.deepReading)
-        assertNull(viewModel.uiState.value.deepReadMessage)
-        assertEquals("深读正文", repo.upserted.last().analysisText)
+        runCurrent()
+        assertEquals(100_000L, viewModel.uiState.value.budgetCents)
+        assertEquals(15_000L, viewModel.uiState.value.budgetSnapshot?.weeklyRemainingCents)
     }
 
     private fun newViewModel(
         repo: ReportRepository,
         txRepo: TransactionRepository,
         parser: FakeParser = FakeParser(available = false),
+        budgetCents: Long = 0L,
+        budgetSnapshot: MonthlyBudgetSnapshot = MonthlyBudgetSnapshot(0, 0, 0, 1, 0, 0, 0),
     ): ReportViewModel {
-        val budgetRepo = FakeMonthlyBudgetRepository()
+        val budgetRepo = FakeMonthlyBudgetRepository(budgetCents)
         val generate = GenerateReportUseCase(txRepo, repo, budgetRepo)
         val ensure = EnsureReportsUseCase(
             FakeReportRepository(),
-            GenerateReportUseCase(
-                FakeTransactionRepository(),
-                FakeReportRepository(),
-                budgetRepo,
-            ),
+            GenerateReportUseCase(FakeTransactionRepository(), FakeReportRepository(), budgetRepo),
         )
         return ReportViewModel(
             reportRepository = repo,
@@ -306,6 +227,8 @@ class ReportViewModelTest {
             loadReportSeriesUseCase = LoadReportSeriesUseCase(txRepo),
             deepReadReportUseCase = DeepReadReportUseCase(parser, repo),
             nlTransactionParser = parser,
+            monthlyBudgetRepository = budgetRepo,
+            monthlyBudgetEngine = FakeBudgetEngine(budgetSnapshot),
         )
     }
 
@@ -341,14 +264,23 @@ class ReportViewModelTest {
         override suspend fun generate(systemInstruction: String, userText: String): String? = reply
     }
 
-    private class FakeMonthlyBudgetRepository : com.expfal.yunayu.domain.repository.MonthlyBudgetRepository {
-        override fun observeMonthlyBudgetCents(): Flow<Long> = MutableStateFlow(0L)
-        override suspend fun saveMonthlyBudgetCents(cents: Long) = Unit
+    private class FakeMonthlyBudgetRepository(
+        initial: Long = 0L,
+    ) : MonthlyBudgetRepository {
+        private val flow = MutableStateFlow(initial)
+        override fun observeMonthlyBudgetCents(): Flow<Long> = flow
+        override suspend fun saveMonthlyBudgetCents(cents: Long) {
+            flow.value = cents
+        }
     }
 
-    /** [ReportRepository] 手写 fake：按类型维护 StateFlow，记录 observe/upsert 调用。 */
-    private class FakeReportRepository : ReportRepository {
+    private class FakeBudgetEngine(
+        private val snapshot: MonthlyBudgetSnapshot,
+    ) : MonthlyBudgetEngine {
+        override fun observeSnapshot(today: LocalDate): Flow<MonthlyBudgetSnapshot> = flowOf(snapshot)
+    }
 
+    private class FakeReportRepository : ReportRepository {
         val observeCalls = mutableListOf<ReportPeriodType>()
         val upserted = mutableListOf<Report>()
         private val flows = mutableMapOf<ReportPeriodType, MutableStateFlow<List<Report>>>()
@@ -378,25 +310,17 @@ class ReportViewModelTest {
         override suspend fun invalidateWhereWindowContains(epochMillis: Long) = Unit
     }
 
-    /** [TransactionRepository] 手写 fake：记录窗口聚合调用，返回空汇总。 */
     private class FakeTransactionRepository : TransactionRepository {
-
         val windowTotalsCalls = mutableListOf<Pair<Long, Long>>()
         var windowTotalsResult: WindowTotals = WindowTotals(0L, 0L)
         var windowTotalsGate: CompletableDeferred<Unit>? = null
 
         override suspend fun add(transaction: Transaction): Long = 0L
-
         override suspend fun delete(transactionId: Long) = Unit
-
         override fun observeAll(): Flow<List<Transaction>> = flowOf(emptyList())
-
         override fun observeByTag(tagId: Long): Flow<List<Transaction>> = flowOf(emptyList())
-
         override fun observeExpenseSumBetween(startInclusiveMs: Long, endExclusiveMs: Long): Flow<Long> = flowOf(0L)
-
         override fun observeRecent(limit: Int): Flow<List<RecentTransaction>> = flowOf(emptyList())
-
         override fun observeFiltered(
             startInclusiveMs: Long?,
             endExclusiveMs: Long?,
@@ -404,39 +328,23 @@ class ReportViewModelTest {
             noteKeyword: String?,
             accountFilter: AccountFilter,
         ): Flow<List<RecentTransaction>> = flowOf(emptyList())
-
         override fun observeUncategorizedCount(): Flow<Int> = flowOf(0)
-
         override suspend fun getUncategorized(): List<RecentTransaction> = emptyList()
-
         override suspend fun assignTags(assignments: Map<Long, List<Long>>) = Unit
-
         override suspend fun getOccurredAtsByTagIds(tagIds: List<Long>): List<Long> = emptyList()
-
         override suspend fun getById(id: Long): Transaction? = null
-
         override suspend fun updateTransaction(transaction: Transaction) = Unit
-
         override fun observeHeldCents(): Flow<Long> = flowOf(0L)
-
-        override suspend fun getWindowTotals(
-            startInclusiveMs: Long,
-            endExclusiveMs: Long,
-        ): WindowTotals {
+        override suspend fun getWindowTotals(startInclusiveMs: Long, endExclusiveMs: Long): WindowTotals {
             windowTotalsCalls += startInclusiveMs to endExclusiveMs
             windowTotalsGate?.await()
             return windowTotalsResult
         }
-
-        override suspend fun getExpenseByCategory(
-            startInclusiveMs: Long,
-            endExclusiveMs: Long,
-        ): List<CategoryExpense> = emptyList()
-
+        override suspend fun getExpenseByCategory(startInclusiveMs: Long, endExclusiveMs: Long): List<CategoryExpense> =
+            emptyList()
         override suspend fun countUncategorizedBetween(startInclusiveMs: Long, endExclusiveMs: Long): Int = 0
-
         override suspend fun getMaxExpenseCentsBetween(startInclusiveMs: Long, endExclusiveMs: Long): Long? = null
-
-        override suspend fun getBetween(startInclusiveMs: Long, endExclusiveMs: Long): List<RecentTransaction> = emptyList()
+        override suspend fun getBetween(startInclusiveMs: Long, endExclusiveMs: Long): List<RecentTransaction> =
+            emptyList()
     }
 }

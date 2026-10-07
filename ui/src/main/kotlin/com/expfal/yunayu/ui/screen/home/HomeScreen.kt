@@ -65,7 +65,9 @@ import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetSheet
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetUiState
 import com.expfal.yunayu.ui.screen.budget.MonthlyBudgetViewModel
 import com.expfal.yunayu.ui.screen.quickadd.QuickAddScreen
+import com.expfal.yunayu.ui.screen.report.ReportDetailScreen
 import com.expfal.yunayu.ui.screen.report.ReportScreen
+import com.expfal.yunayu.ui.screen.report.ReportViewModel
 import com.expfal.yunayu.ui.screen.subscription.SubscriptionManageScreen
 import com.expfal.yunayu.ui.screen.tagmanage.TagManageScreen
 import com.expfal.yunayu.ui.screen.transactionmanage.TransactionManageScreen
@@ -90,16 +92,24 @@ private enum class FullScreen {
     API_SETTINGS,
     BACKUP,
     REPORT,
+    REPORT_DETAIL,
     TRANSACTIONS,
     ACCOUNT_MANAGE,
     SUBSCRIPTION_MANAGE,
     QUICK_ADD,
 }
 
+/** Intent extra：周日通知点击后打开本周报告详情。 */
+const val EXTRA_OPEN_WEEKLY_REPORT = "com.expfal.yunayu.OPEN_WEEKLY_REPORT"
+
 /** 首页：月度预算看板卡片置顶，下方最近记录列表，悬浮「快速记账」按钮进入全屏记账页面。 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun HomeScreen(modifier: Modifier = Modifier) {
+fun HomeScreen(
+    modifier: Modifier = Modifier,
+    openWeeklyReport: Boolean = false,
+    onOpenWeeklyReportConsumed: () -> Unit = {},
+) {
     var showBudgetSetup by remember { mutableStateOf(false) }
     val pageStackHolder = remember { mutableStateOf(listOf(FullScreen.NONE)) }
     var pageStack by pageStackHolder
@@ -109,10 +119,18 @@ fun HomeScreen(modifier: Modifier = Modifier) {
     var drillTagIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val budgetViewModel: MonthlyBudgetViewModel = viewModel()
     val homeViewModel: HomeViewModel = viewModel()
+    val reportViewModel: ReportViewModel = viewModel()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
     // F3 修复：提升 listState 到 when 分发之外，跨全屏切换存活，避免返回时滚动位置丢失
     val listState = rememberLazyListState()
+
+    LaunchedEffect(openWeeklyReport) {
+        if (!openWeeklyReport) return@LaunchedEffect
+        reportViewModel.openThisWeekDetail()
+        pageStackHolder.value = listOf(FullScreen.NONE, FullScreen.REPORT, FullScreen.REPORT_DETAIL)
+        onOpenWeeklyReportConsumed()
+    }
 
     LaunchedEffect(drawerState) {
         snapshotFlow { drawerState.currentValue to pendingFullScreen }
@@ -180,12 +198,22 @@ fun HomeScreen(modifier: Modifier = Modifier) {
                 FullScreen.BACKUP -> BackupScreen(onBack = popPage)
                 FullScreen.REPORT -> ReportScreen(
                     onBack = popPage,
+                    onOpenDetail = {
+                        pageStack = pageStack + FullScreen.REPORT_DETAIL
+                    },
+                    onSetupBudget = { showBudgetSetup = true },
+                    viewModel = reportViewModel,
+                )
+                FullScreen.REPORT_DETAIL -> ReportDetailScreen(
+                    onBack = popPage,
                     onDrillToTransactions = { start, end, tagId ->
                         drillStartMs = start
                         drillEndMs = end
                         drillTagIds = tagId?.let { setOf(it) } ?: emptySet()
                         pageStack = pageStack + FullScreen.TRANSACTIONS
                     },
+                    onSetupBudget = { showBudgetSetup = true },
+                    viewModel = reportViewModel,
                 )
                 FullScreen.TRANSACTIONS -> TransactionManageScreen(
                     onBack = popPage,
