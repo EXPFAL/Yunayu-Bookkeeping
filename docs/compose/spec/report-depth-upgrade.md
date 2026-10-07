@@ -1,14 +1,20 @@
 ---
 feature: report-depth-upgrade
-status: implemented
+status: delivered
 updated: 2026-10-07
 branch: cursor/v1-1-0-backup-ci-d984
-commits:
+commits: 1d3b48d..dfe5f17
 ---
 
 # 分析报告升级：本地事实核 + 按需 AI 深读
 
 ## Report
+
+**What was built** — 分析报告从「单期快照 + 洞察卡片」升级为可感知的复盘页：近 6 期序列、环比与分类增减取数层（`ReportSeriesCalculator` / `LoadReportSeriesUseCase`）；事实评分叙事（`ReportFactScorer` / `ReportNarrativeBuilder`）与规则建议（`ReportAdviceBuilder`）写入 `STORY`/`ADVICE`；AI 深读降级为按需按钮（`DeepReadReportUseCase`，复用 NL 通道）。视觉主次重塑后详情首屏为 Hero 数字区（周期标签 + 净结余大字 + ±% 环比徽章）→ 本期故事段 → 行动建议条 → 竖柱趋势图（本期高亮、金额在柱上）→ 环比对比条 → 分类增减 mini 条 → 交互饼图与折叠细节。零 schema 变更。
+
+**Verification** — `./gradlew :ui:ktlintCheck :ui:testDebugUnitTest :domain:test :app:assembleDebug` 全绿；`:data:testDebugUnitTest` 中 `CompletionRequesterTest` 2 例失败为 PRE-EXISTING（与本变更无关，本次 diff 不触及 `data/nlparse`）。独立复审确认 S2.4.1 三处规格缺口（Hero 周期标签、环比 ±%、柱上金额）已闭合，调用签名一致。
+
+**Journey log** — 功能按规格落地后用户反馈「和上一版区别不大」：根因是新模块复用了旧 UI 语汇（InsightCard / DetailLine）。体验换代要改「脸」而不只是加模块。material-icons-extended 不在依赖里，趋势/灵感图标改用 core 的 KeyboardArrow 与 Star。规格里 Hero 的周期标签/±%/柱上金额比 T8 验收句更严，实现时以规格为准。
 
 ## [S1] Problem
 
@@ -62,7 +68,24 @@ commits:
 
 **落库**：叙事写入 `LocalInsightKind.STORY`（一条）；建议写入 `LocalInsightKind.ADVICE`（0–2 条）；与既有细节洞察一并序列化进 `local_insights`。`analysisText` **专供 AI 深读**，不存本地叙事。
 
-`LocalInsightBuilder` 保留为细节事实源；UI：故事 → 建议 → 趋势/环比/增减榜 → 概览/饼图 → 折叠细节。
+`LocalInsightBuilder` 保留为细节事实源。叙事**内容口径不变**；呈现改为大字号故事段（非 InsightCard）。
+
+### 2.4.1 视觉主次重塑（v2 修订）
+
+体验目标：打开详情即换代，不再与旧版「卡片 + 键值行」同构。数据口径零变更。
+
+**信息层级（自上而下）**
+
+1. **Hero 数字区**：净结余大字号主数字；收入 / 支出副行；环比徽章（净结余或支出 ±%）；周期标签。不用 InsightCard。
+2. **本期故事**：`bodyLarge` 正文段落，无卡片描边；左侧 3dp 主色竖条或引号装饰；与 Hero 连成「导语」。
+3. **建议条**：0–2 条行动提示（图标位 + 短标题 + 一行说明），样式为浅底圆角条，区别于洞察卡。
+4. **近 N 期支出柱状图**：竖柱（非进度条），本期高亮；柱下短期键、柱上或侧金额；高度 ≥ 96dp。
+5. **环比对比条**：收入 / 支出 / 净结余 三行；每行「标签 | 上期→本期 | ± 数值与迷你 delta 条」；涨跌用语义色（支出升/结余降偏警示色）。
+6. **分类增减**：Top 增 / Top 减；每条「名称 + 金额差 + mini 横条长度按 |Δ| 归一」。
+7. **支出分类占比**：保留交互饼图与列表、分类下钻。
+8. **折叠细节洞察**：保持折叠；深度解读保持在末尾可选区。
+
+**明确不做**：改叙事措辞算法、改取数、新 schema、动画转场库。
 
 ### 2.5 规则建议器
 
@@ -77,11 +100,12 @@ commits:
 
 ### 2.6 可视化层
 
-- **近 N 期支出趋势条**（Canvas 小条；净结余双列二期再加）
-- **环比差**：收入/支出/净结余 +/- 数字
-- **分类增减榜**：Top 增 / Top 减
-- **保留**：概览四行、交互饼图、分类下钻
-- **叙事卡 / 建议卡 / 折叠细节洞察**
+- **Hero 数字区** + **故事段**（见 2.4.1）
+- **近 N 期支出柱状图**（Canvas 竖柱，本期高亮；净结余双列二期再加）
+- **环比对比条**（上期→本期 + delta 条 + 语义色）
+- **分类增减 mini 条**（|Δ| 归一）
+- **建议条**（行动提示样式）
+- **保留**：交互饼图、分类下钻、折叠细节洞察
 
 ### 2.7 AI 深读（Phase 2）
 
@@ -136,3 +160,5 @@ commits:
 - [x] T5: 报告详情 UI
 - [x] T6: AI 深读按需层（Phase 2，同迭代交付）
 - [x] T7: test + ktlintCheck + assembleDebug 三绿
+- [x] T8: 视觉主次重塑 — Hero 数字区、故事段、建议条、柱状图、环比对比条、分类 mini 条 — acceptance: 详情首屏不再呈现「卡片+键值行」同构；本期高亮柱、环比语义色、建议条样式可辨；饼图/下钻/折叠细节不回归 (covers: S2.4.1, S2.6)
+- [x] T9: 重塑后门禁 — `test` + `ktlintCheck` + `assembleDebug` 三绿 — acceptance: 命令全绿并记录 (covers: S2.10; depends: T8)
